@@ -6,7 +6,7 @@ import { T } from '../core/tuning';
 import * as V from '../core/vec';
 import type { V3 } from '../core/vec';
 import type { CollisionWorld, MoveResult, RayHit } from '../core/types';
-import type { Brush } from '../levels/course01';
+import type { Brush } from '../levels/types';
 
 export async function initPhysics() { await RAPIER.init(); }
 
@@ -22,10 +22,8 @@ export class RapierWorld implements CollisionWorld {
     for (const b of brushes) {
       const d = RAPIER.ColliderDesc.cuboid(b.s[0] / 2, b.s[1] / 2, b.s[2] / 2)
         .setTranslation(b.p[0], b.p[1], b.p[2]);
-      if (b.r) {
-        const q = euler(b.r[0], b.r[1], b.r[2]);
-        d.setRotation(q);
-      }
+      if (b.q) d.setRotation({ x: b.q[0], y: b.q[1], z: b.q[2], w: b.q[3] });
+      else if (b.r) d.setRotation(euler(b.r[0], b.r[1], b.r[2]));
       this.world.createCollider(d);
     }
 

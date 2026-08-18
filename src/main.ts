@@ -7,7 +7,7 @@ import { Input } from './engine/input';
 import { Renderer } from './engine/render';
 import { Panel } from './tools/panel';
 import { Hud } from './tools/hud';
-import { brushes, triggers, spawn, killY } from './levels/course01';
+import { brushes, triggers, spawn, killY } from './levels';
 
 const FIXED = 1 / 120;
 const MAX_STEPS = 8;
@@ -69,6 +69,29 @@ function finish() {
   }
 }
 
+// ---------------------------------------------------------------- camera drift
+
+/**
+ * Devil-May-Cry style: you own the camera with the mouse, but the moment you stop
+ * steering it, it eases back behind your direction of travel so you're never
+ * fighting it while running. Gated on roughly-forward input — auto-rotating the
+ * yaw while the player is strafing would silently curve their movement, since
+ * movement is camera-relative.
+ */
+function autoFollowCamera(dt: number) {
+  if (T.camera.autoFollow <= 0) return;
+  if (input.mouseIdle < T.camera.followDelay) return;
+  const speed = V.lenH(player.vel);
+  if (speed < T.camera.followMinSpeed) return;
+  if (input.intent.moveY <= 0.5 || Math.abs(input.intent.moveX) > 0.5) return;
+
+  const targetYaw = Math.atan2(-player.vel.x, -player.vel.z);
+  const k = 1 - Math.exp(-T.camera.autoFollow * dt);
+  input.intent.yaw += V.shortestAngle(input.intent.yaw, targetYaw) * k;
+  input.intent.pitch += (T.camera.pitchRest - input.intent.pitch)
+    * (1 - Math.exp(-T.camera.pitchFollow * dt));
+}
+
 // ---------------------------------------------------------------- loop
 
 let last = performance.now();
@@ -77,7 +100,7 @@ let acc = 0;
 function frame(now: number) {
   const raw = Math.min((now - last) / 1000, 0.25);
   last = now;
-  input.sample();
+  input.sample(raw);
 
   if (input.restart) { input.restart = false; restart(); }
 
@@ -108,7 +131,8 @@ function frame(now: number) {
   if (steps === MAX_STEPS) acc = 0; // don't let a stall snowball
 
   gfx.pushTrail(player.pos);
-  gfx.update(player, input.intent.yaw, input.intent.pitch, raw, (f, d, m) => world.ray(f, d, m));
+  autoFollowCamera(raw);
+  gfx.update(player, input.intent, raw, world);
 
   if (bestPath) {
     const i = Math.min(bestPath.length - 1, Math.floor(run.time / FIXED));
@@ -132,6 +156,7 @@ requestAnimationFrame(frame);
   input,
   gfx,
   restart,
+  autoFollowCamera,
   /** Teleport for tests — drops the player at a spot with zero velocity. */
   place(x: number, y: number, z: number) {
     player = makePlayer({ x, y, z });

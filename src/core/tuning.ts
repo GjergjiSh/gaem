@@ -5,7 +5,7 @@
 // structure automatically, so adding a param here is all it takes to get a slider.
 
 /** Bump when defaults change meaningfully — invalidates saved localStorage tunes. */
-export const TUNING_VERSION = 3;
+export const TUNING_VERSION = 5;
 
 export const T = {
   world: {
@@ -83,9 +83,16 @@ export const T = {
     detectDist: 0.85,     // how far to probe sideways for a wall
     minSpeed: 5,          // below this you slide off instead of running
     maxAngle: 0.35,       // radians from vertical still counted as a runnable wall
-    maxTime: 1.6,         // how long one wallrun can last
-    gravityScale: 0.18,   // gravity while attached — near zero feels best
-    upBoost: 3.2,         // instant vertical kick on attach
+    maxTime: 2.5,         // hard backstop; the gravity arc should end it first
+    // Gravity ramps in over the run instead of being constant: you attach nearly
+    // weightless, hang, then arc downward with increasing pull. That arc — not a
+    // timer — is what should take you off the wall.
+    gravityStart: 0.0,
+    gravityEnd: 1.0,
+    gravityRamp: 1.15,    // seconds from start to end of the ramp
+    upBoost: 2.5,         // instant vertical kick on attach
+    entryVyMax: 2,        // clamp on inherited climb speed, so the arc starts
+                          // the same way whether you crept or rocketed onto the wall
     runAccel: 70,         // acceleration along the wall
     capBonus: 1.5,        // wallruns get a raised speed ceiling too
     jumpOut: 9,           // wall-jump impulse along the wall normal
@@ -94,7 +101,7 @@ export const T = {
     cooldown: 0.18,       // stops instantly re-attaching to the same wall
     refillJumps: true,
     refillDash: true,
-    stickAssist: 6,       // pull toward the wall, keeps you glued through corners
+    stickAssist: 14,      // pull toward the wall, keeps you glued through corners
   },
 
   momentum: {
@@ -129,6 +136,14 @@ export const T = {
     slideRoll: 0.09,
     wallRoll: 0.22,       // camera banks away from the wall during a wallrun
     slideHeight: 0.7,     // camera drops toward the ground during a slide
+    // Devil-May-Cry style orbit: you swing the camera around the character, and
+    // when you stop steering it, it drifts back behind your direction of travel.
+    autoFollow: 2.4,      // how fast it drifts back
+    followDelay: 0.55,    // seconds of untouched mouse before drift starts
+    followMinSpeed: 4,    // and only once you're actually moving
+    pitchRest: 0.10,      // pitch it settles toward
+    pitchFollow: 1.1,
+    speedDistance: 3.0,   // extra arm length at hard cap — wider view when fast
   },
 
   character: {
@@ -159,7 +174,11 @@ export const META: Record<string, { min?: number; max?: number; step?: number; d
   'slide/capBonus': { min: 1, max: 4, step: 0.05, doc: 'Slide speed ceiling = ground.maxSpeed x this.' },
   'slide/friction': { min: 0, max: 20, step: 0.1 },
   'slide/slopeAccel': { min: 0, max: 200, step: 1 },
-  'wall/gravityScale': { min: 0, max: 1, step: 0.01, doc: '0 = perfectly level wallrun.' },
+  'wall/gravityStart': { min: 0, max: 1, step: 0.01, doc: '0 = weightless on attach.' },
+  'wall/gravityEnd': { min: 0, max: 2, step: 0.01 },
+  'wall/gravityRamp': { min: 0.1, max: 4, step: 0.05, doc: 'Shorter = you arc off the wall sooner.' },
+  'camera/autoFollow': { min: 0, max: 10, step: 0.1, doc: '0 disables the drift-behind entirely.' },
+  'camera/followDelay': { min: 0, max: 3, step: 0.05 },
   'wall/maxAngle': { min: 0, max: 0.8, step: 0.01 },
   'wall/capBonus': { min: 1, max: 3, step: 0.05 },
   'wall/detectDist': { min: 0.4, max: 2, step: 0.05 },
@@ -172,13 +191,19 @@ export const META: Record<string, { min?: number; max?: number; step?: number; d
   'character/maxSlopeAngle': { min: 0.2, max: 1.4, step: 0.01, doc: 'Radians. Above this is a wall.' },
 };
 
+/**
+ * The built-in defaults, captured before any saved profile is applied. Without this
+ * there is no way back to the values in this file once localStorage holds a tune —
+ * TUNING_VERSION only guards schema changes, not changed defaults.
+ */
+export const DEFAULTS: any = JSON.parse(JSON.stringify(T));
+
 /** Sensible default slider bounds for any param without an explicit META entry. */
 export function inferRange(path: string, value: number) {
   const m = META[path] ?? {};
   const max = m.max ?? (value === 0 ? 1 : Math.abs(value) * 3);
   const min = m.min ?? (value >= 0 ? 0 : -max);
-  const step = m.step ?? (max - min) / 200;
-  return { min, max, step, doc: m.doc };
+  return { min, max, step: m.step, doc: m.doc };
 }
 
 export type Tuning = typeof T;

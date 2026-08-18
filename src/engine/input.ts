@@ -20,6 +20,9 @@ export class Input {
     slide: { pressed: false, held: false },
   };
 
+  /** Seconds since the mouse last moved — drives the camera drift-behind. */
+  mouseIdle = 0;
+
   restart = false;
   private down = new Set<string>();
   private locked = false;
@@ -51,35 +54,34 @@ export class Input {
     });
     addEventListener('mousemove', (e) => {
       if (!this.locked) return;
+      this.mouseIdle = 0;
       this.intent.yaw -= e.movementX * T.camera.sensitivity;
       this.intent.pitch = clamp(
         this.intent.pitch - e.movementY * T.camera.sensitivity,
         T.camera.pitchMin, T.camera.pitchMax,
       );
     });
-    // Mouse buttons as alternates: LMB dash, RMB slide.
+    // LMB is a dash alternate. RMB is free for a combat verb later.
     canvas.addEventListener('mousedown', (e) => {
       if (!this.locked) return;
       if (e.button === 0) this.intent.dash.pressed = true;
-      if (e.button === 2) { this.intent.slide.pressed = true; this.mouseSlide = true; }
     });
-    addEventListener('mouseup', (e) => { if (e.button === 2) this.mouseSlide = false; });
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   }
 
   get pointerLocked() { return this.locked; }
 
   /** Refresh held state. Call once per rendered frame. */
-  sample() {
+  sample(dt = 0) {
+    this.mouseIdle += dt;
     const on = (list: string[]) => list.some((k) => this.down.has(k));
     this.intent.moveY = (on(KEYS.forward) ? 1 : 0) - (on(KEYS.back) ? 1 : 0);
     this.intent.moveX = (on(KEYS.right) ? 1 : 0) - (on(KEYS.left) ? 1 : 0);
     this.intent.jump.held = on(KEYS.jump);
     this.intent.dash.held = on(KEYS.dash);
-    this.intent.slide.held = on(KEYS.slide) || this.mouseSlide;
+    this.intent.slide.held = on(KEYS.slide);
   }
 
-  private mouseSlide = false;
 
   /** Edge flags must survive exactly one fixed tick, then be consumed. */
   consumeEdges() {

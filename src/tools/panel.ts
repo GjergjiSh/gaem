@@ -2,7 +2,7 @@
 // core/tuning.ts is all it takes to get a slider here — no edits in this file.
 
 import { Pane } from 'tweakpane';
-import { T, TUNING_VERSION, inferRange, snapshot, applyProfile } from '../core/tuning';
+import { T, DEFAULTS, TUNING_VERSION, inferRange, snapshot, applyProfile } from '../core/tuning';
 
 const STORE_KEY = `tuning.v${TUNING_VERSION}`;
 
@@ -11,6 +11,14 @@ export class Panel {
   private slotA: any = null;
   private slotB: any = null;
   private showingB = false;
+  /**
+   * Only params you actually moved get persisted, keyed by path. Saving the whole
+   * snapshot instead means a default you change in tuning.ts is immediately
+   * overwritten by the stale saved copy on the next load — you edit the file, reload,
+   * and nothing happens. Storing just the overrides keeps code defaults live for
+   * everything you haven't deliberately touched.
+   */
+  private overrides: Record<string, number | boolean> = {};
 
   constructor(private onChange: () => void) {
     this.pane = new Pane({ title: 'Tuning  ·  F1 hides' });
@@ -23,10 +31,13 @@ export class Panel {
         const path = `${group}/${key}`;
         const value = obj[key];
         if (typeof value === 'boolean') {
-          folder.addBinding(obj, key);
+          folder.addBinding(obj, key).on('change', () => { this.overrides[path] = obj[key]; });
         } else {
           const { min, max, step, doc } = inferRange(path, value);
-          const b = folder.addBinding(obj, key, { min, max, step });
+          const opts: Record<string, number> = { min, max };
+          if (step !== undefined) opts.step = step;   // omitted = continuous, no quantising
+          const b = folder.addBinding(obj, key, opts);
+          b.on('change', () => { this.overrides[path] = obj[key]; });
           if (doc) b.element.title = doc;
         }
       }
@@ -38,6 +49,13 @@ export class Panel {
       navigator.clipboard.writeText(JSON.stringify(snapshot(), null, 2));
     });
     io.addButton({ title: 'load from file' }).on('click', () => this.upload());
+    io.addButton({ title: 'reset to code defaults' }).on('click', () => {
+      this.overrides = {};
+      localStorage.removeItem(STORE_KEY);
+      applyProfile(DEFAULTS);
+      this.refresh();
+      this.onChange();
+    });
     io.addButton({ title: 'store as A' }).on('click', () => { this.slotA = snapshot(); });
     io.addButton({ title: 'store as B' }).on('click', () => { this.slotB = snapshot(); });
     io.addButton({ title: 'toggle A / B  [T]' }).on('click', () => this.toggleAB());
@@ -53,9 +71,19 @@ export class Panel {
     // The key carries a version: bumping it in tuning.ts discards stale saves so
     // new defaults actually take effect instead of being silently overridden.
     const saved = localStorage.getItem(STORE_KEY);
-    if (saved) { try { applyProfile(JSON.parse(saved)); this.refresh(); } catch {} }
+    if (saved) {
+      try {
+        this.overrides = JSON.parse(saved);
+        for (const [path, v] of Object.entries(this.overrides)) {
+          const [group, key] = path.split('/');
+          const g = (T as any)[group];
+          if (g && key in g) g[key] = v;
+        }
+        this.refresh();
+      } catch { this.overrides = {}; }
+    }
     addEventListener('beforeunload', () => {
-      localStorage.setItem(STORE_KEY, JSON.stringify(snapshot()));
+      localStorage.setItem(STORE_KEY, JSON.stringify(this.overrides));
     });
   }
 

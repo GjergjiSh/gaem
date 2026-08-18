@@ -2,8 +2,8 @@ import * as THREE from 'three';
 import { T } from '../core/tuning';
 import * as V from '../core/vec';
 import { currentCap } from '../core/solver';
-import type { Player } from '../core/types';
-import { brushes, triggers } from '../levels/course01';
+import type { CollisionWorld, Intent, Player } from '../core/types';
+import { brushes, triggers } from '../levels';
 
 const TRAIL_POINTS = 900;
 
@@ -41,7 +41,8 @@ export class Renderer {
         new THREE.MeshLambertMaterial({ color: b.c ?? 0x6b7280 }),
       );
       m.position.set(b.p[0], b.p[1], b.p[2]);
-      if (b.r) m.rotation.set(b.r[0], b.r[1], b.r[2]);
+      if (b.q) m.quaternion.set(b.q[0], b.q[1], b.q[2], b.q[3]);
+      else if (b.r) m.rotation.set(b.r[0], b.r[1], b.r[2]);
       this.scene.add(m);
 
       const edges = new THREE.LineSegments(
@@ -49,7 +50,7 @@ export class Renderer {
         new THREE.LineBasicMaterial({ color: 0x000000, opacity: 0.35, transparent: true }),
       );
       edges.position.copy(m.position);
-      edges.rotation.copy(m.rotation);
+      edges.quaternion.copy(m.quaternion);
       this.scene.add(edges);
     }
 
@@ -121,10 +122,8 @@ export class Renderer {
    * @param alpha interpolation factor between the last two physics ticks
    * @param castRay world query for camera collision pull-in
    */
-  update(
-    p: Player, yaw: number, pitch: number, dt: number,
-    castRay: (from: V.V3, dir: V.V3, max: number) => number | null,
-  ) {
+  update(p: Player, i: Intent, dt: number, col: CollisionWorld) {
+    const yaw = i.yaw, pitch = i.pitch;
     const pos = new THREE.Vector3(p.pos.x, p.pos.y, p.pos.z);
 
     this.player.position.copy(pos);
@@ -143,10 +142,13 @@ export class Renderer {
 
     // Overspeed extends the arm — reads as "you are going fast" in third person.
     const over = Math.max(0, V.lenH(p.vel) - currentCap(p)) / T.momentum.hardCap;
-    let want = T.camera.distance * (1 + over * 0.35);
+    // Pull the camera out as you go faster — the wider view is what makes speed
+    // readable in third person, and it keeps obstacles on screen long enough to react.
+    const speedT = V.clamp(V.lenH(p.vel) / T.momentum.hardCap, 0, 1);
+    let want = T.camera.distance + T.camera.speedDistance * speedT + T.camera.distance * over * 0.35;
 
     const dir = fwd.clone().negate();
-    const hit = castRay(
+    const hit = col.ray(
       { x: this.camTarget.x, y: this.camTarget.y, z: this.camTarget.z },
       { x: dir.x, y: dir.y, z: dir.z },
       want + T.camera.collisionRadius,

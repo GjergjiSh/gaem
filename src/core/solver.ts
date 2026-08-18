@@ -207,7 +207,44 @@ function endSlide(p: Player) {
 
 // ---------------------------------------------------------------- wallrun
 
-/** Probe both sides for a runnable wall. Returns true if we attached. */
+/**
+ * Shared attach path. Validates that the surface is steep enough, that we aren't
+ * re-grabbing the wall we just left, and that we're travelling ALONG it rather
+ * than straight into it — hitting a wall head-on should bonk, not stick.
+ */
+function attachWall(p: Player, rawNormal: V3): boolean {
+  if (Math.abs(rawNormal.y) > Math.sin(T.wall.maxAngle)) return false;
+
+  const n = V.norm(V.v3(rawNormal.x, 0, rawNormal.z));
+  if (V.lenH(n) < 1e-4) return false;
+  if (n.x * p.lastWallX + n.z * p.lastWallZ > 0.85) return false;
+
+  const h = V.lenH(p.vel);
+  if (h < T.wall.minSpeed) return false;
+
+  // Only the component running along the wall survives the attach; if that's too
+  // small we came in square-on and there's nothing to carry.
+  const along = V.projectOnPlane(V.v3(p.vel.x, 0, p.vel.z), n);
+  if (V.lenH(along) < T.wall.minSpeed) return false;
+
+  const right = V.v3(-p.vel.z / h, 0, p.vel.x / h);
+  p.wallSide = (right.x * -n.x + right.z * -n.z) >= 0 ? 1 : -1;
+  p.wallNormal = n;
+  p.wallTime = 0;
+  const entryVy = Math.min(Math.max(p.vel.y, 0), T.wall.entryVyMax) + T.wall.upBoost;
+  p.vel = V.v3(along.x, entryVy, along.z);
+  // Drop any jump still sitting in the buffer from the approach. Without this the
+  // buffered press fires as a wall jump on the very next tick and you're flung off
+  // a wallrun you never got to hold.
+  p.bufJump = 0;
+  if (T.wall.refillJumps) p.jumpsLeft = T.jump.maxJumps;
+  if (T.wall.refillDash) p.dashCharges = T.dash.maxCharges;
+  registerTech(p);
+  enter(p, 'wallrunning');
+  return true;
+}
+
+/** Proximity probe: catches walls you're running past without touching. */
 function tryWallAttach(p: Player, col: CollisionWorld): boolean {
   if (p.wallCooldown > 0) return false;
   const h = V.lenH(p.vel);
@@ -216,28 +253,10 @@ function tryWallAttach(p: Player, col: CollisionWorld): boolean {
   const dir = V.v3(p.vel.x / h, 0, p.vel.z / h);
   const right = V.v3(-dir.z, 0, dir.x);
   const reach = T.character.radius + T.wall.detectDist;
-  const maxTilt = Math.sin(T.wall.maxAngle);
 
   for (const side of [1, -1]) {
-    const probe = V.scale(right, side);
-    const hit = col.rayHit(p.pos, probe, reach);
-    if (!hit) continue;
-    if (Math.abs(hit.normal.y) > maxTilt) continue;      // floor or ceiling, not a wall
-    // Refuse the wall we just jumped off, unless it's genuinely a different surface.
-    const sameWall = hit.normal.x * p.lastWallX + hit.normal.z * p.lastWallZ > 0.85;
-    if (sameWall && p.chainTimer > 0 && p.wallCoyote > 0) continue;
-
-    p.wallNormal = V.norm(V.v3(hit.normal.x, 0, hit.normal.z));
-    p.wallSide = side;
-    p.wallTime = 0;
-    // Flatten into the wall plane and add the attach pop.
-    const along = V.projectOnPlane(V.v3(p.vel.x, 0, p.vel.z), p.wallNormal);
-    p.vel = V.v3(along.x, Math.max(p.vel.y, 0) + T.wall.upBoost, along.z);
-    if (T.wall.refillJumps) p.jumpsLeft = T.jump.maxJumps;
-    if (T.wall.refillDash) p.dashCharges = T.dash.maxCharges;
-    registerTech(p);
-    enter(p, 'wallrunning');
-    return true;
+    const hit = col.rayHit(p.pos, V.scale(right, side), reach);
+    if (hit && attachWall(p, hit.normal)) return true;
   }
   return false;
 }
@@ -262,9 +281,16 @@ function updateWallrunning(p: Player, i: Intent, wish: V3, col: CollisionWorld, 
 
   if (p.bufJump > 0) return doWallJump(p);
   if (p.bufDash > 0 && canDash(p)) return doDash(p, i);
-  if (p.wallTime > T.wall.maxTime || p.grounded) return detachWall(p);
+  // Only a genuine landing ends the run. `grounded` alone lies here: an
+  // outward-leaning wall registers a contact under the capsule and reads as
+  // ground, which would detach us on the tick we attach.
+  if (p.wallTime > T.wall.maxTime || (p.grounded && p.vel.y <= 0)) return detachWall(p);
 
-  p.vel.y -= T.world.gravityRise * T.wall.gravityScale * dt;
+  // The arc: gravity ramps in over the run, quadratically, so you attach nearly
+  // weightless, hang, then peel off downward under increasing pull.
+  const ramp = V.clamp(p.wallTime / Math.max(T.wall.gravityRamp, 1e-3), 0, 1);
+  const gScale = V.lerp(T.wall.gravityStart, T.wall.gravityEnd, ramp * ramp);
+  p.vel.y -= T.world.gravityRise * gScale * dt;
 
   // Accelerate along the wall in whichever direction we're already travelling.
   const tangent = V.norm(V.v3(-p.wallNormal.z, 0, p.wallNormal.x));
@@ -441,6 +467,14 @@ export function step(p: Player, i: Intent, col: CollisionWorld, dt: number) {
   p.pos = res.pos;
   p.grounded = res.grounded;
   p.groundNormal = res.groundNormal;
+
+  // Brushing a wall in mid-air is the most common way to start a wallrun — the
+  // sideways probe alone misses it, because a wall you're running INTO is in front
+  // of you, not beside you.
+  if (res.hitWall && !res.grounded && p.wallCooldown <= 0
+      && (p.state === 'airborne' || p.state === 'dashing')) {
+    attachWall(p, res.wallNormal);
+  }
 
   // Kill velocity into surfaces we actually hit, or we stick to walls. During a
   // wallrun the glue force is deliberately pushing into the wall, so skip it.

@@ -403,3 +403,108 @@ slide jump both fall, the tech clears with room. Everything downstream shifted 1
 - Wallruns descend ~2.3 m over a full run at `gravityScale` 0.18. Set it to 0 for a flat run.
 - Collider still doesn't shrink during a slide, so no sliding under geometry yet.
 - Input recorder / replay-under-a-different-tune still not built.
+
+---
+
+## 10. Iteration 3 — arena, DMC camera, wallrun arc
+
+The course was teaching the wrong lesson. Movement tech exists to keep you mobile in a fight,
+so the level is now an **arena** you circulate in, not a track you finish.
+
+### Hexagonal arena
+
+`src/levels/arena.ts`, fully generated from constants rather than hand-placed boxes:
+
+- Six slanted perimeter walls you can carry a wallrun along
+- Central raised dais — contested high ground, and the spawn
+- Three tall pillars to wallrun around and break sightlines
+- Three approach ramps for slides, with their low ends buried below the floor so no lip forms
+- Two rings of floating pads at mixed heights as dash / double-jump targets
+- Six low blocks scattered off-axis, so the arena never reads symmetrical from the inside
+
+`src/levels/index.ts` is a one-line registry — swapping back to the old parkour course is a
+single import change. `Brush` gained an optional quaternion (`q`), because "yaw it to face the
+centre, then lean it" is ambiguous under Euler order; composing two axis-angle rotations
+explicitly removes the guesswork.
+
+**The wall slant has two independent ceilings, and the second one is not obvious.** It must stay
+under `wall.maxAngle` to count as a runnable wall at all — but it must *also* stay shallow enough
+that climbing the bank doesn't fight the character controller. At 12° the outward bank read as an
+unclimbable slope: Rapier zeroed the vertical velocity and reported `grounded`, so wallruns died
+after 0.2 s. 7° behaves. If you steepen `WALL_TILT`, re-measure the wallrun before trusting it.
+
+### Devil May Cry camera, no crosshair
+
+The crosshair and the ADS aim stance are gone — wrong model for a character-action game. The
+camera is now a proper orbit rig:
+
+- The mouse swings the camera around the character; the character keeps facing its movement
+  direction
+- When you stop steering it, the camera **eases back behind your direction of travel**
+  (`camera.autoFollow`, after `camera.followDelay`), and the pitch settles toward `pitchRest`
+- The arm extends with speed (`camera.speedDistance`), so going fast widens the view
+
+Three hands-off guards, all verified: it never moves while the mouse is active, never while you
+are strafing, and never below `followMinSpeed`. **The strafe guard is not cosmetic** — movement is
+camera-relative, so auto-rotating the yaw mid-strafe would silently curve your path.
+
+Measured convergence from 90° off-axis: 71° → 44° → 21° → 6° → 1° over ~2 s.
+
+### Wallrun: an arc, not a timer
+
+Gravity now **ramps in quadratically** over the run (`wall.gravityStart` → `gravityEnd` across
+`gravityRamp`) instead of being a flat fraction. You attach nearly weightless, hang, then peel off
+under increasing pull. The arc ends the run; `maxTime` is only a backstop.
+
+Measured, attaching at 16 u/s:
+
+| t | height | vy | gravity |
+|---|---|---|---|
+| 0.00s | 1.30 | +4.50 | 0% |
+| 0.25s | 2.45 | +4.34 | 5% |
+| 0.50s | 3.56 | +3.28 | 20% |
+| 0.75s | 4.29 | +0.48 | 43% |
+| 0.88s | 4.28 | 0.00 | 48% |
+
+~0.9 s, +3 m of height, sweeping 32° of the arena before it lets go.
+
+Four separate bugs had to be fixed before any of that was reachable:
+
+1. **Detection only probed sideways from velocity**, so running *at* a wall never attached — the
+   wall is in front of you, not beside you. Rapier already reports the contact, so a wall you
+   brush in mid-air now attaches directly. Head-on impacts still bonk: the along-wall component
+   has to survive `wall.minSpeed`, and square-on it doesn't.
+2. **A stale jump buffer fired as a wall jump on the tick you attached**, flinging you off a
+   wallrun you never got to hold. The buffer is cleared on attach.
+3. **`grounded` lies next to a leaning wall** — the bank registers a contact under the capsule.
+   A run now ends only on a genuine landing (`grounded && vel.y <= 0`).
+4. **Inherited climb speed made the arc unpredictable** — attaching mid-jump carried 13 u/s
+   upward into the run. `wall.entryVyMax` clamps it so the arc starts the same way every time.
+
+Wallruns are no longer renewable on one surface: `lastWall` is cleared only by touching the
+ground, so you must reach a *different* wall or land. Previously you could re-grab the same wall
+forever.
+
+### The tuning panel was silently discarding your edits
+
+Two bugs that mattered more than they look, because they made the whole rig untrustworthy:
+
+- **`beforeunload` saved the entire snapshot to localStorage.** Change a default in `tuning.ts`,
+  reload, and the stale saved copy overwrote it — the edit appeared to do nothing.
+  `TUNING_VERSION` only guards *schema* changes, not changed defaults. The panel now persists
+  **only the params you actually moved**, so code defaults stay live for everything else.
+- **Inferred slider steps quantised every value on load** — `3.2` became `3.2125` the moment the
+  panel bound it. Steps are now only applied where `META` specifies one; everything else is
+  continuous.
+
+Added `DEFAULTS` (captured before any profile is applied) and a **reset to code defaults** button,
+so there is always a way back.
+
+### Still open
+
+- Wallrunning up a steeper bank still fights the controller; 7° is the practical ceiling for the
+  current character setup.
+- `ground.friction` still bleeds chain speed when you release the stick.
+- No collider shrink on slide, so no sliding under geometry.
+- Input recorder / replay-under-a-different-tune still not built.
+- The arena has no combat verbs yet — it's shaped for them, but empty.

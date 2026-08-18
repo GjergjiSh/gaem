@@ -31,7 +31,11 @@ export class Hud {
     this.ctx = this.canvas.getContext('2d')!;
   }
 
-  update(p: Player, timing: { run: number; splits: string[]; best: number | null }, ab: string) {
+  update(
+    p: Player,
+    timing: { run: number; splits: string[]; best: number | null },
+    ab: string,
+  ) {
     const h = V.lenH(p.vel);
     const cap = currentCap(p);
     const bar = (t: number, max: number) => {
@@ -45,7 +49,7 @@ export class Hud {
       `vert     ${p.vel.y.toFixed(2).padStart(6)}`,
       `jumps    ${p.jumpsLeft}/${T.jump.maxJumps}   dash ${p.dashCharges}/${T.dash.maxCharges}`,
       `chain    x${p.chain}  ${bar(p.chainTimer, T.momentum.chainWindow)}`,
-      `wall     ${p.wallSide ? (p.wallSide > 0 ? 'right' : 'left ') : '--   '} ${bar(T.wall.maxTime - p.wallTime, T.wall.maxTime)}`,
+      `wall     ${p.wallSide ? (p.wallSide > 0 ? 'right' : 'left ') : '--   '} arc ${bar(T.wall.gravityRamp - p.wallTime, T.wall.gravityRamp)}`,
       `coyote   ${bar(p.coyoteJump, T.jump.coyoteTime)}  buf ${bar(p.bufJump, T.jump.bufferTime)}`,
       `slidecoy ${bar(p.slideCoyote, T.slide.coyoteTime)}${p.slideCoyote > 0 ? '  LEDGE TECH ARMED' : ''}`,
       `dash cd  ${bar(T.dash.cooldown - p.dashCooldown, T.dash.cooldown)}`,
@@ -55,6 +59,7 @@ export class Hud {
       ``,
       `WASD move · Space jump · Shift dash · Ctrl slide`,
       `air into a wall = wallrun · Space = wall jump`,
+      `mouse orbits the camera; it drifts back when you let go`,
       `R restart · F1 panel · T A/B${ab ? `  [${ab}]` : ''}`,
     ].join('\n');
 

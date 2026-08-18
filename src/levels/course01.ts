@@ -1,19 +1,7 @@
 // Grey-box test course. Data, not hand-placed meshes — so a new obstacle is one line.
 // Forward is -Z. Every section exists to isolate one technique.
 
-export interface Brush {
-  p: [number, number, number];  // centre
-  s: [number, number, number];  // size
-  r?: [number, number, number]; // euler rotation, radians
-  c?: number;                   // colour
-}
-
-export interface Trigger {
-  p: [number, number, number];
-  r: number;
-  kind: 'checkpoint' | 'goal';
-  name: string;
-}
+import type { Brush, Trigger } from './types';
 
 const PLATFORM = 0x6b7280;
 const RAMP = 0x8b5cf6;
