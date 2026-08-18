@@ -1,0 +1,26 @@
+{
+  "name": "game",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "check": "tsc --noEmit"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.20.0",
+    "three": "^0.185.1",
+    "tweakpane": "^4.0.5"
+  },
+  "devDependencies": {
+    "@tweakpane/core": "^2.0.5",
+    "@types/three": "^0.185.4",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.1"
+  },
+  "type": "module"
+}
