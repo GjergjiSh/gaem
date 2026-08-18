@@ -45,13 +45,16 @@ export class Hud {
       `vert     ${p.vel.y.toFixed(2).padStart(6)}`,
       `jumps    ${p.jumpsLeft}/${T.jump.maxJumps}   dash ${p.dashCharges}/${T.dash.maxCharges}`,
       `chain    x${p.chain}  ${bar(p.chainTimer, T.momentum.chainWindow)}`,
+      `wall     ${p.wallSide ? (p.wallSide > 0 ? 'right' : 'left ') : '--   '} ${bar(T.wall.maxTime - p.wallTime, T.wall.maxTime)}`,
       `coyote   ${bar(p.coyoteJump, T.jump.coyoteTime)}  buf ${bar(p.bufJump, T.jump.bufferTime)}`,
+      `slidecoy ${bar(p.slideCoyote, T.slide.coyoteTime)}${p.slideCoyote > 0 ? '  LEDGE TECH ARMED' : ''}`,
       `dash cd  ${bar(T.dash.cooldown - p.dashCooldown, T.dash.cooldown)}`,
       ``,
       `time     ${timing.run.toFixed(2)}s${timing.best !== null ? `   best ${timing.best.toFixed(2)}s` : ''}`,
       ...timing.splits.map((s) => `  ${s}`),
       ``,
       `WASD move · Space jump · Shift dash · Ctrl slide`,
+      `air into a wall = wallrun · Space = wall jump`,
       `R restart · F1 panel · T A/B${ab ? `  [${ab}]` : ''}`,
     ].join('\n');
 

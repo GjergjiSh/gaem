@@ -5,7 +5,7 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import { T } from '../core/tuning';
 import * as V from '../core/vec';
 import type { V3 } from '../core/vec';
-import type { CollisionWorld, MoveResult } from '../core/types';
+import type { CollisionWorld, MoveResult, RayHit } from '../core/types';
 import type { Brush } from '../levels/course01';
 
 export async function initPhysics() { await RAPIER.init(); }
@@ -98,12 +98,20 @@ export class RapierWorld implements CollisionWorld {
     return hit ? hit.timeOfImpact : null;
   }
 
-  private rayNormal(from: V3, dir: V3, maxDist: number): V3 | null {
+  rayHit(from: V3, dir: V3, maxDist: number): RayHit | null {
     const hit = this.world.castRayAndGetNormal(
       new RAPIER.Ray(from, dir), maxDist, true,
       undefined, undefined, this.collider,
     );
-    return hit ? V.v3(hit.normal.x, hit.normal.y, hit.normal.z) : null;
+    if (!hit) return null;
+    let n = V.v3(hit.normal.x, hit.normal.y, hit.normal.z);
+    // Point the normal back at the ray origin, so callers get a consistent sign.
+    if (V.dot(n, dir) > 0) n = V.scale(n, -1);
+    return { dist: hit.timeOfImpact, normal: n };
+  }
+
+  private rayNormal(from: V3, dir: V3, maxDist: number): V3 | null {
+    return this.rayHit(from, dir, maxDist)?.normal ?? null;
   }
 }
 

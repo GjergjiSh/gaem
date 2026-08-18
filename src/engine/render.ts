@@ -164,12 +164,15 @@ export class Renderer {
     this.camera.lookAt(this.camTarget);
 
     // roll + fov feedback
-    const wantRoll = sliding ? T.camera.slideRoll : 0;
+    const wantRoll = sliding ? T.camera.slideRoll
+      : p.state === 'wallrunning' ? T.camera.wallRoll * p.wallSide
+        : 0;
     this.roll = V.damp(this.roll, wantRoll, 10, dt);
     this.camera.rotateZ(this.roll);
 
     const wantFov = T.camera.fovBase
       + (p.state === 'dashing' ? T.camera.fovDash : 0)
+      + (p.state === 'wallrunning' ? T.camera.fovDash * 0.5 : 0)
       + over * T.camera.fovSpeed;
     this.fov = V.damp(this.fov, wantFov, T.camera.fovRate, dt);
     if (Math.abs(this.camera.fov - this.fov) > 0.01) {

@@ -35,7 +35,17 @@ export class Input {
     });
     addEventListener('keyup', (e) => this.down.delete(e.code));
 
-    canvas.addEventListener('click', () => canvas.requestPointerLock());
+    // Click the canvas to capture the mouse. No overlay: Chrome imposes a short
+    // cooldown after Esc releases the lock, and a request inside that window is
+    // rejected — which is what produced the "refused" state that never cleared.
+    // Swallowing the error and letting the next click retry is the whole fix.
+    canvas.addEventListener('click', () => {
+      if (document.pointerLockElement !== canvas) {
+        const r = canvas.requestPointerLock() as unknown as Promise<void> | undefined;
+        if (r && typeof r.catch === 'function') r.catch(() => { /* retry on next click */ });
+      }
+    });
+    document.addEventListener('pointerlockerror', () => { /* Esc cooldown; ignore */ });
     document.addEventListener('pointerlockchange', () => {
       this.locked = document.pointerLockElement === canvas;
     });

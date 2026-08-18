@@ -1,6 +1,6 @@
 import type { V3 } from './vec';
 
-export type StateName = 'grounded' | 'airborne' | 'dashing' | 'sliding';
+export type StateName = 'grounded' | 'airborne' | 'dashing' | 'sliding' | 'wallrunning';
 
 export interface Btn { pressed: boolean; held: boolean }
 
@@ -27,9 +27,12 @@ export interface MoveResult {
  * The only door between the movement solver and the physics engine.
  * Swapping Rapier for another backend means reimplementing exactly this.
  */
+export interface RayHit { dist: number; normal: V3 }
+
 export interface CollisionWorld {
   move(pos: V3, displacement: V3): MoveResult;
   ray(from: V3, dir: V3, maxDist: number): number | null;
+  rayHit(from: V3, dir: V3, maxDist: number): RayHit | null;
 }
 
 export interface Player {
@@ -56,6 +59,17 @@ export interface Player {
   bufDash: number;
   bufSlide: number;
   slideCooldown: number;
+  slideCoyote: number; // ledge-tech grace: a jump here still counts as a slide jump
+  dashEntrySpeed: number;
+
+  // wallrun
+  wallNormal: V3;
+  wallSide: number;   // -1 wall on the left, +1 on the right, 0 none
+  wallTime: number;
+  wallCoyote: number;
+  wallCooldown: number;
+  lastWallX: number;  // so you can't re-attach to the wall you just left
+  lastWallZ: number;
 
   chain: number;      // consecutive tech links
   chainTimer: number;

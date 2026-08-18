@@ -2,7 +2,9 @@
 // core/tuning.ts is all it takes to get a slider here — no edits in this file.
 
 import { Pane } from 'tweakpane';
-import { T, inferRange, snapshot, applyProfile } from '../core/tuning';
+import { T, TUNING_VERSION, inferRange, snapshot, applyProfile } from '../core/tuning';
+
+const STORE_KEY = `tuning.v${TUNING_VERSION}`;
 
 export class Panel {
   pane: Pane;
@@ -48,10 +50,12 @@ export class Panel {
     });
 
     // Survive page reloads with the last tune intact — Vite HMR reloads a lot.
-    const saved = localStorage.getItem('tuning');
+    // The key carries a version: bumping it in tuning.ts discards stale saves so
+    // new defaults actually take effect instead of being silently overridden.
+    const saved = localStorage.getItem(STORE_KEY);
     if (saved) { try { applyProfile(JSON.parse(saved)); this.refresh(); } catch {} }
     addEventListener('beforeunload', () => {
-      localStorage.setItem('tuning', JSON.stringify(snapshot()));
+      localStorage.setItem(STORE_KEY, JSON.stringify(snapshot()));
     });
   }
 

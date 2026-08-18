@@ -7,24 +7,10 @@
   <style>
     html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0d12; }
     #view { display: block; width: 100vw; height: 100vh; }
-    #hint {
-      position: fixed; inset: 0; display: grid; place-items: center; z-index: 30;
-      font: 15px ui-monospace, Consolas, monospace; color: #e6edf3;
-      background: rgba(11,13,18,.75); cursor: pointer; text-align: center;
-    }
-    #hint.hidden { display: none; }
   </style>
 </head>
 <body>
   <canvas id="view"></canvas>
-  <div id="hint">click to capture mouse<br /><span style="opacity:.6">esc releases it</span></div>
   <script type="module" src="/src/main.ts"></script>
-  <script>
-    const hint = document.getElementById('hint');
-    document.addEventListener('pointerlockchange', () => {
-      hint.classList.toggle('hidden', !!document.pointerLockElement);
-    });
-    hint.addEventListener('click', () => document.getElementById('view').click());
-  </script>
 </body>
 </html>

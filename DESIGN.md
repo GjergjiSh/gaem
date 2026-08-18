@@ -299,3 +299,107 @@ instant restart, timescale hook.
   a chain is live.
 - Changing `character.radius` / `character.height` at runtime moves the sliders but not the
   Rapier capsule; those two need a reload to take effect.
+
+---
+
+## 9. Iteration 2 — responsiveness, wallrun, ledge tech
+
+### The sluggishness had one root cause
+
+Acceleration alone cannot turn you when you are already at the speed cap. The Quake-style
+`accelerate()` only adds speed up to `cap - projected`, so at cap there is no headroom left and
+a sideways input does almost nothing. Raising `accel` does not fix it — the term is clamped.
+
+The fix is a second, separate mechanism: **`redirect()` rotates horizontal velocity toward the
+stick while preserving its magnitude.** Turning is now free; gaining speed still is not. Exposed
+as `air.redirect` and `ground.redirect`, and it is the knob to reach for first if air control
+still feels off.
+
+Measured, holding full-left at cap after a jump:
+
+| elapsed | heading change | speed |
+|---|---|---|
+| 50 ms | 49° | 14.3 |
+| 100 ms | 67° | 14.4 |
+| 200 ms | 82° | 13.5 |
+
+Also retuned for snap: `ground.accel` 90 → 160, `air.accel` 45 → 110, `air.control` 0.75 → 1,
+gravity 30/48 → 36/62, jump 11 → 13.5, dash 26 → 32 over a shorter 0.16 s.
+
+### The slide was being strangled by its own speed cap
+
+`bleedOverspeed` used one global cap, so a slide that boosted to 18 u/s was dragged straight back
+to 11 — the boost evaporated in about a third of a second. Fixes:
+
+- `currentCap()` is now **state-aware**: `slide.capBonus` (×2.4) and `wall.capBonus` (×1.5) give
+  those states their own ceiling, so a slide keeps what it earns.
+- `slide.friction` 7 → 3, `slopeAccel` 26 → 95, `minSpeed` 3.5 → 2.
+- `slide.minTime` stops the slide being dropped on the frame it starts.
+
+Sliding the ramp now runs **18.3 → 32.2 u/s** and carries 28.7 onto the flat, where before it
+died almost immediately.
+
+### The ramp was an invisible wall
+
+Rotating a box about its centre lifted its top-rear corner 0.67 m above the deck — over
+`character.stepHeight`, so it read as a wall. Players hit it at full speed and stopped dead.
+The ramp is now positioned so that corner lands exactly on the platform lip (verified: junctions
+match to within 1 mm at both ends). **Worth remembering when adding any rotated brush.**
+
+### Wallrun
+
+New `wallrunning` state. Probes perpendicular to the direction of travel, attaches to any surface
+within `wall.maxAngle` of vertical, applies `gravityScale` (0.18) instead of full gravity, and
+accelerates along the wall. Wall jump keeps the along-wall component and adds an outward kick, and
+never returns less speed than you arrived with. Attaching refills jumps and dash, so walls are
+chain links rather than rest stops. `wall.coyoteTime` keeps the wall jump alive briefly after
+you leave the surface.
+
+Measured: attaches in 31 ticks, runs 1.46 s / 28 m at 16.5 u/s; wall jump kicks out at 8.3 u/s
+lateral with vy 11.2 and refills both charges.
+
+Level support added: a **wallrun canyon** with no floor (run the walls or fall) and a
+**wall-jump shaft** with walls along the travel axis, so you attach side-on and alternate jumps
+to climb to the goal.
+
+### The dash-slide-jump ledge tech
+
+The trick needs four things to compose, and three were missing:
+
+1. `slide.coyoteTime` (160 ms) — a window after sliding off a ledge in which a jump still counts
+   as a *slide* jump and keeps the multiplier. Deliberately outlives the ordinary ground-jump
+   coyote window, so a late jump keeps the speed even once it has become an air jump.
+2. `jump.slideExitBonus` raised 1.15 → 1.28.
+3. `dash.preserveEntrySpeed` — a dash exits at the greater of its own exit speed and the speed
+   you entered with, so it can never *cost* momentum mid-chain.
+4. `momentum.airDecayScale` (0.2) — overspeed bleeds at a fifth of the ground rate while
+   airborne, so a launch keeps what it earned instead of shedding it before landing.
+
+Measured launch speed off the same lip, and the resulting gap cleared:
+
+| input | launch | gap cleared |
+|---|---|---|
+| run + jump | 11.9 u/s | 7.7 m (1.00×) |
+| slide + ledge jump | 20.3 u/s | 13.1 m (1.71×) |
+| dash → slide → ledge jump | 40.7 u/s | 26.3 m (**3.42×**) |
+
+The big gap was widened 6 m → 20 m so it is only crossable with the full chain: plain jump and
+slide jump both fall, the tech clears with room. Everything downstream shifted 14 m to match.
+
+### Also
+
+- **Pointer-lock overlay removed entirely.** It dimmed the whole game and got stuck reading
+  "refused" because Chrome enforces a short cooldown after Esc releases the lock, and the old
+  code bounced the request through a synthetic `canvas.click()`, which is an untrusted event.
+  Now: click the canvas, that's it; a rejected request just retries on the next click.
+- `TUNING_VERSION` added — the panel's localStorage key carries it, so changing defaults
+  actually takes effect instead of being silently overridden by a stale saved tune.
+- R restart verified end-to-end through the live loop, not just the key handler.
+
+### Still open
+
+- Overspeed decay on the ground is still gated by `ground.friction` (34/s) when you release the
+  stick. Holding a direction behaves correctly.
+- Wallruns descend ~2.3 m over a full run at `gravityScale` 0.18. Set it to 0 for a flat run.
+- Collider still doesn't shrink during a slide, so no sliding under geometry yet.
+- Input recorder / replay-under-a-different-tune still not built.
