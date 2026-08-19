@@ -141,7 +141,7 @@ function frame(now: number) {
     ghost.visible = true;
   }
 
-  hud.update(player, { run: run.time, splits: run.splits, best }, panel.abLabel);
+  hud.update(player, { run: run.time, splits: run.splits, best }, panel.abLabel, input.lookMode);
   requestAnimationFrame(frame);
 }
 

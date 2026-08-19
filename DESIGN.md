@@ -508,3 +508,27 @@ so there is always a way back.
 - No collider shrink on slide, so no sliding under geometry.
 - Input recorder / replay-under-a-different-tune still not built.
 - The arena has no combat verbs yet — it's shaped for them, but empty.
+
+---
+
+## 11. Camera input: never depend on Pointer Lock alone
+
+The camera was completely dead in the preview pane. Cause: the surface sets a permissions
+policy where `document.featurePolicy.allowsFeature('pointer-lock')` is **false**, so
+`requestPointerLock()` is rejected every time regardless of user gesture. The earlier
+"pointer lock refused" overlay was reporting this correctly; removing that overlay and
+swallowing the rejection turned a visible error into a silently dead camera, which was worse.
+
+Two look modes now, and the fallback needs no permissions:
+
+- **Free look** — pointer locked, driven by `movementX/Y`. The good path, works in a normal
+  browser tab.
+- **Drag look** — hold left mouse button and drag, driven by `clientX/Y` deltas. Always
+  available. Verified: a 300 px drag turns 37.8° of yaw, and mouse movement with the button up
+  is correctly ignored.
+
+The HUD now prints which mode is active, so a camera that isn't responding explains itself
+instead of looking like a broken build.
+
+**For free look, open `http://localhost:5173` in a normal browser tab** — the preview pane will
+always be drag-look.

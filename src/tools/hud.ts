@@ -35,6 +35,7 @@ export class Hud {
     p: Player,
     timing: { run: number; splits: string[]; best: number | null },
     ab: string,
+    lookMode = '',
   ) {
     const h = V.lenH(p.vel);
     const cap = currentCap(p);
@@ -59,7 +60,8 @@ export class Hud {
       ``,
       `WASD move · Space jump · Shift dash · Ctrl slide`,
       `air into a wall = wallrun · Space = wall jump`,
-      `mouse orbits the camera; it drifts back when you let go`,
+      `camera: ${lookMode}`,
+      `it drifts back behind you when you let go`,
       `R restart · F1 panel · T A/B${ab ? `  [${ab}]` : ''}`,
     ].join('\n');
 

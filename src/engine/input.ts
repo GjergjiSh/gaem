@@ -24,8 +24,13 @@ export class Input {
   mouseIdle = 0;
 
   restart = false;
+  /** True once a pointer-lock request has been rejected — surfaced in the HUD. */
+  lockBlocked = false;
   private down = new Set<string>();
   private locked = false;
+  private dragging = false;
+  private lastX = 0;
+  private lastY = 0;
 
   constructor(private canvas: HTMLElement) {
     addEventListener('keydown', (e) => {
@@ -38,38 +43,58 @@ export class Input {
     });
     addEventListener('keyup', (e) => this.down.delete(e.code));
 
-    // Click the canvas to capture the mouse. No overlay: Chrome imposes a short
-    // cooldown after Esc releases the lock, and a request inside that window is
-    // rejected — which is what produced the "refused" state that never cleared.
-    // Swallowing the error and letting the next click retry is the whole fix.
+    // Two ways to look, because Pointer Lock is not always available: an embedded
+    // frame has to be granted `allow="pointer-lock"`, and without it every request
+    // is rejected. Free-look is the good path; drag-look is the fallback that always
+    // works. Never depend on the lock alone — a silent rejection leaves the camera
+    // completely dead, with nothing on screen to explain why.
     canvas.addEventListener('click', () => {
-      if (document.pointerLockElement !== canvas) {
+      if (document.pointerLockElement === canvas) return;
+      try {
         const r = canvas.requestPointerLock() as unknown as Promise<void> | undefined;
-        if (r && typeof r.catch === 'function') r.catch(() => { /* retry on next click */ });
-      }
+        if (r && typeof r.catch === 'function') r.catch(() => { this.lockBlocked = true; });
+      } catch { this.lockBlocked = true; }
     });
-    document.addEventListener('pointerlockerror', () => { /* Esc cooldown; ignore */ });
+    document.addEventListener('pointerlockerror', () => { this.lockBlocked = true; });
     document.addEventListener('pointerlockchange', () => {
       this.locked = document.pointerLockElement === canvas;
+      if (this.locked) this.lockBlocked = false;
     });
+
+    canvas.addEventListener('mousedown', (e) => {
+      if (e.button !== 0 || this.locked) return;
+      this.dragging = true;
+      this.lastX = e.clientX;
+      this.lastY = e.clientY;
+    });
+    addEventListener('mouseup', () => { this.dragging = false; });
+    addEventListener('mouseleave', () => { this.dragging = false; });
+
     addEventListener('mousemove', (e) => {
-      if (!this.locked) return;
+      let dx = 0, dy = 0;
+      if (this.locked) {
+        dx = e.movementX; dy = e.movementY;
+      } else if (this.dragging) {
+        dx = e.clientX - this.lastX; dy = e.clientY - this.lastY;
+        this.lastX = e.clientX; this.lastY = e.clientY;
+      } else {
+        return;
+      }
       this.mouseIdle = 0;
-      this.intent.yaw -= e.movementX * T.camera.sensitivity;
+      this.intent.yaw -= dx * T.camera.sensitivity;
       this.intent.pitch = clamp(
-        this.intent.pitch - e.movementY * T.camera.sensitivity,
+        this.intent.pitch - dy * T.camera.sensitivity,
         T.camera.pitchMin, T.camera.pitchMax,
       );
-    });
-    // LMB is a dash alternate. RMB is free for a combat verb later.
-    canvas.addEventListener('mousedown', (e) => {
-      if (!this.locked) return;
-      if (e.button === 0) this.intent.dash.pressed = true;
     });
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   }
 
   get pointerLocked() { return this.locked; }
+  get lookMode() {
+    if (this.locked) return 'free look';
+    return this.lockBlocked ? 'drag to look (pointer lock blocked)' : 'click to capture · or drag to look';
+  }
 
   /** Refresh held state. Call once per rendered frame. */
   sample(dt = 0) {
