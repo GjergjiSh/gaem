@@ -599,3 +599,54 @@ out the open end before reaching the opposite face — exactly one bounce, never
 - **Tuning panel scrolls.** The schema outgrew the viewport (940 px of content in a 612 px panel)
   and the lower folders were simply unreachable. It now has an explicit max-height and
   `overflow-y: auto`.
+
+---
+
+## 13. Standing on walls, and a camera that follows you
+
+### The hover bug
+
+Press into a slanted perimeter wall, release the stick, and the character stayed pinned there
+forever — HUD reading `state grounded`, `speed 0.00`, never falling.
+
+`RapierWorld.move()` took `controller.computedGrounded()` at face value. On an 83°-from-horizontal
+bank that returns **true**, so the solver treated it as standing: friction killed the horizontal
+speed and `if (res.grounded && p.vel.y < 0) p.vel.y = 0` zeroed the fall every tick. A perfect
+hover.
+
+The first fix — reject grounded when a *contact* is too steep — didn't work, and the reason is
+worth writing down: **a resting character produces no contacts at all.** With zero displacement
+the controller computes no collisions, so there was no evidence to judge by and the conservative
+fallback kept trusting Rapier.
+
+What works is requiring *positive evidence* of a walkable surface, from a downward probe sampled
+at the capsule centre plus four points around it. The ring matters: a single centre ray misses on
+a ledge edge, which would drop the player through perfectly good floor.
+
+Verified: parked on the wall it now falls 6.08 m to the ground, while flat ground, the walkable
+ramp (`groundNormal.y` 0.96), a floating-pad rim, walking and the 3-bounce wall chain all still
+behave.
+
+### Camera follows the character's back
+
+The old gate only engaged after 0.55 s of stillness, above 4 u/s, and only on near-pure forward
+input — so through actual parkour it almost never fired and you had to fly the camera by hand.
+
+It now targets `player.facing + PI` (literally "looking at their back", and smoother than raw
+velocity), engages after 0.12 s at 6.0 rate, and — the real change — runs in three situations
+rather than one:
+
+- **no movement input at all** — post-ejection flight, falling
+- **forward-ish input**, now including diagonals
+- **wallrunning or dashing**, where the state drives motion and input is ignored
+
+The gating exists because movement is camera-relative: rotating the yaw while the player holds a
+direction changes what that direction *means*. Each permitted case is one with no feedback loop —
+no input means nothing to curve, forward-ish input just keeps "forward" pointing where you already
+go, and the state-driven cases ignore input entirely.
+
+**Pure strafe stays excluded on purpose** — it is also the bunnyhop stance, which depends on the
+player turning the mouse themselves. Auto-follow there would fight the tech.
+
+Measured: 105° → 3° in 0.6 s during no-input flight; 180° → 9° in 0.5 s while wallrunning; and
+0.0° movement during a pure strafe.

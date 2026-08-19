@@ -71,20 +71,37 @@ function finish() {
 // ---------------------------------------------------------------- camera drift
 
 /**
- * Devil-May-Cry style: you own the camera with the mouse, but the moment you stop
- * steering it, it eases back behind your direction of travel so you're never
- * fighting it while running. Gated on roughly-forward input — auto-rotating the
- * yaw while the player is strafing would silently curve their movement, since
- * movement is camera-relative.
+ * Keeps the camera behind the character so you can parkour without steering it.
+ * It targets the character's FACING (which itself chases the movement direction),
+ * so the framing is literally "looking at their back".
+ *
+ * The gating is the subtle part. Movement is camera-relative, so rotating the yaw
+ * while the player holds a direction changes what that direction means — auto-follow
+ * during a pure strafe would silently curve them into a spiral. It is therefore
+ * allowed only when there is no feedback loop to create:
+ *
+ *   - no movement input at all (post-ejection flight, falling) — nothing to curve
+ *   - forward-ish input, where turning the camera just keeps "forward" pointing
+ *     where they are already going
+ *   - wallrunning or dashing, where the state drives motion and input is ignored
+ *
+ * Pure strafe is deliberately excluded — that is also the bunnyhop stance, which
+ * depends on the player steering the mouse themselves.
  */
 function autoFollowCamera(dt: number) {
   if (T.camera.autoFollow <= 0) return;
   if (input.mouseIdle < T.camera.followDelay) return;
-  const speed = V.lenH(player.vel);
-  if (speed < T.camera.followMinSpeed) return;
-  if (input.intent.moveY <= 0.5 || Math.abs(input.intent.moveX) > 0.5) return;
+  if (V.lenH(player.vel) < T.camera.followMinSpeed) return;
 
-  const targetYaw = Math.atan2(-player.vel.x, -player.vel.z);
+  const mx = input.intent.moveX, my = input.intent.moveY;
+  const noInput = Math.abs(mx) < 0.1 && Math.abs(my) < 0.1;
+  const forwardish = my > 0.1 && Math.abs(mx) <= my + 0.35;
+  const stateDriven = player.state === 'wallrunning' || player.state === 'dashing';
+  if (!noInput && !forwardish && !stateDriven) return;
+
+  // Character forward is (sin facing, cos facing); camera forward is
+  // (-sin yaw, -cos yaw). Equating them gives yaw = facing + PI.
+  const targetYaw = player.facing + Math.PI;
   const k = 1 - Math.exp(-T.camera.autoFollow * dt);
   input.intent.yaw += V.shortestAngle(input.intent.yaw, targetYaw) * k;
   input.intent.pitch += (T.camera.pitchRest - input.intent.pitch)

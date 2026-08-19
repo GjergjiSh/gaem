@@ -152,9 +152,9 @@ export const T = {
     slideHeight: 0.7,     // camera drops toward the ground during a slide
     // Devil-May-Cry style orbit: you swing the camera around the character, and
     // when you stop steering it, it drifts back behind your direction of travel.
-    autoFollow: 2.4,      // how fast it drifts back
-    followDelay: 0.55,    // seconds of untouched mouse before drift starts
-    followMinSpeed: 4,    // and only once you're actually moving
+    autoFollow: 6.0,      // how fast it swings back behind you
+    followDelay: 0.12,    // seconds of untouched mouse before it takes over
+    followMinSpeed: 2,    // and only once you're actually moving
     pitchRest: 0.10,      // pitch it settles toward
     pitchFollow: 1.1,
     speedDistance: 3.0,   // extra arm length at hard cap — wider view when fast

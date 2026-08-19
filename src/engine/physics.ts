@@ -61,29 +61,62 @@ export class RapierWorld implements CollisionWorld {
     this.body.setTranslation(next, true);
     this.world.step();
 
-    const grounded = this.controller.computedGrounded();
-
     // Wall normals come from the controller, sign-corrected so they always oppose
     // the attempted motion. Rapier's normal orientation is not reliable enough to
     // trust raw when you need it for velocity projection.
     let hitWall = false;
     let wallNormal = V.v3();
+    let groundNormal = V.v3(0, 1, 0);
+    let walkable = false;
+    let steepSupport = false;
     const cos = Math.cos(T.character.maxSlopeAngle);
+
     for (let k = 0; k < this.controller.numComputedCollisions(); k++) {
       const c = this.controller.computedCollision(k);
       if (!c) continue;
       let n = V.v3(c.normal1.x, c.normal1.y, c.normal1.z);
       if (V.dot(n, disp) > 0) n = V.scale(n, -1);
-      if (n.y < cos) { hitWall = true; wallNormal = n; }
+      if (n.y < cos) {
+        hitWall = true;
+        wallNormal = n;
+        if (n.y > 0) steepSupport = true;   // sloped, but too steep to stand on
+      } else {
+        walkable = true;
+        groundNormal = n;
+      }
     }
 
-    // Ground normal from an explicit downward probe — deterministic sign, unlike
-    // fishing it out of the contact set.
-    let groundNormal = V.v3(0, 1, 0);
-    if (grounded) {
-      const n = this.rayNormal(next, V.v3(0, -1, 0), T.character.height);
-      if (n && n.y > 0) groundNormal = n;
+    /*
+     * Downward probe, sampled at the centre and four points around the capsule.
+     *
+     * A single centre ray is not enough: standing on a ledge edge it misses, and a
+     * resting character produces NO contacts at all (zero displacement means the
+     * controller computes no collisions), so there'd be nothing to judge by. The
+     * ring gives positive evidence of real ground in both cases.
+     */
+    const reach = T.character.height * 0.5 + T.character.stepHeight + 0.25;
+    const r = T.character.radius * 0.7;
+    const samples: [number, number][] = [[0, 0], [r, 0], [-r, 0], [0, r], [0, -r]];
+    for (const [ox, oz] of samples) {
+      const hit = this.rayHit(
+        V.v3(next.x + ox, next.y, next.z + oz), V.v3(0, -1, 0), reach,
+      );
+      if (!hit) continue;
+      if (hit.normal.y >= cos) { walkable = true; groundNormal = hit.normal; break; }
+      steepSupport = true;
     }
+
+    /*
+     * Rapier's computedGrounded() reports true against a steep bank — the slanted
+     * arena walls register a resting contact under the capsule. Taken at face value
+     * the solver treats you as standing, zeroes vertical velocity every tick, and you
+     * hover against the wall forever instead of sliding off.
+     *
+     * Being grounded therefore requires positive evidence of a walkable surface, not
+     * merely Rapier's say-so.
+     */
+    const grounded = this.controller.computedGrounded() && walkable;
+    void steepSupport;
 
     return { pos: next, grounded, groundNormal, hitWall, wallNormal };
   }
