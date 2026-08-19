@@ -3,8 +3,19 @@
 
 import { Pane } from 'tweakpane';
 import { T, DEFAULTS, TUNING_VERSION, inferRange, snapshot, applyProfile } from '../core/tuning';
+import { typingInAField } from '../engine/input';
 
 const STORE_KEY = `tuning.v${TUNING_VERSION}`;
+
+// Built-in game-feel profiles: JSON files in src/profiles/, bundled at build time.
+// Each is applied over code DEFAULTS, so a file only has to list what it changes —
+// a full snapshot (what "download json" produces) works identically.
+const PROFILE_MODULES = import.meta.glob('../profiles/*.json', { eager: true }) as Record<string, any>;
+const PROFILES: Record<string, any> = {};
+for (const [path, mod] of Object.entries(PROFILE_MODULES)) {
+  PROFILES[path.split('/').pop()!.replace(/\.json$/, '')] = (mod as any).default ?? mod;
+}
+const PROFILE_NAMES = Object.keys(PROFILES).sort();
 
 export class Panel {
   pane: Pane;
@@ -18,7 +29,9 @@ export class Panel {
    * and nothing happens. Storing just the overrides keeps code defaults live for
    * everything you haven't deliberately touched.
    */
-  private overrides: Record<string, number | boolean> = {};
+  private overrides: Record<string, number | boolean | string> = {};
+  /** Bound to the built-in profile dropdown. */
+  private sel = { profile: '' };
 
   constructor(private onChange: () => void) {
     this.pane = new Pane({ title: 'Tuning  ·  F1 hides' });
@@ -37,7 +50,9 @@ export class Panel {
       for (const key of Object.keys(obj)) {
         const path = `${group}/${key}`;
         const value = obj[key];
-        if (typeof value === 'boolean') {
+        if (typeof value === 'boolean' || typeof value === 'string') {
+          // Strings get no range: tweakpane turns a '#rrggbb' value into a colour
+          // picker on its own, which is exactly what crosshair/color wants.
           folder.addBinding(obj, key).on('change', () => { this.overrides[path] = obj[key]; });
         } else {
           const { min, max, step, doc } = inferRange(path, value);
@@ -51,6 +66,15 @@ export class Panel {
     }
 
     const io = this.pane.addFolder({ title: 'profiles', expanded: true });
+    // Built-in feels. The dropdown and the Alt+1–9 hotkeys both land in
+    // loadProfile(), which records the whole diff as overrides so the choice
+    // survives a reload.
+    if (PROFILE_NAMES.length) {
+      const opts = [{ text: '— pick —', value: '' },
+        ...PROFILE_NAMES.map((n, i) => ({ text: `alt+${i + 1} · ${n}`, value: n }))];
+      io.addBinding(this.sel, 'profile', { label: 'built-in', options: opts })
+        .on('change', (ev) => { if (ev.value) this.loadProfile(ev.value); });
+    }
     io.addButton({ title: 'download json' }).on('click', () => this.download());
     io.addButton({ title: 'copy to clipboard' }).on('click', () => {
       navigator.clipboard.writeText(JSON.stringify(snapshot(), null, 2));
@@ -58,6 +82,7 @@ export class Panel {
     io.addButton({ title: 'load from file' }).on('click', () => this.upload());
     io.addButton({ title: 'reset to code defaults' }).on('click', () => {
       this.overrides = {};
+      this.sel.profile = '';
       localStorage.removeItem(STORE_KEY);
       applyProfile(DEFAULTS);
       this.refresh();
@@ -70,8 +95,17 @@ export class Panel {
     this.pane.on('change', () => this.onChange());
 
     addEventListener('keydown', (e) => {
+      // Same reason the character ignores keys here: these hotkeys are on the
+      // window, so without the guard typing a value into a field would trigger them.
+      if (typingInAField(e)) return;
       if (e.code === 'F1') { e.preventDefault(); this.toggle(); }
       if (e.code === 'KeyT') this.toggleAB();
+      // ALT+digit, not plain digits: 1 and 2 are gun slots now.
+      const digit = e.altKey ? e.code.match(/^Digit([1-9])$/) : null;
+      if (digit) {
+        const name = PROFILE_NAMES[Number(digit[1]) - 1];
+        if (name) this.loadProfile(name);
+      }
     });
 
     // Survive page reloads with the last tune intact — Vite HMR reloads a lot.
@@ -110,11 +144,39 @@ export class Panel {
 
   refresh() { this.pane.refresh(); }
 
+  /** Apply a built-in profile over code defaults and persist it like slider moves. */
+  loadProfile(name: string) {
+    const data = PROFILES[name];
+    if (!data) return;
+    applyProfile(DEFAULTS);
+    applyProfile(data);
+    this.captureOverrides();
+    this.sel.profile = name;
+    this.refresh();
+    this.onChange();
+  }
+
+  /**
+   * Rebuild the override set from "how does T differ from DEFAULTS right now".
+   * Needed after wholesale loads (built-in profile, uploaded file), where the
+   * per-slider change tracking never fired — without it the loaded tune is
+   * silently lost (or half-merged with stale overrides) on the next reload.
+   */
+  private captureOverrides() {
+    this.overrides = {};
+    for (const group of Object.keys(T)) {
+      const obj = (T as any)[group], def = (DEFAULTS as any)[group];
+      for (const key of Object.keys(obj)) {
+        if (obj[key] !== def[key]) this.overrides[`${group}/${key}`] = obj[key];
+      }
+    }
+  }
+
   /**
    * Record a change made outside the panel (a hotkey, say) so it persists like any
    * slider move and the widget shows the new value instead of going stale.
    */
-  noteOverride(path: string, value: number | boolean) {
+  noteOverride(path: string, value: number | boolean | string) {
     this.overrides[path] = value;
     this.refresh();
   }
@@ -141,6 +203,8 @@ export class Panel {
       const f = inp.files?.[0];
       if (!f) return;
       applyProfile(JSON.parse(await f.text()));
+      this.captureOverrides();
+      this.sel.profile = '';
       this.refresh();
       this.onChange();
     };

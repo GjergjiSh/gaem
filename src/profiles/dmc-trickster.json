@@ -1,0 +1,63 @@
+{
+  "world": {
+    "gravityRise": 25,
+    "gravityFall": 38,
+    "maxFallSpeed": 38
+  },
+  "ground": {
+    "maxSpeed": 8.5,
+    "accel": 150,
+    "friction": 30,
+    "redirect": 16
+  },
+  "air": {
+    "accel": 120,
+    "control": 1,
+    "redirect": 16
+  },
+  "jump": {
+    "speed": 12.5,
+    "doubleJumpSpeed": 11.5,
+    "maxJumps": 3,
+    "coyoteTime": 0.12
+  },
+  "dash": {
+    "enabled": true,
+    "speed": 40,
+    "duration": 0.09,
+    "cooldown": 0.22,
+    "maxCharges": 3,
+    "refillOnGround": true,
+    "refillOnWall": true,
+    "gravityScale": 0,
+    "exitSpeedKeep": 0.32,
+    "preserveEntrySpeed": false,
+    "verticalAimFP": 1,
+    "refundJumpOnDash": true
+  },
+  "slide": {
+    "enabled": false
+  },
+  "wall": {
+    "upBoost": 4,
+    "gravityStart": 0.2,
+    "gravityEnd": 1.4,
+    "gravityRamp": 0.9,
+    "maxChain": 4
+  },
+  "bhop": {
+    "airWishSpeed": 0
+  },
+  "momentum": {
+    "overspeedDecay": 16,
+    "airDecayScale": 0.2,
+    "chainBonus": 1.04,
+    "hardCap": 30
+  },
+  "camera": {
+    "firstPerson": true,
+    "fovBase": 82,
+    "fovDash": 22,
+    "fovRate": 12
+  }
+}

@@ -703,3 +703,135 @@ game — though Ghostrunner is exactly that, so it's a proven direction rather t
 Keeping both means the choice can be made on feel with a real movement system underneath, instead of
 up front. The cost of keeping both is small: one branch in `render.ts` and a handful of
 mode-specific tuning values.
+
+---
+
+## 15. Combat layer — arsenal, thrusters, peripheral meters
+
+Combat finally lands on top of the movement system, built the way §2 promised: every
+verb is a tuning group, and `core/` still knows nothing about Three.js or Rapier.
+
+### Two guns, switched the way shooters actually switch
+
+`engine/weapon.ts` is an arsenal rather than a gun. A gun is a name plus a function
+returning its live stats, so adding a third is one tuning group and one entry in
+`GUNS` — no changes to the firing, reticle or HUD code.
+
+| | slot | cycle | pattern | per-projectile damage |
+|---|---|---|---|---|
+| rifle | **1** | 0.65 s bolt | one round, no spread | 1× |
+| shotgun | **2** | 0.90 s pump | 9 pellets, 0.075 rad cone | 0.45× |
+
+**Q swaps to the last gun you held**, CS/Doom style — that is the switch you use in a
+fight; the digits are for picking. Switching costs `weapon.switchTime` (0.28 s) and
+resets the fire cycle, so swapping is a commitment rather than a way to dodge a
+reload.
+
+Two things had to change underneath:
+
+- **Ballistics travel with the projectile**, not with the gun. Size, drop, range and
+  damage are copied onto the round at spawn, because the gun that fired it may be
+  swapped away — or retuned mid-flight — long before it lands.
+- **Damage is a multiplier on the shared head/body values**, not a per-gun table.
+  That is what lets a shotgun pellet do a fraction of a rifle round while `enemyHp`,
+  `headDamage` and `bodyDamage` stay one place to tune the fight.
+
+The pellet cone samples `sqrt(random())` on the radius. Sampling the radius uniformly
+clumps every pattern in the middle, and then the choke slider stops meaning anything.
+
+**`weapon` is now the shared block** (range, ADS, damage model, switch time) with
+`rifle` and `shotgun` holding their own ballistics. Saved tunes that named
+`weapon/projSpeed` and friends are silently dropped on load, which is the correct
+outcome — the path no longer exists.
+
+### Thrusters
+
+Hover jets on the jump button, with **their own resource**. Fuel is deliberately not
+stamina: hovering must never cost you a dash, or the two verbs fight over one pool.
+
+They are a held *modifier* inside `airborne`, not a state. Modelling them as a state
+would have meant duplicating all of `updateAirborne` inside it for no behavioural
+gain — you can still dash out of a hover, still catch a wall, still get shot.
+
+The shape of the verb is **hang and shoot, not fly**, and three numbers enforce it:
+
+- `maxRise` (3) caps the climb. At 7 a full tank climbed **15.1 m**, which is a
+  jetpack; at 3 it climbs **6.7 m** — enough to hold the air over the dais, not
+  enough to leave the fight.
+- `hoverDrag` bleeds horizontal speed, so arriving at 25 u/s parks you at the
+  8 u/s `hoverCap` inside half a second instead of sailing across the arena.
+- The tank is short (2.38 s) and **the ground refuels 2.5× faster than the air**, so
+  the loop is "hover, come down, go again" rather than waiting it out mid-air.
+
+Measured, flat floor, 120 Hz:
+
+| check | result |
+|---|---|
+| jets light after ground jump | no (1 jump left) |
+| jets light after double jump | yes, 6 ticks later |
+| climb over a full tank | 6.67 m, peak vy 2.90 (maxRise 3) |
+| entering a hover at 25 u/s | 8.24 → 7.85 u/s over 1 s |
+| refuel from empty, 1 s grounded | 43.2 |
+| refuel from empty, 1 s airborne | 17.3 |
+| jump apex / run terminal | 2.475 m / 11.000 — unchanged |
+
+**The ignition gate is the subtle part.** `thruster.requireEmptyJumps` means the jets
+only light once your jumps are spent: jump, double jump, keep holding. Without it a
+held jump burns the tank on every single hop, which is both a waste and a surprise.
+
+**Refuelling lives in `tickTimers`, not in the thruster.** `updateThruster` is only
+reachable from `updateAirborne`, and you are by definition not airborne while
+standing on the floor — so with the refuel inside the verb, the `groundRefuel` bonus
+was unreachable code. The burn stays with the verb; the tank bookkeeping runs
+unconditionally.
+
+Running the tank dry locks the jets out until `restartFuel` is back, so burning the
+last drop has a real cost.
+
+### The meters moved to the periphery, and stopped being circles
+
+Stamina, thruster fuel and the sword combo were rings **44 px** from the crosshair.
+That is inside the area you are actually looking at, so they read as clutter and
+compete with the target.
+
+They are now **outward-facing half-circles at 360 px**, bulging away from the centre:
+movement resources on the left (stamina outside, fuel on the inner arc), the sword
+on the right. Peripheral vision picks up a change in fill without ever asking you to
+look away from what you are shooting at. Radius, offset, stroke, sweep and spacing
+are all sliders (`T.meters`) — `sweep: 360` turns them back into full rings.
+
+A large offset on a small window would push them off screen entirely, so the tuned
+value is a request rather than a promise: it yields to the viewport.
+
+### Crosshair editor
+
+The reticle is data now (`T.crosshair`): dot size, tick length, thickness, gap,
+opacity, outline and colour. `length: 0` leaves the bare dot the game shipped with;
+`dotSize: 0` leaves a classic four-tick cross. The colour is a string, which
+Tweakpane turns into a colour picker on its own — the panel gained a string branch
+alongside its number and boolean ones.
+
+The ticks **bloom with the equipped gun's cone** (`crosshair.spreadScale`), so the
+shotgun's spread is something you can see rather than something you discover by
+missing. Readiness is shown by fading and shrinking the reticle rather than by
+recolouring it, because the colour belongs to the player now.
+
+### Infinite attacks
+
+`sword.infinite` holds the combo full and clears any cooldown. It exists so arc,
+reach and parry can be tuned without a cooldown getting in the way — the same reason
+`stamina/dashCost: 0` exists.
+
+### Key changes
+
+**The tuning panel's profile hotkeys moved to Alt+1–9.** Plain digits are gun slots
+now. Full keyboard: **1**/**2** guns · **Q** last gun · **M4** sword · hold **Space**
+with no jumps left for thrusters.
+
+### Still open
+
+- Enemies are still stationary dummies; hovering over them is currently free.
+- The shotgun has no falloff beyond the cone spreading out — no per-metre damage
+  curve, which is probably the next thing the fight needs.
+- No gun models or muzzle flashes: the arsenal is entirely reticle and HUD so far.
+- Input recorder / replay-under-a-different-tune, still not built.

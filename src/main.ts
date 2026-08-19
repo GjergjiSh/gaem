@@ -7,7 +7,13 @@ import { Input } from './engine/input';
 import { Renderer } from './engine/render';
 import { Panel } from './tools/panel';
 import { Hud } from './tools/hud';
-import { brushes, triggers, spawn, killY } from './levels';
+import { Editor } from './tools/editor';
+import { Enemies } from './engine/enemies';
+import { Weapon } from './engine/weapon';
+import { Projectiles } from './engine/projectiles';
+import { Sword } from './engine/sword';
+import { Rings } from './tools/rings';
+import { level } from './levels';
 
 const FIXED = 1 / 120;
 const MAX_STEPS = 8;
@@ -15,13 +21,34 @@ const MAX_STEPS = 8;
 await initPhysics();
 
 const canvas = document.getElementById('view') as HTMLCanvasElement;
-const world = new RapierWorld(brushes, spawn);
+const world = new RapierWorld(level.brushes, level.spawn);
 const input = new Input(canvas);
 const gfx = new Renderer(canvas);
 const hud = new Hud();
 const panel = new Panel(() => world.syncTuning());
 
-let player = makePlayer(spawn);
+let player = makePlayer(level.spawn);
+const enemies = new Enemies(gfx.scene);
+const rings = new Rings();
+let hitsTaken = 0;
+let laps = 0;
+const projectiles = new Projectiles(gfx, enemies, {
+  onEnemyHit: (r) => weapon.markerFor(r),
+  onPlayerHit: () => { hitsTaken++; rings.flash(); },
+});
+const weapon = new Weapon(input, gfx, enemies, projectiles);
+const sword = new Sword(input, gfx, enemies, projectiles, (r) => weapon.markerFor(r));
+
+const editor = new Editor(gfx, world, {
+  playerPos: () => player.pos,
+  // Exit / level switch invalidates the run, the ghost and the player's spot.
+  onWorldChanged: () => {
+    best = null;
+    bestPath = null;
+    acc = 0;
+    restart();
+  },
+});
 
 // ---------------------------------------------------------------- run timer + ghost
 
@@ -42,16 +69,24 @@ ghost.visible = false;
 gfx.scene.add(ghost);
 
 function restart() {
-  player = makePlayer(spawn);
-  input.intent.yaw = 0;
+  player = makePlayer(level.spawn);
+  input.intent.yaw = level.spawnYaw ?? 0;
   input.intent.pitch = 0;
   run = newRun();
+  laps = 0;
+  hitsTaken = 0;
+  enemies.rebuild();
+  projectiles.clear();
   ghost.visible = bestPath !== null;
 }
 
 function checkTriggers() {
-  for (const t of triggers) {
+  // The goal only counts after every checkpoint — a lap means a full lap, and
+  // spawning on top of the finish line can't instantly complete one.
+  const need = level.triggers.filter((t) => t.kind === 'checkpoint').length;
+  for (const t of level.triggers) {
     if (run.hit.has(t.name)) continue;
+    if (t.kind === 'goal' && run.hit.size < need) continue;
     const d = Math.hypot(player.pos.x - t.p[0], player.pos.y - t.p[1], player.pos.z - t.p[2]);
     if (d > t.r) continue;
     run.hit.add(t.name);
@@ -61,11 +96,15 @@ function checkTriggers() {
 }
 
 function finish() {
-  run.active = false;
   if (best === null || run.time < best) {
     best = run.time;
     bestPath = run.path.slice();
   }
+  // Lap loop: the course re-arms immediately — fresh (re-jittered) enemies, a
+  // clean set of splits, and the next lap's clock starts as you keep moving.
+  laps++;
+  run = newRun();
+  enemies.rebuild();
 }
 
 // ---------------------------------------------------------------- camera drift
@@ -119,6 +158,16 @@ let acc = 0;
 function frame(now: number) {
   const raw = Math.min((now - last) / 1000, 0.25);
   last = now;
+
+  // Editor mode: the sim is frozen, the editor owns the camera, we only draw.
+  if (editor.active) {
+    editor.update();
+    gfx.renderOnly();
+    acc = 0;
+    requestAnimationFrame(frame);
+    return;
+  }
+
   input.sample(raw);
 
   if (input.restart) { input.restart = false; restart(); }
@@ -154,7 +203,7 @@ function frame(now: number) {
       checkTriggers();
     }
 
-    if (player.pos.y < killY) { restart(); break; }
+    if (player.pos.y < level.killY) { restart(); break; }
 
     acc -= FIXED;
     steps++;
@@ -162,6 +211,18 @@ function frame(now: number) {
   if (steps === MAX_STEPS) acc = 0; // don't let a stall snowball
 
   autoFollowCamera(raw);
+  weapon.update(raw);
+  sword.update(raw, player);
+  enemies.update(raw, player.pos, projectiles, gfx.brushMeshes);
+  projectiles.update(raw, player.pos);
+  rings.update(raw, {
+    stamina: player.stamina / T.stamina.max,
+    fuel: player.fuel / T.thruster.fuelMax,
+    thrusting: player.thrusting,
+    charges: sword.charges,
+    maxCharges: T.sword.combo,
+    cooldown: sword.cooldownFrac,
+  });
   gfx.update(player, input.intent, raw, world);
 
   if (bestPath) {
@@ -172,7 +233,8 @@ function frame(now: number) {
   }
 
   hud.update(player, { run: run.time, splits: run.splits, best }, panel.abLabel, input.lookMode,
-    T.camera.firstPerson ? 'first person' : 'third person');
+    T.camera.firstPerson ? 'first person' : 'third person',
+    `${weapon.hudLine()}   lap ${laps} · hits ${hitsTaken}`);
   requestAnimationFrame(frame);
 }
 
@@ -186,6 +248,13 @@ requestAnimationFrame(frame);
   world,
   input,
   gfx,
+  panel,
+  editor,
+  level,
+  enemies,
+  weapon,
+  sword,
+  projectiles,
   restart,
   autoFollowCamera,
   /** Teleport for tests — drops the player at a spot with zero velocity. */

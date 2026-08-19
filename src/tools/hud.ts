@@ -37,6 +37,7 @@ export class Hud {
     ab: string,
     lookMode = '',
     viewMode = '',
+    combat = '',
   ) {
     const h = V.lenH(p.vel);
     const cap = currentCap(p);
@@ -55,16 +56,20 @@ export class Hud {
       `coyote   ${bar(p.coyoteJump, T.jump.coyoteTime)}  buf ${bar(p.bufJump, T.jump.bufferTime)}`,
       `slidecoy ${bar(p.slideCoyote, T.slide.coyoteTime)}${p.slideCoyote > 0 ? '  LEDGE TECH ARMED' : ''}`,
       `dash cd  ${bar(T.dash.cooldown - p.dashCooldown, T.dash.cooldown)}`,
+      `fuel     ${bar(p.fuel, T.thruster.fuelMax)}${p.thrusting ? '  THRUST' : p.fuelDry ? '  DRY' : ''}`,
       ``,
       `time     ${timing.run.toFixed(2)}s${timing.best !== null ? `   best ${timing.best.toFixed(2)}s` : ''}`,
+      ...(combat ? [combat] : []),
       ...timing.splits.map((s) => `  ${s}`),
       ``,
       `WASD move · Space jump · Shift dash · Ctrl slide`,
+      `hold Space with no jumps left = thrusters (hover + shoot)`,
       `air into a wall = wallrun (auto-runs) · Space = eject`,
+      `1 rifle · 2 shotgun · Q last gun · M4 sword`,
       `view     ${viewMode}   [V to switch]`,
       `camera: ${lookMode}`,
       `it drifts back behind you when you let go`,
-      `R restart · F1 panel · T A/B${ab ? `  [${ab}]` : ''}`,
+      `R restart · F1 panel · F2 editor · T A/B${ab ? `  [${ab}]` : ''}`,
     ].join('\n');
 
     this.history.push(h);

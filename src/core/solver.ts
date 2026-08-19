@@ -37,6 +37,12 @@ export function makePlayer(spawn: V3): Player {
     lastWallX: 0,
     lastWallZ: 0,
     wallChain: 0,
+    sprinting: false,
+    stamina: T.stamina.max,
+    thrusting: false,
+    fuel: T.thruster.fuelMax,
+    fuelIdle: 0,
+    fuelDry: false,
     chain: 0,
     chainTimer: 0,
     alive: true,
@@ -58,7 +64,8 @@ export function currentCap(p: Player): number {
   const chain = Math.min(T.momentum.maxChainBonus, Math.pow(T.momentum.chainBonus, p.chain));
   const state = p.state === 'sliding' ? T.slide.capBonus
     : p.state === 'wallrunning' ? T.wall.capBonus
-      : 1;
+      : p.state === 'grounded' && p.sprinting ? T.sprint.multiplier
+        : 1;
   return T.ground.maxSpeed * chain * state;
 }
 
@@ -119,6 +126,9 @@ function applyFriction(vel: V3, friction: number, dt: number): V3 {
 
 /** The soft cap. Overspeed bleeds off rather than being clamped. */
 function bleedOverspeed(p: Player, dt: number) {
+  // The thruster runs its own drag toward hoverCap; letting the soft cap bleed on
+  // top would double up and make the hover feel sticky.
+  if (p.thrusting) return;
   const cap = currentCap(p);
   const h = V.lenH(p.vel);
   if (h <= cap) return;
@@ -187,6 +197,8 @@ function doWallJump(p: Player) {
 }
 
 function canDash(p: Player) {
+  if (!T.dash.enabled) return false;
+  if (p.stamina < T.stamina.dashCost) return false;
   return p.dashCharges > 0 && p.dashCooldown <= 0;
 }
 
@@ -204,6 +216,7 @@ function doDash(p: Player, i: Intent) {
   p.dashTime = T.dash.duration;
   p.dashEntrySpeed = V.lenH(p.vel);
   p.dashCharges--;
+  p.stamina = Math.max(0, p.stamina - T.stamina.dashCost);
   p.dashCooldown = T.dash.cooldown;
   p.bufDash = 0;
   p.coyoteDash = 0;
@@ -213,6 +226,7 @@ function doDash(p: Player, i: Intent) {
 }
 
 function canSlide(p: Player) {
+  if (!T.slide.enabled) return false;
   // Sliding is a ground move. Without the explicit grounded test you can crouch
   // while stuck to a wall, which looks and reads wrong.
   if (!p.grounded || p.state === 'wallrunning') return false;
@@ -241,6 +255,7 @@ function endSlide(p: Player) {
  * than straight into it — hitting a wall head-on should bonk, not stick.
  */
 function attachWall(p: Player, rawNormal: V3): boolean {
+  if (!T.wall.enabled) return false;
   if (Math.abs(rawNormal.y) > Math.sin(T.wall.maxAngle)) return false;
 
   // Hard stop on endless wall travel. Cleared only by touching the ground, so a
@@ -339,6 +354,50 @@ function updateWallrunning(p: Player, i: Intent, wish: V3, col: CollisionWorld, 
   if (V.lenH(p.vel) < T.wall.minSpeed) detachWall(p);
 }
 
+// ---------------------------------------------------------------- thrusters
+
+/**
+ * Hover jets, a held modifier rather than a state — you can still dash out of a
+ * hover, still catch a wall, still be shot at. Modelling it as a state would have
+ * meant duplicating all of updateAirborne inside it for no behavioural gain.
+ *
+ * The shape of the verb is "hang and shoot", not "fly": `maxRise` caps the climb,
+ * `hoverDrag` bleeds horizontal speed so a hover parks you rather than launching
+ * you across the arena, and the tank is short. Running it dry locks the jets out
+ * until `restartFuel` is back, so there is a real cost to burning the last drop.
+ *
+ * Returns the gravity scale to apply this tick.
+ */
+function updateThruster(p: Player, i: Intent, wish: V3, dt: number): number {
+  const t = T.thruster;
+  const wants = t.enabled && i.thrust.held && !p.grounded
+    // The gate that stops a held jump from lighting the jets on every hop.
+    && (!t.requireEmptyJumps || p.jumpsLeft <= 0);
+
+  p.thrusting = wants && !p.fuelDry && p.fuel > 0;
+  if (!p.thrusting) return 1;
+
+  p.fuelIdle = 0;
+  p.fuel = Math.max(0, p.fuel - t.burnRate * dt);
+  if (p.fuel <= 0) p.fuelDry = true;
+
+  // Climb, capped. Thrust only pushes until maxRise, so the jets can arrest a
+  // fall instantly but can never turn into an escalator.
+  if (p.vel.y < t.maxRise) {
+    p.vel.y = Math.min(t.maxRise, p.vel.y + t.thrust * dt);
+  }
+
+  // Hover steering: its own small accel and cap, plus drag toward a standstill.
+  // The drag is what makes it a hover — without it you keep whatever speed you
+  // arrived with and drift out of the fight.
+  p.vel = accelerate(p.vel, wish, t.hoverAccel, t.hoverCap, dt);
+  const h = V.lenH(p.vel);
+  if (h > 1e-4) {
+    p.vel = V.setLenH(p.vel, Math.max(0, h - t.hoverDrag * h * dt));
+  }
+  return t.gravityScale;
+}
+
 // ---------------------------------------------------------------- states
 
 function gravity(p: Player, dt: number, scale = 1) {
@@ -361,7 +420,18 @@ function updateGrounded(p: Player, i: Intent, wish: V3, dt: number) {
 }
 
 function updateAirborne(p: Player, i: Intent, wish: V3, col: CollisionWorld, dt: number) {
-  gravity(p, dt);
+  // Thrusters run before gravity because they change how much of it applies.
+  const gScale = updateThruster(p, i, wish, dt);
+  gravity(p, dt, gScale);
+
+  // While the jets are burning the thruster owns horizontal control — running the
+  // air accel on top would let you out-accelerate hoverCap and turn the hover into
+  // free flight, which is exactly what the cap exists to prevent.
+  if (p.thrusting) {
+    if (p.bufDash > 0 && canDash(p)) return doDash(p, i);
+    if (!p.grounded && tryWallAttach(p, col)) return;
+    return;
+  }
 
   // Pure strafe (A or D with no forward input) is the bunnyhop stance: skip redirect
   // and use the classic small-wish-speed accel so turning the mouse gains speed.
@@ -467,7 +537,27 @@ function tickTimers(p: Player, dt: number) {
   p.wallCooldown = d(p.wallCooldown);
   p.chainTimer = d(p.chainTimer);
   if (p.chainTimer <= 0) p.chain = 0;
+  p.stamina = Math.min(T.stamina.max, p.stamina + T.stamina.regen * dt);
   p.stateTime += dt;
+
+  // Thruster tank. Refuelling belongs here rather than in updateThruster because
+  // it has to happen in every state — most of all on the ground, where the
+  // groundRefuel bonus makes "land, top up, go again" the loop instead of
+  // hanging in the air waiting. Landing is the reward, not patience.
+  const th = T.thruster;
+  if (p.thrusting) {
+    p.fuelIdle = 0;
+  } else {
+    p.fuelIdle += dt;
+    if (p.fuelIdle >= th.refuelDelay) {
+      const rate = th.refuelRate * (p.grounded ? th.groundRefuel : 1);
+      p.fuel = Math.min(th.fuelMax, p.fuel + rate * dt);
+    }
+  }
+  if (p.fuelDry && p.fuel >= th.restartFuel) p.fuelDry = false;
+  // Cleared every tick; only updateAirborne re-arms it, so no other state can
+  // leave the HUD showing a burn that isn't happening.
+  p.thrusting = false;
 }
 
 /** One fixed physics tick. */
@@ -480,6 +570,9 @@ export function step(p: Player, i: Intent, col: CollisionWorld, dt: number) {
 
   const wish = wishDir(i);
   const wasGrounded = p.grounded;
+
+  // Sprint is a held modifier, not a state — the cap change happens in currentCap().
+  p.sprinting = T.sprint.enabled && i.dash.held && i.moveY > T.sprint.minForward;
 
   // Run the new state's update in the same tick when a transition fires, so a dash
   // or jump takes effect on the frame you pressed it instead of the one after.
@@ -496,11 +589,6 @@ export function step(p: Player, i: Intent, col: CollisionWorld, dt: number) {
     }
     guard++;
   } while (p.state !== before && guard < 3);
-
-  // Variable jump height: cutting the button early clips upward velocity.
-  if (!i.jump.held && p.vel.y > 0 && p.state === 'airborne') {
-    p.vel.y *= Math.pow(T.jump.cutMultiplier, dt * 60);
-  }
 
   if (p.state !== 'dashing') bleedOverspeed(p, dt);
 
@@ -542,6 +630,14 @@ export function step(p: Player, i: Intent, col: CollisionWorld, dt: number) {
     if (p.state === 'grounded') enter(p, 'airborne');
     if (p.state === 'sliding') {
       p.slideCoyote = T.slide.coyoteTime;
+      // Ghostrunner ledge boost: a slide carried off a ledge flings you forward
+      // and drops you hard. The coyote jump above converts the fling into a
+      // launch (the "Super"); miss the window and you eat the drop instead.
+      if (T.slide.ledgeBoost > 0) {
+        p.vel = V.setLenH(p.vel, Math.min(T.momentum.hardCap, V.lenH(p.vel) + T.slide.ledgeBoost));
+        registerTech(p);
+      }
+      if (T.slide.ledgeDrop > 0) p.vel.y = Math.min(p.vel.y, -T.slide.ledgeDrop);
       if (!i.slide.held) endSlide(p);
     }
   }

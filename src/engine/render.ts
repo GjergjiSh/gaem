@@ -3,13 +3,36 @@ import { T } from '../core/tuning';
 import * as V from '../core/vec';
 import { currentCap } from '../core/solver';
 import type { CollisionWorld, Intent, Player } from '../core/types';
-import { brushes, triggers } from '../levels';
+import { level } from '../levels';
+
+/** Unit square pyramid: 1x1 base centred at y=-0.5, apex at (0, 0.5, 0). */
+function pyramidGeometry(): THREE.BufferGeometry {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute([
+    -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0, 0.5, 0,
+  ], 3));
+  g.setIndex([1, 0, 4, 2, 1, 4, 3, 2, 4, 0, 3, 4, 0, 1, 2, 0, 2, 3]);
+  // Non-indexed so each face gets its own flat normal instead of smoothed corners.
+  const flat = g.toNonIndexed();
+  flat.computeVertexNormals();
+  return flat;
+}
+
+const UNIT_BOX = new THREE.BoxGeometry(1, 1, 1);
+const UNIT_PYRAMID = pyramidGeometry();
+const BOX_EDGES = new THREE.EdgesGeometry(UNIT_BOX);
+const PYRAMID_EDGES = new THREE.EdgesGeometry(UNIT_PYRAMID);
 
 export class Renderer {
   scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(T.camera.fovBase, 1, 0.1, 600);
   renderer: THREE.WebGLRenderer;
   player: THREE.Group;
+  /** One mesh per brush, index-aligned with level.brushes — the editor's handle. */
+  brushMeshes: THREE.Mesh[] = [];
+  /** 0..1 scope amount, written by the weapon each frame. Pulls FOV in. */
+  adsT = 0;
+  private levelGroup = new THREE.Group();
 
   private camPos = new THREE.Vector3(0, 5, 10);
   private camTarget = new THREE.Vector3();
@@ -31,37 +54,8 @@ export class Renderer {
     sun.position.set(30, 60, 20);
     this.scene.add(sun);
 
-    for (const b of brushes) {
-      const m = new THREE.Mesh(
-        new THREE.BoxGeometry(b.s[0], b.s[1], b.s[2]),
-        new THREE.MeshLambertMaterial({ color: b.c ?? 0x6b7280 }),
-      );
-      m.position.set(b.p[0], b.p[1], b.p[2]);
-      if (b.q) m.quaternion.set(b.q[0], b.q[1], b.q[2], b.q[3]);
-      else if (b.r) m.rotation.set(b.r[0], b.r[1], b.r[2]);
-      this.scene.add(m);
-
-      const edges = new THREE.LineSegments(
-        new THREE.EdgesGeometry(m.geometry),
-        new THREE.LineBasicMaterial({ color: 0x000000, opacity: 0.35, transparent: true }),
-      );
-      edges.position.copy(m.position);
-      edges.quaternion.copy(m.quaternion);
-      this.scene.add(edges);
-    }
-
-    for (const t of triggers) {
-      const ring = new THREE.Mesh(
-        new THREE.TorusGeometry(t.r * 0.5, 0.08, 8, 32),
-        new THREE.MeshBasicMaterial({
-          color: t.kind === 'goal' ? 0x22c55e : 0xfbbf24,
-          transparent: true, opacity: 0.5,
-        }),
-      );
-      ring.position.set(t.p[0], t.p[1], t.p[2]);
-      ring.rotation.x = Math.PI / 2;
-      this.scene.add(ring);
-    }
+    this.scene.add(this.levelGroup);
+    this.buildLevel();
 
     // Player: capsule plus a nose so facing direction is readable.
     this.player = new THREE.Group();
@@ -80,6 +74,59 @@ export class Renderer {
 
     this.resize();
     addEventListener('resize', () => this.resize());
+  }
+
+  /**
+   * (Re)build all level visuals from the live level data. Meshes use UNIT
+   * geometry with mesh.scale = brush size, so an editor gizmo dragging
+   * position/rotation/scale IS the brush transform — no conversion layer.
+   */
+  buildLevel() {
+    for (const child of [...this.levelGroup.children]) {
+      this.levelGroup.remove(child);
+      const m = child as THREE.Mesh;
+      if (m.material) (m.material as THREE.Material).dispose();
+    }
+    this.brushMeshes = [];
+
+    for (let i = 0; i < level.brushes.length; i++) {
+      const b = level.brushes[i];
+      const pyramid = b.kind === 'pyramid';
+      const m = new THREE.Mesh(
+        pyramid ? UNIT_PYRAMID : UNIT_BOX,
+        new THREE.MeshLambertMaterial({ color: b.c ?? 0x6b7280 }),
+      );
+      m.position.set(b.p[0], b.p[1], b.p[2]);
+      if (b.q) m.quaternion.set(b.q[0], b.q[1], b.q[2], b.q[3]);
+      else if (b.r) m.rotation.set(b.r[0], b.r[1], b.r[2]);
+      m.scale.set(b.s[0], b.s[1], b.s[2]);
+      m.userData.brushIndex = i;
+      // Edge lines ride along as a child, so every gizmo drag moves them too.
+      m.add(new THREE.LineSegments(
+        pyramid ? PYRAMID_EDGES : BOX_EDGES,
+        new THREE.LineBasicMaterial({ color: 0x000000, opacity: 0.35, transparent: true }),
+      ));
+      this.levelGroup.add(m);
+      this.brushMeshes.push(m);
+    }
+
+    for (const t of level.triggers) {
+      const ring = new THREE.Mesh(
+        new THREE.TorusGeometry(t.r * 0.5, 0.08, 8, 32),
+        new THREE.MeshBasicMaterial({
+          color: t.kind === 'goal' ? 0x22c55e : 0xfbbf24,
+          transparent: true, opacity: 0.5,
+        }),
+      );
+      ring.position.set(t.p[0], t.p[1], t.p[2]);
+      ring.rotation.x = Math.PI / 2;
+      this.levelGroup.add(ring);
+    }
+  }
+
+  /** Draw the scene with the camera exactly as-is — the editor's render path. */
+  renderOnly() {
+    this.renderer.render(this.scene, this.camera);
   }
 
   resize() {
@@ -121,10 +168,22 @@ export class Renderer {
 
     // Third person shows speed by extending the arm; first person has no arm, so
     // FOV and head bob carry that job alone.
+    // The dash FOV punch is a FORWARD cue: scale it by how camera-forward the dash
+    // actually is, or a sideways blink reads as a lunge you never made.
+    let dashFov = 0;
+    if (p.state === 'dashing') {
+      const dh = Math.hypot(p.dashDir.x, p.dashDir.z);
+      const dot = dh > 1e-4
+        ? (p.dashDir.x * -Math.sin(yaw) + p.dashDir.z * -Math.cos(yaw)) / dh
+        : 0;
+      dashFov = T.camera.fovDash * V.lerp(1, Math.max(0, dot), T.camera.fovDashAim);
+    }
     const wantFov = T.camera.fovBase
-      + (p.state === 'dashing' ? T.camera.fovDash : 0)
+      + dashFov
       + (p.state === 'wallrunning' ? T.camera.fovDash * 0.5 : 0)
-      + over * T.camera.fovSpeed;
+      + (p.sprinting ? T.sprint.fovAdd : 0)
+      + over * T.camera.fovSpeed
+      + T.weapon.adsFov * this.adsT;
     this.fov = V.damp(this.fov, wantFov, T.camera.fovRate, dt);
     if (Math.abs(this.camera.fov - this.fov) > 0.01) {
       this.camera.fov = this.fov;

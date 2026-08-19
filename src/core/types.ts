@@ -13,6 +13,7 @@ export interface Intent {
   jump: Btn;
   dash: Btn;
   slide: Btn;
+  thrust: Btn;     // hover jets; shares the jump key, see engine/input.ts
 }
 
 export interface MoveResult {
@@ -45,6 +46,15 @@ export interface Player {
   stateTime: number;
   grounded: boolean;
   groundNormal: V3;
+  sprinting: boolean; // dash button doubles as sprint when sprint.enabled
+  stamina: number;    // dashing spends this; regenerates over time
+
+  // Thrusters. Their own resource, deliberately separate from stamina: hovering
+  // must never cost you a dash, or the two verbs fight over one pool.
+  thrusting: boolean; // jets burning this tick
+  fuel: number;
+  fuelIdle: number;   // seconds since the jets last burned — gates the refuel
+  fuelDry: boolean;   // ran the tank empty; locked out until restartFuel is back
 
   jumpsLeft: number;
   dashCharges: number;

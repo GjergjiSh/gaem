@@ -1,0 +1,65 @@
+{
+  "world": {
+    "gravityRise": 32,
+    "gravityFall": 58
+  },
+  "ground": {
+    "maxSpeed": 5.4,
+    "accel": 95,
+    "friction": 30,
+    "redirect": 16,
+    "turnAssist": 2.6
+  },
+  "sprint": {
+    "enabled": true,
+    "multiplier": 1.32,
+    "fovAdd": 7
+  },
+  "air": {
+    "accel": 22,
+    "control": 1,
+    "redirect": 2.5
+  },
+  "jump": {
+    "speed": 8.8,
+    "maxJumps": 1,
+    "coyoteTime": 0.08,
+    "bufferTime": 0.1,
+    "slideExitBonus": 1.04
+  },
+  "dash": {
+    "enabled": false
+  },
+  "slide": {
+    "boost": 3.2,
+    "friction": 5.5,
+    "minSpeed": 6,
+    "capBonus": 1.7,
+    "steerRate": 1.4,
+    "minTime": 0.35,
+    "cooldown": 0.35,
+    "coyoteTime": 0.08
+  },
+  "wall": {
+    "enabled": false
+  },
+  "bhop": {
+    "airWishSpeed": 0,
+    "window": 0.06
+  },
+  "momentum": {
+    "overspeedDecay": 22,
+    "airDecayScale": 0.5,
+    "chainBonus": 1,
+    "maxChainBonus": 1,
+    "chainWindow": 0.6,
+    "hardCap": 18
+  },
+  "camera": {
+    "firstPerson": true,
+    "fovBase": 80,
+    "fovSpeed": 4,
+    "bobAmount": 0.05,
+    "bobRate": 1.5
+  }
+}

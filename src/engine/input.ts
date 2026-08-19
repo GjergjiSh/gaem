@@ -10,7 +10,35 @@ const KEYS = {
   jump: ['Space'],
   dash: ['ShiftLeft', 'ShiftRight'],
   slide: ['ControlLeft', 'KeyC'],
+  // Same key as jump on purpose: jump, double jump, keep holding and the jets
+  // light. The solver gates it on having no jumps left (thruster.requireEmptyJumps),
+  // so a held hop can't quietly burn the tank.
+  thrust: ['Space'],
 };
+
+/** Gun slots, in arsenal order. Slot N is Digit(N+1). */
+const SLOT_CODES = ['Digit1', 'Digit2'];
+
+// Every code the game consumes. Each of these gets preventDefault so the browser
+// never treats a gameplay chord as a shortcut — slide (Ctrl) + strafe (D) is
+// literally Ctrl+D, the "bookmark this page" accelerator, and Ctrl+S is "save
+// page". (Ctrl+W closes the tab and CANNOT be blocked from a normal tab — the
+// beforeunload guard below turns that into a confirm dialog instead.)
+const GAME_CODES = new Set([
+  ...Object.values(KEYS).flat(),
+  ...SLOT_CODES,
+  'KeyR', 'KeyV', 'KeyQ',
+]);
+
+/**
+ * The tuning panel has real text fields. Its key events bubble to the window
+ * listeners below, so without this typing a value would also drive the character.
+ */
+export function typingInAField(e: KeyboardEvent): boolean {
+  const el = e.target as HTMLElement | null;
+  if (!el) return false;
+  return el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName);
+}
 
 export class Input {
   intent: Intent = {
@@ -18,10 +46,23 @@ export class Input {
     jump: { pressed: false, held: false },
     dash: { pressed: false, held: false },
     slide: { pressed: false, held: false },
+    thrust: { pressed: false, held: false },
   };
 
   /** Seconds since the mouse last moved — drives the camera drift-behind. */
   mouseIdle = 0;
+
+  /** Fire edge, consumed by the weapon. Only set while pointer-locked, so the
+   *  click that CAPTURES the pointer never also fires a shot. */
+  shootPressed = false;
+  /** Right mouse held — ADS. The "scope" is an FOV pull, handled by the weapon. */
+  adsHeld = false;
+  /** Mouse 4 (side button) edge — sword swing, consumed by the sword. */
+  swingPressed = false;
+  /** Gun slot requested this frame (0-based), or null. Consumed by the weapon. */
+  weaponSlot: number | null = null;
+  /** Q edge — swap to the previously held gun, CS/Doom style. */
+  weaponSwap = false;
 
   restart = false;
   toggleView = false;
@@ -35,15 +76,46 @@ export class Input {
 
   constructor(private canvas: HTMLElement) {
     addEventListener('keydown', (e) => {
+      if (typingInAField(e)) return;
+      // BEFORE the repeat check: a held Ctrl+D fires repeat keydowns, and each
+      // one would re-trigger the bookmark dialog if left unprevented.
+      if (GAME_CODES.has(e.code)) e.preventDefault();
       if (e.repeat) return;
       this.down.add(e.code);
       if (e.code === 'KeyR') this.restart = true;
       if (e.code === 'KeyV') this.toggleView = true;
-      if (KEYS.jump.includes(e.code)) { this.intent.jump.pressed = true; e.preventDefault(); }
+      if (e.code === 'KeyQ') this.weaponSwap = true;
+      const slot = SLOT_CODES.indexOf(e.code);
+      if (slot >= 0) this.weaponSlot = slot;
+      if (KEYS.jump.includes(e.code)) this.intent.jump.pressed = true;
       if (KEYS.dash.includes(e.code)) this.intent.dash.pressed = true;
       if (KEYS.slide.includes(e.code)) this.intent.slide.pressed = true;
     });
     addEventListener('keyup', (e) => this.down.delete(e.code));
+
+    // A keyup is only delivered to the focused window. Alt-tab, click another app,
+    // or hit any OS/browser chord while holding W and that keyup lands somewhere
+    // else — the key stays "down" forever and the character runs on its own with
+    // nothing on the keyboard to stop it. Focus loss is the only signal we get, so
+    // treat it as every key being released.
+    addEventListener('blur', () => this.releaseAll());
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) this.releaseAll();
+    });
+
+    // Ctrl+W (slide + forward!) closes the tab and JS cannot cancel it. While the
+    // pointer is locked — i.e. actually playing — arm a leave-confirmation so a
+    // mid-run Ctrl+W asks instead of instantly killing the session.
+    addEventListener('beforeunload', (e) => {
+      if (this.locked) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    });
+
+    // Where available (Chromium, requires fullscreen to take effect), keyboard
+    // lock captures even Ctrl+W/Ctrl+T for the game. Harmless no-op elsewhere.
+    (navigator as any).keyboard?.lock?.([...GAME_CODES]).catch(() => {});
 
     // Two ways to look, because Pointer Lock is not always available: an embedded
     // frame has to be granted `allow="pointer-lock"`, and without it every request
@@ -51,6 +123,9 @@ export class Input {
     // works. Never depend on the lock alone — a silent rejection leaves the camera
     // completely dead, with nothing on screen to explain why.
     canvas.addEventListener('click', () => {
+      // The editor owns the mouse while active: clicks select brushes there,
+      // so grabbing pointer lock would fight it.
+      if (document.body.classList.contains('editing')) return;
       if (document.pointerLockElement === canvas) return;
       try {
         const r = canvas.requestPointerLock() as unknown as Promise<void> | undefined;
@@ -64,12 +139,28 @@ export class Input {
     });
 
     canvas.addEventListener('mousedown', (e) => {
-      if (e.button !== 0 || this.locked) return;
+      if (e.button === 2) { this.adsHeld = true; return; }
+      // Side buttons swing the sword — and must not trigger browser history nav.
+      if (e.button === 3 || e.button === 4) {
+        e.preventDefault();
+        this.swingPressed = true;
+        return;
+      }
+      if (e.button !== 0) return;
+      if (this.locked) { this.shootPressed = true; return; }
       this.dragging = true;
       this.lastX = e.clientX;
       this.lastY = e.clientY;
     });
-    addEventListener('mouseup', () => { this.dragging = false; });
+    addEventListener('mouseup', (e) => {
+      if (e.button === 2) this.adsHeld = false;
+      if (e.button === 3 || e.button === 4) e.preventDefault();
+      this.dragging = false;
+    });
+    // Chromium fires history navigation from side buttons on mouseup/auxclick.
+    canvas.addEventListener('auxclick', (e) => {
+      if (e.button === 3 || e.button === 4) e.preventDefault();
+    });
     addEventListener('mouseleave', () => { this.dragging = false; });
 
     addEventListener('mousemove', (e) => {
@@ -83,10 +174,12 @@ export class Input {
         return;
       }
       this.mouseIdle = 0;
-      this.intent.yaw -= dx * T.camera.sensitivity;
+      // Scoped aim slows the mouse — precision without a separate scope state.
+      const sens = T.camera.sensitivity * (this.adsHeld ? T.weapon.adsSensScale : 1);
+      this.intent.yaw -= dx * sens;
       const lo = T.camera.firstPerson ? T.camera.pitchMinFP : T.camera.pitchMin;
       const hi = T.camera.firstPerson ? T.camera.pitchMaxFP : T.camera.pitchMax;
-      this.intent.pitch = clamp(this.intent.pitch - dy * T.camera.sensitivity, lo, hi);
+      this.intent.pitch = clamp(this.intent.pitch - dy * sens, lo, hi);
     });
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   }
@@ -106,13 +199,35 @@ export class Input {
     this.intent.jump.held = on(KEYS.jump);
     this.intent.dash.held = on(KEYS.dash);
     this.intent.slide.held = on(KEYS.slide);
+    this.intent.thrust.held = on(KEYS.thrust);
   }
 
+
+  /**
+   * Drop all held input. Used when focus leaves the page, where the matching
+   * keyups will never arrive.
+   */
+  releaseAll() {
+    this.down.clear();
+    this.dragging = false;
+    this.shootPressed = false;
+    this.adsHeld = false;
+    this.swingPressed = false;
+    this.weaponSlot = null;
+    this.weaponSwap = false;
+    this.intent.moveX = 0;
+    this.intent.moveY = 0;
+    for (const b of [this.intent.jump, this.intent.dash, this.intent.slide, this.intent.thrust]) {
+      b.pressed = false;
+      b.held = false;
+    }
+  }
 
   /** Edge flags must survive exactly one fixed tick, then be consumed. */
   consumeEdges() {
     this.intent.jump.pressed = false;
     this.intent.dash.pressed = false;
     this.intent.slide.pressed = false;
+    this.intent.thrust.pressed = false;
   }
 }

@@ -1,0 +1,176 @@
+// Dummy targets: box-people with distinct head / body / limb hitboxes, standing
+// at positions defined in the level data (with a random jitter per respawn, so
+// every lap the targets sit somewhere slightly different). They shoot slow
+// projectiles at the player when in range and sight, but don't move or block.
+// Head is one tap, everything else takes two (see T.weapon).
+
+import * as THREE from 'three';
+import { T } from '../core/tuning';
+import { level } from '../levels';
+import type { V3 } from '../core/vec';
+import type { Projectiles } from './projectiles';
+
+const BODY_COLOR = 0xb45309;
+const HEAD_COLOR = 0xfbbf24;
+const DEAD_COLOR = 0x4b5563;
+const FLASH = 0xff3333;
+
+interface Dummy {
+  root: THREE.Group;
+  parts: THREE.Mesh[];
+  hp: number;
+  alive: boolean;
+  fallT: number;   // 0..1 death tip-over animation
+  flashT: number;  // hit flash time remaining
+  fireT: number;   // seconds until this dummy may shoot again
+}
+
+export class Enemies {
+  private dummies: Dummy[] = [];
+  private group = new THREE.Group();
+  private ray = new THREE.Raycaster();
+
+  constructor(scene: THREE.Scene) {
+    scene.add(this.group);
+    this.rebuild();
+  }
+
+  /** Rebuild all dummies from the level data — fresh jitter every time. */
+  rebuild() {
+    for (const d of this.dummies) {
+      this.group.remove(d.root);
+      for (const p of d.parts) (p.material as THREE.Material).dispose();
+    }
+    this.dummies = [];
+    const j = T.enemy.spawnJitter;
+    for (const [x, y, z] of level.enemies ?? []) {
+      this.spawn(x + (Math.random() * 2 - 1) * j, y, z + (Math.random() * 2 - 1) * j);
+    }
+  }
+
+  private spawn(x: number, y: number, z: number) {
+    const root = new THREE.Group();
+    root.position.set(x, y, z);
+    const parts: THREE.Mesh[] = [];
+    const idx = this.dummies.length;
+    const k = T.enemy.scale;
+
+    const box = (part: 'head' | 'body' | 'limb', color: number,
+      sx: number, sy: number, sz: number, px: number, py: number) => {
+      const m = new THREE.Mesh(
+        new THREE.BoxGeometry(sx * k, sy * k, sz * k),
+        new THREE.MeshLambertMaterial({ color }),
+      );
+      m.position.set(px * k, py * k, 0);
+      m.userData.part = part;
+      m.userData.enemy = idx;
+      root.add(m);
+      parts.push(m);
+    };
+
+    box('head', HEAD_COLOR, 0.36, 0.36, 0.36, 0, 1.62);
+    box('body', BODY_COLOR, 0.55, 0.75, 0.28, 0, 1.05);
+    box('limb', BODY_COLOR, 0.16, 0.65, 0.16, -0.4, 1.02);  // arms
+    box('limb', BODY_COLOR, 0.16, 0.65, 0.16, 0.4, 1.02);
+    box('limb', BODY_COLOR, 0.2, 0.85, 0.2, -0.15, 0.42);   // legs
+    box('limb', BODY_COLOR, 0.2, 0.85, 0.2, 0.15, 0.42);
+
+    this.group.add(root);
+    this.dummies.push({
+      root, parts, hp: T.weapon.enemyHp, alive: true, fallT: 0, flashT: 0,
+      // Random initial delay so a fresh lap doesn't greet you with one volley.
+      fireT: Math.random() * T.enemy.fireInterval,
+    });
+  }
+
+  /** Every hittable mesh of every living dummy — raycast targets. */
+  get aliveMeshes(): THREE.Mesh[] {
+    const out: THREE.Mesh[] = [];
+    for (const d of this.dummies) if (d.alive) out.push(...d.parts);
+    return out;
+  }
+
+  get total() { return this.dummies.length; }
+  get kills() { return this.dummies.filter((d) => !d.alive).length; }
+
+  /** World position of a dummy's head — reflect target and muzzle. */
+  headPosition(idx: number): THREE.Vector3 | null {
+    const d = this.dummies[idx];
+    if (!d || !d.alive) return null;
+    return d.parts[0].getWorldPosition(new THREE.Vector3());
+  }
+
+  /** Feet positions of living dummies — the sword's targets. */
+  alivePositions(): { idx: number; pos: THREE.Vector3 }[] {
+    return this.dummies
+      .map((d, idx) => ({ d, idx }))
+      .filter(({ d }) => d.alive)
+      .map(({ d, idx }) => ({ idx, pos: d.root.position.clone() }));
+  }
+
+  /**
+   * Apply one part-based projectile hit. Head/body values are shared (T.weapon);
+   * `scale` is the firing gun's multiplier, which is how a shotgun pellet does a
+   * fraction of a rifle round without needing its own damage table.
+   */
+  hit(mesh: THREE.Mesh, scale = 1): { killed: boolean; headshot: boolean } {
+    const headshot = mesh.userData.part === 'head';
+    const base = headshot ? T.weapon.headDamage : T.weapon.bodyDamage;
+    return this.damage(mesh.userData.enemy, base * scale, headshot);
+  }
+
+  /** Generic damage — the sword's path. */
+  damage(idx: number, amount: number, headshot = false): { killed: boolean; headshot: boolean } {
+    const d = this.dummies[idx];
+    if (!d || !d.alive) return { killed: false, headshot };
+    d.hp -= amount;
+    d.flashT = 0.12;
+    const killed = d.hp <= 0;
+    if (killed) {
+      d.alive = false;
+      for (const p of d.parts) {
+        (p.material as THREE.MeshLambertMaterial).color.setHex(DEAD_COLOR);
+      }
+    }
+    return { killed, headshot };
+  }
+
+  /** Flash decay, death tip-over, and firing at the player. */
+  update(dt: number, playerPos: V3, projectiles: Projectiles, walls: THREE.Mesh[]) {
+    const target = new THREE.Vector3(playerPos.x, playerPos.y, playerPos.z);
+
+    for (const d of this.dummies) {
+      if (d.flashT > 0) {
+        d.flashT -= dt;
+        const on = d.flashT > 0;
+        for (const p of d.parts) {
+          (p.material as THREE.MeshLambertMaterial).emissive.setHex(on ? FLASH : 0);
+        }
+      }
+      if (!d.alive) {
+        if (d.fallT < 1) {
+          d.fallT = Math.min(1, d.fallT + dt * 3);
+          // Rotate about the feet (group origin) so the corpse tips, not floats.
+          d.root.rotation.x = (-Math.PI / 2) * (1 - Math.pow(1 - d.fallT, 3));
+        }
+        continue;
+      }
+
+      d.fireT -= dt;
+      if (d.fireT > 0) continue;
+      const muzzle = d.parts[0].getWorldPosition(new THREE.Vector3());
+      const dist = muzzle.distanceTo(target);
+      if (dist > T.enemy.range) continue;
+
+      // Hold fire without line of sight — shooting through walls reads as unfair.
+      const dir = target.clone().sub(muzzle).normalize();
+      this.ray.set(muzzle, dir);
+      this.ray.far = dist - 0.5;
+      if (this.ray.intersectObjects(walls, false).length > 0) continue;
+
+      d.fireT = T.enemy.fireInterval;
+      projectiles.spawn(muzzle, dir.multiplyScalar(T.enemy.projSpeed), 'enemy',
+        this.dummies.indexOf(d));
+    }
+  }
+}

@@ -16,16 +16,11 @@ export class RapierWorld implements CollisionWorld {
   body: RAPIER.RigidBody;
   collider: RAPIER.Collider;
 
+  private levelColliders: RAPIER.Collider[] = [];
+
   constructor(brushes: Brush[], spawn: V3) {
     this.world = new RAPIER.World({ x: 0, y: 0, z: 0 }); // gravity is the solver's job
-
-    for (const b of brushes) {
-      const d = RAPIER.ColliderDesc.cuboid(b.s[0] / 2, b.s[1] / 2, b.s[2] / 2)
-        .setTranslation(b.p[0], b.p[1], b.p[2]);
-      if (b.q) d.setRotation({ x: b.q[0], y: b.q[1], z: b.q[2], w: b.q[3] });
-      else if (b.r) d.setRotation(euler(b.r[0], b.r[1], b.r[2]));
-      this.world.createCollider(d);
-    }
+    this.buildLevel(brushes);
 
     const halfHeight = (T.character.height - 2 * T.character.radius) / 2;
     this.body = this.world.createRigidBody(
@@ -43,6 +38,35 @@ export class RapierWorld implements CollisionWorld {
     this.controller.setMaxSlopeClimbAngle(T.character.maxSlopeAngle);
     this.controller.setMinSlopeSlideAngle(T.character.maxSlopeAngle);
     this.controller.setApplyImpulsesToDynamicBodies(false);
+  }
+
+  private buildLevel(brushes: Brush[]) {
+    for (const b of brushes) {
+      let d: RAPIER.ColliderDesc;
+      if (b.kind === 'pyramid') {
+        // Square pyramid = convex hull of the four base corners plus the apex.
+        const [hx, hy, hz] = [b.s[0] / 2, b.s[1] / 2, b.s[2] / 2];
+        const pts = new Float32Array([
+          -hx, -hy, -hz, hx, -hy, -hz, hx, -hy, hz, -hx, -hy, hz, 0, hy, 0,
+        ]);
+        const hull = RAPIER.ColliderDesc.convexHull(pts);
+        if (!hull) continue;
+        d = hull;
+      } else {
+        d = RAPIER.ColliderDesc.cuboid(b.s[0] / 2, b.s[1] / 2, b.s[2] / 2);
+      }
+      d.setTranslation(b.p[0], b.p[1], b.p[2]);
+      if (b.q) d.setRotation({ x: b.q[0], y: b.q[1], z: b.q[2], w: b.q[3] });
+      else if (b.r) d.setRotation(euler(b.r[0], b.r[1], b.r[2]));
+      this.levelColliders.push(this.world.createCollider(d));
+    }
+  }
+
+  /** Tear down and re-create the level colliders — the editor's exit path. */
+  rebuildLevel(brushes: Brush[]) {
+    for (const c of this.levelColliders) this.world.removeCollider(c, false);
+    this.levelColliders = [];
+    this.buildLevel(brushes);
   }
 
   /** Tuning values that Rapier caches internally need re-pushing when sliders move. */

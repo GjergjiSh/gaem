@@ -61,10 +61,6 @@ for (let i = 0; i < SIDES; i++) {
   });
 }
 
-// --- central dais: the contested high ground every arena needs.
-brushes.push({ p: [0, 1, 0], s: [13, 2, 13], c: PILLAR });
-brushes.push({ p: [0, 2.6, 0], s: [7, 1.2, 7], c: PAD });
-
 // --- three tall pillars to wallrun around and break sightlines.
 for (let i = 0; i < 3; i++) {
   const theta = (i / 3) * Math.PI * 2 + Math.PI / 6;
@@ -91,22 +87,25 @@ for (let i = 0; i < 3; i++) {
   });
 }
 
-// --- floating pads at mixed heights: dash and double-jump targets, and cover to
-// drop off. Two rings, deliberately not aligned with each other.
+// --- pad columns at mixed heights: dash and double-jump targets, and cover to
+// drop off. Two rings, deliberately not aligned with each other. Solid all the way
+// to the floor rather than floating slabs, so there's no dead air gap underneath.
 for (let i = 0; i < 6; i++) {
   const theta = (i / 6) * Math.PI * 2 + Math.PI / 6;
+  const top = 6.9 + (i % 2) * 2.5; // preserves the old floating-slab top surface
   brushes.push({
-    p: [Math.sin(theta) * 25, 6.5 + (i % 2) * 2.5, Math.cos(theta) * 25],
-    s: [6, 0.8, 6],
+    p: [Math.sin(theta) * 25, top / 2, Math.cos(theta) * 25],
+    s: [6, top, 6],
     q: axisAngle(0, 1, 0, theta),
     c: PAD,
   });
 }
 for (let i = 0; i < 3; i++) {
   const theta = (i / 3) * Math.PI * 2;
+  const top = 9.9;
   brushes.push({
-    p: [Math.sin(theta) * 10.5, 9.5, Math.cos(theta) * 10.5],
-    s: [5, 0.8, 5],
+    p: [Math.sin(theta) * 10.5, top / 2, Math.cos(theta) * 10.5],
+    s: [5, top, 5],
     q: axisAngle(0, 1, 0, theta),
     c: PAD,
   });
@@ -157,5 +156,15 @@ export { brushes };
 // a stopwatch until combat gives us something worth measuring.
 export const triggers: Trigger[] = [];
 
-export const spawn = { x: 0, y: 6, z: 0 };   // drop onto the central dais
+// --- dummy targets: a loose ring inside the pillars, clear of every brush
+// footprint above, feet on the floor. Reset with the run.
+export const enemies: [number, number, number][] = [
+  [9.9, 0, 9.9],
+  [9.9, 0, -9.9],
+  [-9.9, 0, -9.9],
+  [-9.9, 0, 9.9],
+  [4, 0, 6.9],
+];
+
+export const spawn = { x: 0, y: 6, z: 0 };   // drop onto the open arena floor
 export const killY = -25;
