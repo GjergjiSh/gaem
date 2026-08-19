@@ -219,6 +219,7 @@ function frame(now: number) {
     stamina: player.stamina / T.stamina.max,
     fuel: player.fuel / T.thruster.fuelMax,
     thrusting: player.thrusting,
+    boosting: player.boosting,
     charges: sword.charges,
     maxCharges: T.sword.combo,
     cooldown: sword.cooldownFrac,

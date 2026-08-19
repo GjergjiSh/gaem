@@ -57,6 +57,7 @@ export class Rings {
     stamina: number;        // 0..1
     fuel: number;           // 0..1 thruster tank
     thrusting: boolean;
+    boosting: boolean;
     charges: number;
     maxCharges: number;
     cooldown: number;       // 0..1 remaining, 0 = ready
@@ -125,7 +126,11 @@ export class Rings {
     // which resource is empty without reading either of them.
     const fuel: Arc = {
       slot: 1, side: -1, frac: s.fuel,
-      color: s.thrusting ? '#fde047' : s.fuel >= 1 ? 'rgba(250,204,21,.30)' : '#facc15',
+      // The burner drains multiples of the tank, so it gets its own colour —
+      // you need to see that you're spending fast without reading the number.
+      color: s.boosting ? '#fb7185'
+        : s.thrusting ? '#fde047'
+          : s.fuel >= 1 ? 'rgba(250,204,21,.30)' : '#facc15',
     };
     track(fuel); fill(fuel);
 

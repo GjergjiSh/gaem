@@ -87,13 +87,16 @@ export class Hud {
       `state    ${p.state.padEnd(9)}${p.grounded ? 'grounded' : 'air'}`,
       `speed    ${h.toFixed(2).padStart(6)}  cap ${cap.toFixed(1)}${h > cap + 0.05 ? '  OVER' : ''}`,
       `vert     ${p.vel.y.toFixed(2).padStart(6)}`,
-      `jumps    ${p.jumpsLeft}/${T.jump.maxJumps}   dash ${p.dashCharges}/${T.dash.maxCharges}`,
+      `jumps    ${p.jumpsLeft}/${T.jump.maxJumps}   dash ${T.dash.enabled
+        ? `${p.dashCharges}/${T.dash.maxCharges}`
+        : `off (shift = ${T.sprint.enabled ? 'sprint' : 'nothing'})`}`,
       `chain    x${p.chain}  ${bar(p.chainTimer, T.momentum.chainWindow)}`,
       `wall     ${p.wallSide ? (p.wallSide > 0 ? 'right' : 'left ') : '--   '} arc ${bar(T.wall.gravityRamp - p.wallTime, T.wall.gravityRamp)}  chain ${p.wallChain}/${T.wall.maxChain}`,
       `coyote   ${bar(p.coyoteJump, T.jump.coyoteTime)}  buf ${bar(p.bufJump, T.jump.bufferTime)}`,
       `slidecoy ${bar(p.slideCoyote, T.slide.coyoteTime)}${p.slideCoyote > 0 ? '  LEDGE TECH ARMED' : ''}`,
       `dash cd  ${bar(T.dash.cooldown - p.dashCooldown, T.dash.cooldown)}`,
-      `fuel     ${bar(p.fuel, T.thruster.fuelMax)}${p.thrusting ? '  THRUST' : p.fuelDry ? '  DRY' : ''}`,
+      `fuel     ${bar(p.fuel, T.thruster.fuelMax)}${p.boosting ? '  BURN x'
+        + T.thruster.boostBurn : p.thrusting ? '  THRUST' : p.fuelDry ? '  DRY' : ''}`,
       ``,
       `time     ${timing.run.toFixed(2)}s${timing.best !== null ? `   best ${timing.best.toFixed(2)}s` : ''}`,
       ...(combat ? [combat] : []),
@@ -108,6 +111,7 @@ export class Hud {
       this.help.textContent = [
         `WASD move · Space jump · Shift dash · Ctrl slide`,
         `hold Space with no jumps left = thrusters (hover + shoot)`,
+        `  + Shift while thrusting = afterburner (drinks fuel, goes fast)`,
         `air into a wall = wallrun (auto-runs) · Space = eject`,
         `1 rifle · 2 shotgun · 3 railgun · Q last gun · M4 sword`,
         `view     ${viewMode}   [V to switch]`,

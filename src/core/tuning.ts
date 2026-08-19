@@ -250,6 +250,18 @@ export const T = {
     hoverCap: 13,       // horizontal ceiling while hovering
     hoverRedirect: 12,  // turns velocity without changing speed — THE responsiveness knob
     hoverDrag: 0.9,     // horizontal damping, so you drift instead of flying off
+    // --- afterburner: hold the dash key WHILE the jets are lit. The hover is for
+    // holding a position and shooting; this is for crossing the arena. It costs
+    // multiples of the fuel, which is the only thing stopping it being the answer
+    // to everything. Point and go: the stick if you're steering it, otherwise
+    // wherever you're looking, pitch included.
+    boost: true,
+    boostAccel: 95,     // accel along the aim while the burner is lit
+    boostCap: 34,       // horizontal ceiling under boost — THE ironman number
+    boostRise: 13,      // vertical ceiling under boost (replaces maxRise while lit)
+    boostAim: 1,        // how much camera pitch tilts the boost; 0 = flat only
+    boostBurn: 2.4,     // fuel burn multiplier while boosting
+    boostDrag: 0.12,    // near-zero damping — a burn keeps what it builds
     fuelMax: 120,
     burnRate: 42,       // fuel/sec while burning
     refuelRate: 40,     // fuel/sec once refuelling starts
@@ -421,6 +433,12 @@ export const META: Record<string, { min?: number; max?: number; step?: number; d
   'thruster/hoverAccel': { min: 0, max: 150, step: 1 },
   'thruster/hoverCap': { min: 0, max: 30, step: 0.5 },
   'thruster/hoverRedirect': { min: 0, max: 30, step: 0.5, doc: 'Turns velocity without changing speed. THE hover-feel knob.' },
+  'thruster/boostAccel': { min: 0, max: 250, step: 1, doc: 'Accel along the aim while boosting.' },
+  'thruster/boostCap': { min: 0, max: 70, step: 0.5, doc: 'Horizontal ceiling under boost.' },
+  'thruster/boostRise': { min: 0, max: 40, step: 0.5, doc: 'Vertical ceiling under boost.' },
+  'thruster/boostAim': { min: 0, max: 1.5, step: 0.01, doc: '1 = the burn goes exactly where you look.' },
+  'thruster/boostBurn': { min: 1, max: 8, step: 0.1, doc: 'Fuel multiplier. This is the only cost.' },
+  'thruster/boostDrag': { min: 0, max: 6, step: 0.02 },
   'thruster/hoverDrag': { min: 0, max: 12, step: 0.1, doc: 'Horizontal damping. 0 = you fly away.' },
   'thruster/fuelMax': { min: 10, max: 300, step: 5 },
   'thruster/burnRate': { min: 1, max: 150, step: 1, doc: 'Fuel/sec. fuelMax / this = hover seconds.' },

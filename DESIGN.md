@@ -920,3 +920,75 @@ HUD is always one keystroke from coming back and never a mystery.
 - Enemies are still stationary; hovering over them costs nothing.
 - No damage falloff on the shotgun beyond the cone spreading out.
 - Input recorder / replay-under-a-different-tune, still not built.
+
+---
+
+## 17. The afterburner, and why the dash felt like nothing
+
+### The dash was actively braking you
+
+"Dashing after I stop thrusting barely works." It measured out exactly as
+described, and the cause is one line:
+
+```ts
+p.vel = V.scale(p.dashDir, T.dash.speed);   // every tick of the dash
+```
+
+A flat overwrite. Dash out of an afterburn at 34 u/s and the dash **drops you to
+32** for its whole duration, then `preserveEntrySpeed` hands the speed back on
+exit. Net zero. A verb that costs you speed and then refunds it is
+indistinguishable from a verb that does nothing.
+
+§9 already stated the rule — *a dash must never COST you speed, or it can't be a
+link in a chain* — it was just only enforced at the exit. It now holds for the
+whole dash, so above `dash.speed` a dash is a **free redirect at your current
+speed** rather than a brake.
+
+| | before | after |
+|---|---|---|
+| entering | 34.0 | 34.0 |
+| during the dash | **32.0** | **34.0** |
+| on exit | 33.8 | 33.8 |
+
+Ordinary dashes are untouched: 0.167 s / 5.29 m / exit 27.1 from a standstill,
+matching §14 to the centimetre. The change only reaches cases where you were
+already faster than `dash.speed`.
+
+**Worth knowing:** the titanfall house tune (§16) ships `dash.enabled: false` —
+Shift is *sprint* there, and always was. The HUD used to print `dash 1/1`
+regardless, which looks like a broken dash rather than a deliberate kit; it now
+reads `dash off (shift = sprint)`.
+
+### Afterburner
+
+Hold the dash key **while the jets are already lit**. The hover is for holding a
+position and shooting; the burner is for crossing the arena.
+
+- **Point and go**: the stick if you're steering it, otherwise wherever the
+  camera looks, with pitch folded in (`boostAim`) so you climb by aiming up
+  rather than by holding another key.
+- It deliberately does **not** go through `accelerate()`. That clamps against a
+  wish speed, which is the right model for running and the wrong one for a
+  rocket. A burn adds along the aim until it hits `boostCap`.
+- `boostDrag` is near zero, so what you build you keep — and after the tank runs
+  out, ordinary airborne overspeed bleed (`airDecayScale` 0.2) takes over at
+  1.8 u/s, so you *coast* out of a burn instead of stopping dead.
+- **Fuel is the only cost**, at `boostBurn` (2.4×). That is the entire balance:
+  2.86 s of hover, or 1.19 s of burn.
+
+Measured, stick forward, level aim:
+
+| | |
+|---|---|
+| speed ramp | 23.4 → 34.0 u/s in 0.5 s (`boostCap` 34, ~3× running speed) |
+| after the tank dries | 33.4 at 1.5 s, 32.5 at 2.0 s — it coasts |
+| climb, aiming 45° up | +11.2 m in 1 s, vy 12.9 (`boostRise` 13) |
+
+Base lift still applies while boosting, but only enough to arrest a fall — a
+level burn flies level, and climbing has to be aimed for.
+
+**The dash branch inside the hover is gone.** Shift belongs to the burner while
+the jets are lit; the dash is back the instant you let go of the jump key.
+
+The fuel arc turns red while boosting, because a resource draining at 2.4× needs
+to say so without you reading the number.

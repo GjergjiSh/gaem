@@ -40,6 +40,7 @@ export function makePlayer(spawn: V3): Player {
     sprinting: false,
     stamina: T.stamina.max,
     thrusting: false,
+    boosting: false,
     fuel: T.thruster.fuelMax,
     fuelIdle: 0,
     fuelDry: false,
@@ -377,9 +378,16 @@ function updateThruster(p: Player, i: Intent, wish: V3, dt: number): number {
   p.thrusting = wants && !p.fuelDry && p.fuel > 0;
   if (!p.thrusting) return 1;
 
+  // Afterburner: the dash key, held while the jets are already lit. The hover is
+  // for holding a position and shooting; this is for crossing the arena, and the
+  // only thing keeping it honest is that it drinks the tank.
+  p.boosting = t.boost && i.dash.held;
+
   p.fuelIdle = 0;
-  p.fuel = Math.max(0, p.fuel - t.burnRate * dt);
+  p.fuel = Math.max(0, p.fuel - t.burnRate * (p.boosting ? t.boostBurn : 1) * dt);
   if (p.fuel <= 0) p.fuelDry = true;
+
+  if (p.boosting) return boostThruster(p, i, wish, dt);
 
   // Climb, capped. Thrust only pushes until maxRise, so the jets can arrest a
   // fall instantly but can never turn into an escalator.
@@ -397,6 +405,40 @@ function updateThruster(p: Player, i: Intent, wish: V3, dt: number): number {
   if (h > 1e-4) {
     p.vel = V.setLenH(p.vel, Math.max(0, h - t.hoverDrag * h * dt));
   }
+  return t.gravityScale;
+}
+
+/**
+ * The burner. Point and go: the stick if you're steering, otherwise wherever the
+ * camera looks, with pitch folded in so you climb by aiming up rather than by
+ * holding a separate key.
+ *
+ * It deliberately does NOT go through accelerate(): that clamps against a wish
+ * speed, which is the right model for running and the wrong one for a rocket.
+ * A burn adds along the aim until it hits its own ceiling, and `boostDrag` is
+ * near zero so what you build you keep — including after you let go, where the
+ * ordinary airborne overspeed bleed takes over at the gentle air rate.
+ */
+function boostThruster(p: Player, i: Intent, wish: V3, dt: number): number {
+  const t = T.thruster;
+
+  // Base lift first, so a level burn flies level instead of sinking. It only
+  // arrests a fall — climbing still has to be aimed for.
+  if (p.vel.y < 0) p.vel.y = Math.min(0, p.vel.y + t.thrust * dt);
+
+  let dir = wish;
+  if (V.lenH(dir) < 1e-6) dir = V.v3(-Math.sin(i.yaw), 0, -Math.cos(i.yaw));
+  dir = V.norm(V.v3(dir.x, Math.sin(i.pitch) * t.boostAim, dir.z));
+
+  p.vel.x += dir.x * t.boostAccel * dt;
+  p.vel.y += dir.y * t.boostAccel * dt;
+  p.vel.z += dir.z * t.boostAccel * dt;
+
+  const h = V.lenH(p.vel);
+  if (h > t.boostCap) p.vel = V.setLenH(p.vel, t.boostCap);
+  else if (h > 1e-4) p.vel = V.setLenH(p.vel, Math.max(0, h - t.boostDrag * h * dt));
+  p.vel.y = Math.min(p.vel.y, t.boostRise);
+
   return t.gravityScale;
 }
 
@@ -430,7 +472,8 @@ function updateAirborne(p: Player, i: Intent, wish: V3, col: CollisionWorld, dt:
   // air accel on top would let you out-accelerate hoverCap and turn the hover into
   // free flight, which is exactly what the cap exists to prevent.
   if (p.thrusting) {
-    if (p.bufDash > 0 && canDash(p)) return doDash(p, i);
+    // Shift is the burner while the jets are lit, so no dash branch here — the
+    // dash is back the instant you let go of the jump key.
     if (!p.grounded && tryWallAttach(p, col)) return;
     return;
   }
@@ -462,7 +505,15 @@ function updateAirborne(p: Player, i: Intent, wish: V3, col: CollisionWorld, dt:
 }
 
 function updateDashing(p: Player, i: Intent, col: CollisionWorld, dt: number) {
-  p.vel = V.scale(p.dashDir, T.dash.speed);
+  // "A dash must never COST you speed" (§9) has to hold DURING the dash, not just
+  // on the way out. The old code overwrote velocity with dash.speed flat, so
+  // dashing while already faster — out of an afterburn at 34 u/s, say — dropped
+  // you to 32 for the duration and handed it back on exit. Net zero, and it read
+  // as the dash doing nothing at all. At speed the dash is now a free redirect.
+  const speed = T.dash.preserveEntrySpeed
+    ? Math.min(T.momentum.hardCap, Math.max(T.dash.speed, p.dashEntrySpeed))
+    : T.dash.speed;
+  p.vel = V.scale(p.dashDir, speed);
   if (T.dash.gravityScale > 0) gravity(p, dt, T.dash.gravityScale);
 
   p.dashTime -= dt;
@@ -557,9 +608,10 @@ function tickTimers(p: Player, dt: number) {
     }
   }
   if (p.fuelDry && p.fuel >= th.restartFuel) p.fuelDry = false;
-  // Cleared every tick; only updateAirborne re-arms it, so no other state can
+  // Cleared every tick; only updateAirborne re-arms them, so no other state can
   // leave the HUD showing a burn that isn't happening.
   p.thrusting = false;
+  p.boosting = false;
 }
 
 /** One fixed physics tick. */

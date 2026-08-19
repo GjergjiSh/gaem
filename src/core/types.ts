@@ -52,6 +52,7 @@ export interface Player {
   // Thrusters. Their own resource, deliberately separate from stamina: hovering
   // must never cost you a dash, or the two verbs fight over one pool.
   thrusting: boolean; // jets burning this tick
+  boosting: boolean;  // ...and the afterburner is lit on top of that
   fuel: number;
   fuelIdle: number;   // seconds since the jets last burned — gates the refuel
   fuelDry: boolean;   // ran the tank empty; locked out until restartFuel is back
