@@ -117,9 +117,14 @@ export class Panel {
     // The key carries a version: bumping it in tuning.ts discards stale saves so
     // new defaults actually take effect instead of being silently overridden.
     const saved = localStorage.getItem(STORE_KEY);
-    if (saved) {
+    // "{}" counts as nothing saved: beforeunload writes the override set on every
+    // reload, so a reset-then-reload leaves an empty object behind, and treating
+    // that as a saved tune would make the house profile unreachable.
+    let hasSaved = false;
+    try { hasSaved = Object.keys(JSON.parse(saved ?? '{}')).length > 0; } catch { /* none */ }
+    if (hasSaved) {
       try {
-        this.overrides = JSON.parse(saved);
+        this.overrides = JSON.parse(saved!);
         for (const [path, v] of Object.entries(this.overrides)) {
           const [group, key] = path.split('/');
           const g = (T as any)[group];
