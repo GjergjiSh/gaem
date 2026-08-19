@@ -17,7 +17,7 @@ const KEYS = {
 };
 
 /** Gun slots, in arsenal order. Slot N is Digit(N+1). */
-const SLOT_CODES = ['Digit1', 'Digit2'];
+const SLOT_CODES = ['Digit1', 'Digit2', 'Digit3'];
 
 // Every code the game consumes. Each of these gets preventDefault so the browser
 // never treats a gameplay chord as a shortcut — slide (Ctrl) + strafe (D) is

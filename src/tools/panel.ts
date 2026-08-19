@@ -17,6 +17,11 @@ for (const [path, mod] of Object.entries(PROFILE_MODULES)) {
 }
 const PROFILE_NAMES = Object.keys(PROFILES).sort();
 
+// The tune the game boots into when there is nothing saved. Applied over code
+// DEFAULTS exactly like picking it from the dropdown, so "reset to code defaults"
+// still gets you back to the raw tuning.ts values rather than back to this.
+const DEFAULT_PROFILE = 'titanfall';
+
 export class Panel {
   pane: Pane;
   private slotA: any = null;
@@ -122,6 +127,11 @@ export class Panel {
         }
         this.refresh();
       } catch { this.overrides = {}; }
+    } else if (PROFILES[DEFAULT_PROFILE]) {
+      // First run on this browser: boot into the house tune instead of the raw
+      // code defaults. Only when nothing is saved — a returning player's own
+      // tune must never be stomped by this.
+      this.loadProfile(DEFAULT_PROFILE);
     }
     addEventListener('beforeunload', () => {
       localStorage.setItem(STORE_KEY, JSON.stringify(this.overrides));

@@ -835,3 +835,88 @@ with no jumps left for thrusters.
   curve, which is probably the next thing the fight needs.
 - No gun models or muzzle flashes: the arsenal is entirely reticle and HUD so far.
 - Input recorder / replay-under-a-different-tune, still not built.
+
+---
+
+## 16. Iteration 6 — the jets stop wading, a hitscan gun, meters out of the way
+
+### The thrusters felt sluggish for the reason air control did
+
+Horizontal hover control was acceleration-only, and **acceleration cannot turn you
+when you are already at the cap** — the same trap §9 documented for air control.
+`accelerate()` only adds up to `cap - projected`, so at the hover cap a sideways
+stick does almost nothing, and raising `hoverAccel` does not help because the term
+is clamped. It reads as wading.
+
+`thruster.hoverRedirect` is the fix — the hover now rotates velocity toward the
+stick before accelerating, exactly like `air.redirect`. Measured, at cap, slamming
+the stick 90° sideways:
+
+| elapsed | accel only | with `hoverRedirect` 12 |
+|---|---|---|
+| 50 ms | 15° | **45°** |
+| 100 ms | 29° | **67°** |
+| 200 ms | 50° | **83°** |
+| 400 ms | 55° (stalled) | **89°** |
+
+Acceleration alone never even reaches the commanded direction. This is the first
+knob to reach for if the jets ever feel heavy again.
+
+Also retuned for snap: `thrust` 30 → 62, `hoverAccel` 26 → 70, `hoverCap` 8 → 13,
+`hoverDrag` 2.2 → 0.9, `gravityScale` 0.35 → 0.2, `refuelDelay` 0.5 → 0.35 s, tank
+100 → 120.
+
+**`maxRise` is the hover-vs-flight knob, not `thrust`.** Raising it to 8 alongside
+everything else climbed **22 m** on one tank, which is flight again; at 5 it climbs
+**13.9 m** while keeping every bit of the new responsiveness. Snap comes from the
+accel and the redirect; the ceiling decides what the verb *is*.
+
+### Railgun — hitscan, and the reason that matters
+
+Slot 3. No travel, no drop, no lead: the ray resolves on the frame you click. The
+arsenal now splits deliberately — the rifle and shotgun ask you to *read* the
+fight, the railgun asks you to already be right, and it cycles slowly enough
+(1.5 s) that a miss costs you the exchange. It punches through `pierce` targets;
+walls always stop it regardless.
+
+**Piercing is a loop of casts, not one cast.** A raycast only ever reports its
+nearest hit, so each pass steps the origin 5 cm past the surface it went through.
+Without that nudge the next cast starts inside the same mesh and hits it forever.
+
+Projectiles gained a matching `pierce` for the same reason, and a `tracer()` — the
+fading line is the only evidence a hitscan shot happened, so it fades rather than
+blinks out.
+
+### Meters: bigger, yellow fuel, its own bar
+
+The fuel arc was concentric inside the stamina one, which made two resources share
+a glance. It is now **its own half-circle immediately outboard of stamina**, in
+yellow, in the same style — reading outward from the crosshair: stamina, fuel.
+
+Everything grew: radius 34 → 52, stroke 6 → 10, with a dark backing stroke under
+each arc so the cluster reads against bright arena geometry as well as sky.
+`meters.spacing` is now centre-to-centre distance between neighbouring arcs on the
+same side, and `meters.offset` positions the innermost one.
+
+### Titanfall is the house tune
+
+A first run with nothing in localStorage now boots into `profiles/titanfall.json`
+instead of raw code defaults. Only when nothing is saved — a returning player's own
+tune is never stomped — and **"reset to code defaults" still goes to the raw
+`tuning.ts` values**, not back to the profile, so there is still a way to see what
+the file actually says.
+
+### The HUD hides now
+
+The controls list was permanent screen furniture; you need it once. It is a
+separate block that **starts hidden and toggles on F3**, and **F4 takes the whole
+HUD away** — same idea as F1 for the panel and F2 for the editor. Both choices
+persist. The live readout keeps one footer line naming the four keys, so a hidden
+HUD is always one keystroke from coming back and never a mystery.
+
+### Still open
+
+- Shotgun defaults are still the first-guess numbers, not a played-in tune.
+- Enemies are still stationary; hovering over them costs nothing.
+- No damage falloff on the shotgun beyond the cone spreading out.
+- Input recorder / replay-under-a-different-tune, still not built.

@@ -1,6 +1,10 @@
-// The arsenal. Two guns in slots 1 and 2, both firing real PROJECTILES with drop
-// — lead your shots. Q swaps back to the last gun you held, CS/Doom style, which
-// is the switch you actually use in a fight; the digits are for picking.
+// The arsenal. Three guns in slots 1-3. The rifle and the shotgun fire real
+// PROJECTILES with drop, so you lead your shots; the railgun is HITSCAN and lands
+// the instant you click. That split is the point — two weapons ask you to read
+// the fight, one asks you to already be right.
+//
+// Q swaps back to the last gun you held, CS/Doom style, which is the switch you
+// actually use in a fight; the digits are for picking.
 //
 // "Scoping" is deliberately NOT a scope overlay: it's a fast FOV pull plus a
 // sensitivity drop, MW-canted-laser style, so quickscoping never interrupts
@@ -22,10 +26,14 @@ interface GunStats {
   cycle: number;      // seconds between shots
   pellets: number;
   spread: number;     // cone half-angle, radians
+  damage: number;     // per shot/pellet, x the shared head/body damage
+  pierce: number;     // targets a shot passes through before it stops
+  /** Instant ray instead of a projectile. The ballistics below go unread. */
+  hitscan: boolean;
+  beamTime: number;   // hitscan only: how long the tracer lingers
   projSpeed: number;
   projDrop: number;
   projSize: number;
-  damage: number;     // per projectile, x the shared head/body damage
 }
 
 interface Gun {
@@ -40,10 +48,13 @@ const GUNS: Gun[] = [
       cycle: T.rifle.boltTime,
       pellets: 1,
       spread: T.rifle.spread,
+      damage: T.rifle.damage,
+      pierce: 0,
+      hitscan: false,
+      beamTime: 0,
       projSpeed: T.rifle.projSpeed,
       projDrop: T.rifle.projDrop,
       projSize: T.rifle.projSize,
-      damage: T.rifle.damage,
     }),
   },
   {
@@ -52,10 +63,28 @@ const GUNS: Gun[] = [
       cycle: T.shotgun.pumpTime,
       pellets: Math.max(1, Math.round(T.shotgun.pellets)),
       spread: T.shotgun.spread,
+      damage: T.shotgun.damage,
+      pierce: 0,
+      hitscan: false,
+      beamTime: 0,
       projSpeed: T.shotgun.projSpeed,
       projDrop: T.shotgun.projDrop,
       projSize: T.shotgun.projSize,
-      damage: T.shotgun.damage,
+    }),
+  },
+  {
+    name: 'railgun',
+    stats: () => ({
+      cycle: T.railgun.chargeTime,
+      pellets: 1,
+      spread: T.railgun.spread,
+      damage: T.railgun.damage,
+      pierce: Math.max(0, Math.round(T.railgun.pierce)),
+      hitscan: true,
+      beamTime: T.railgun.beamTime,
+      projSpeed: 0,
+      projDrop: 0,
+      projSize: 0,
     }),
   },
 ];
@@ -163,13 +192,28 @@ export class Weapon {
         dir.addScaledVector(up, Math.sin(a) * r);
         dir.normalize();
       }
-      this.projectiles.spawn(
-        origin.clone(),
-        dir.multiplyScalar(g.projSpeed),
-        'player',
-        -1,
-        { size: g.projSize, drop: g.projDrop, range: T.weapon.range, damage: g.damage },
-      );
+      if (g.hitscan) {
+        this.projectiles.hitscan(origin, dir, {
+          range: T.weapon.range,
+          damage: g.damage,
+          pierce: g.pierce,
+          beamTime: g.beamTime,
+        });
+      } else {
+        this.projectiles.spawn(
+          origin.clone(),
+          dir.multiplyScalar(g.projSpeed),
+          'player',
+          -1,
+          {
+            size: g.projSize,
+            drop: g.projDrop,
+            range: T.weapon.range,
+            damage: g.damage,
+            pierce: g.pierce,
+          },
+        );
+      }
     }
   }
 

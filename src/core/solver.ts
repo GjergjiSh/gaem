@@ -387,9 +387,11 @@ function updateThruster(p: Player, i: Intent, wish: V3, dt: number): number {
     p.vel.y = Math.min(t.maxRise, p.vel.y + t.thrust * dt);
   }
 
-  // Hover steering: its own small accel and cap, plus drag toward a standstill.
-  // The drag is what makes it a hover — without it you keep whatever speed you
-  // arrived with and drift out of the fight.
+  // Hover steering. Redirect FIRST, for the same reason air control needed it
+  // (§9): at the hover cap there is no headroom left for accelerate() to add, so
+  // without this a direction change reads as sluggish no matter how high
+  // hoverAccel goes. Turning is free; gaining speed still is not.
+  p.vel = redirect(p.vel, wish, t.hoverRedirect, dt);
   p.vel = accelerate(p.vel, wish, t.hoverAccel, t.hoverCap, dt);
   const h = V.lenH(p.vel);
   if (h > 1e-4) {

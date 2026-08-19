@@ -177,6 +177,18 @@ export const T = {
     spread: 0,          // radians of cone half-angle; 0 = dead centre
   },
 
+  railgun: {
+    // Slot 3, and the only HITSCAN weapon: it lands the instant you click, with
+    // no lead and no drop. That is the whole identity — the other two ask you to
+    // read the fight, this one asks you to already be right. Slow to cycle, so a
+    // miss costs you the exchange.
+    chargeTime: 1.5,    // the gap between shots
+    damage: 3,          // x the shared head/body damage — a clean body shot kills
+    spread: 0,          // radians of cone half-angle; 0 = perfectly on the dot
+    pierce: 3,          // targets one shot punches through before it stops
+    beamTime: 0.12,     // seconds the tracer stays on screen
+  },
+
   shotgun: {
     // Slot 2. A pump firing a cone of slow, heavy-dropping pellets: lethal in
     // the dais scrum, useless across the arena. damage is per PELLET, so the
@@ -221,24 +233,27 @@ export const T = {
   },
 
   thruster: {
-    // Hover jets on the jump button. Deliberately NOT flight: the vertical
-    // ceiling is low, horizontal drag is high, and fuel is short — enough to
-    // hang over the dais and shoot, not enough to cross the arena in the air.
+    // Hover jets on the jump button. Still not flight — the tank is short and
+    // `maxRise` caps the climb — but responsive: the first pass felt like wading
+    // because horizontal control was acceleration-only, and acceleration cannot
+    // turn you when you are already at cap (§9). `hoverRedirect` is the fix, and
+    // it is the first knob to reach for if the jets ever feel heavy again.
     enabled: true,
     // Hold jump once your jumps are spent (jump, double jump, then hold). With
     // this off the jets light on any held jump, which eats fuel on every hop.
     requireEmptyJumps: true,
-    thrust: 30,         // upward accel while burning
-    maxRise: 3,         // vertical speed ceiling under thrust — deliberately low,
-                        // this is what separates "hover" from "fly"
-    gravityScale: 0.35, // gravity while burning — this is what makes it a float
-    hoverAccel: 26,     // horizontal accel while hovering
-    hoverCap: 8,        // horizontal ceiling while hovering — kept below ground speed
-    hoverDrag: 2.2,     // horizontal damping, so you drift instead of flying off
-    fuelMax: 100,
+    thrust: 62,         // upward accel while burning — snappy enough to kill a fall
+    maxRise: 5,         // vertical speed ceiling under thrust — this is the knob
+                        // that decides hover vs. flight, NOT the thrust value
+    gravityScale: 0.2,  // gravity while burning — low, so the jets hold you up
+    hoverAccel: 70,     // horizontal accel while hovering
+    hoverCap: 13,       // horizontal ceiling while hovering
+    hoverRedirect: 12,  // turns velocity without changing speed — THE responsiveness knob
+    hoverDrag: 0.9,     // horizontal damping, so you drift instead of flying off
+    fuelMax: 120,
     burnRate: 42,       // fuel/sec while burning
-    refuelRate: 34,     // fuel/sec once refuelling starts
-    refuelDelay: 0.5,   // seconds after releasing before refuel starts
+    refuelRate: 40,     // fuel/sec once refuelling starts
+    refuelDelay: 0.35,  // seconds after releasing before refuel starts
     groundRefuel: 2.5,  // refuel multiplier while grounded — landing tops you up
     restartFuel: 20,    // fuel needed to re-ignite after running the tank dry
   },
@@ -264,11 +279,11 @@ export const T = {
     // half-circles parked far out toward the edges — a meter near your aim is a
     // meter you misread, so the default offset is deliberately way outside the
     // area you actually look at. Drop `offset` if you want them closer.
-    radius: 34,         // arc radius in px
-    offset: 360,        // px from screen centre to each arc's centre
-    width: 6,           // arc stroke thickness
+    radius: 52,         // arc radius in px
+    offset: 330,        // px from screen centre to the INNERMOST arc on each side
+    width: 10,          // arc stroke thickness
     sweep: 180,         // degrees each arc spans; 360 makes them full rings again
-    spacing: 9,         // px between the outer arc and the inner one beneath it
+    spacing: 128,       // px between neighbouring arcs on the same side
   },
 
   camera: {
@@ -400,11 +415,12 @@ export const META: Record<string, { min?: number; max?: number; step?: number; d
   'shotgun/projDrop': { min: 0, max: 80, step: 0.5 },
   'shotgun/projSize': { min: 0.03, max: 0.6, step: 0.01 },
   'shotgun/damage': { min: 0, max: 2, step: 0.05, doc: 'Per pellet, x the shared head/body damage.' },
-  'thruster/thrust': { min: 0, max: 90, step: 0.5, doc: 'Upward accel while burning.' },
+  'thruster/thrust': { min: 0, max: 150, step: 1, doc: 'Upward accel while burning.' },
   'thruster/maxRise': { min: 0, max: 25, step: 0.5, doc: 'Vertical ceiling under thrust.' },
   'thruster/gravityScale': { min: 0, max: 1, step: 0.01, doc: '0 = weightless hover, 1 = full gravity.' },
-  'thruster/hoverAccel': { min: 0, max: 90, step: 0.5 },
+  'thruster/hoverAccel': { min: 0, max: 150, step: 1 },
   'thruster/hoverCap': { min: 0, max: 30, step: 0.5 },
+  'thruster/hoverRedirect': { min: 0, max: 30, step: 0.5, doc: 'Turns velocity without changing speed. THE hover-feel knob.' },
   'thruster/hoverDrag': { min: 0, max: 12, step: 0.1, doc: 'Horizontal damping. 0 = you fly away.' },
   'thruster/fuelMax': { min: 10, max: 300, step: 5 },
   'thruster/burnRate': { min: 1, max: 150, step: 1, doc: 'Fuel/sec. fuelMax / this = hover seconds.' },
@@ -425,11 +441,16 @@ export const META: Record<string, { min?: number; max?: number; step?: number; d
   'crosshair/thickness': { min: 1, max: 10, step: 1 },
   'crosshair/gap': { min: 0, max: 60, step: 1, doc: 'Centre to the inner end of each tick.' },
   'crosshair/opacity': { min: 0.1, max: 1, step: 0.05 },
-  'meters/radius': { min: 6, max: 90, step: 1, doc: 'Stamina / sword arc radius.' },
-  'meters/offset': { min: 20, max: 700, step: 5, doc: 'How far the meters sit from the crosshair.' },
-  'meters/width': { min: 1, max: 16, step: 0.5 },
+  'meters/radius': { min: 8, max: 140, step: 1, doc: 'Arc radius.' },
+  'meters/offset': { min: 20, max: 700, step: 5, doc: 'How far the innermost meter sits from the crosshair.' },
+  'meters/width': { min: 1, max: 30, step: 0.5 },
   'meters/sweep': { min: 30, max: 360, step: 5, doc: 'Degrees per arc. 360 = full ring.' },
-  'meters/spacing': { min: 0, max: 30, step: 1, doc: 'Gap between the stamina and fuel arcs.' },
+  'meters/spacing': { min: 0, max: 300, step: 2, doc: 'Centre-to-centre gap between arcs on the same side.' },
+  'railgun/chargeTime': { min: 0.1, max: 4, step: 0.05 },
+  'railgun/damage': { min: 0, max: 8, step: 0.05, doc: 'x the shared head/body damage.' },
+  'railgun/spread': { min: 0, max: 0.2, step: 0.002, doc: 'Cone half-angle. Hitscan, so this is pure accuracy.' },
+  'railgun/pierce': { min: 0, max: 8, step: 1, doc: 'Targets one shot punches through. 0 = stops on the first.' },
+  'railgun/beamTime': { min: 0.02, max: 1, step: 0.01, doc: 'How long the tracer lingers.' },
 };
 
 /**

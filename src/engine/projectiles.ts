@@ -18,6 +18,7 @@ export interface Ballistics {
   drop: number;
   range: number;
   damage: number;     // multiplier on the shared head/body damage
+  pierce: number;     // targets this round passes through before it stops
 }
 
 interface Proj extends Ballistics {
@@ -38,6 +39,7 @@ export class Projectiles {
   private list: Proj[] = [];
   private ray = new THREE.Raycaster();
   private flashes: { mesh: THREE.Mesh; t: number }[] = [];
+  private beams: { line: THREE.Line; t: number; life: number }[] = [];
 
   constructor(
     private gfx: Renderer,
@@ -62,6 +64,7 @@ export class Projectiles {
       drop: kind === 'enemy' ? T.enemy.projDrop : 0,
       range: T.weapon.range,
       damage: 1,
+      pierce: 0,
       ...ballistics,
     };
     const mesh = new THREE.Mesh(
@@ -71,6 +74,58 @@ export class Projectiles {
     mesh.position.copy(pos);
     this.gfx.scene.add(mesh);
     this.list.push({ ...b, mesh, vel: vel.clone(), kind, owner, travelled: 0 });
+  }
+
+  /**
+   * Instant-hit shot — the railgun. No travel, no drop, no lead: the ray is
+   * resolved on the frame you click, which is the entire identity of the weapon.
+   *
+   * Piercing is a loop of casts rather than one, because a raycast only ever
+   * reports the nearest hit. Each pass steps the origin just past the surface it
+   * went through; without that nudge the next cast starts inside the same mesh
+   * and hits it again forever. Walls always stop the shot regardless of pierce,
+   * or the beam would go through the arena itself.
+   *
+   * Hits are reported through the same hook as projectiles, so hitmarkers and
+   * kill feedback need to know nothing about how the shot travelled.
+   */
+  hitscan(
+    origin: THREE.Vector3,
+    dir: THREE.Vector3,
+    o: { range: number; damage: number; pierce: number; beamTime: number },
+  ) {
+    let from = origin.clone();
+    let remaining = o.range;
+    let pierce = o.pierce;
+    let end = origin.clone().addScaledVector(dir, o.range);
+
+    // +1 because the shot gets one cast per target it pierces, plus the last one
+    // that actually stops it.
+    for (let pass = 0; pass <= o.pierce + 1; pass++) {
+      if (remaining <= 0) break;
+      this.ray.set(from, dir);
+      this.ray.far = remaining;
+      const targets = [...this.enemies.aliveMeshes, ...this.gfx.brushMeshes];
+      const hit = this.ray.intersectObjects(targets, false)[0];
+      if (!hit) break;
+
+      this.impactFlash(hit.point);
+      end = hit.point.clone();
+      const onTarget = hit.object.userData.part !== undefined;
+      if (onTarget) {
+        this.hooks.onEnemyHit(this.enemies.hit(hit.object as THREE.Mesh, o.damage));
+      }
+      if (!onTarget || pierce <= 0) break;
+
+      pierce--;
+      const step = hit.distance + 0.05;
+      remaining -= step;
+      from = hit.point.clone().addScaledVector(dir, 0.05);
+      // Still going: unless something else stops it, the beam runs out to range.
+      end = from.clone().addScaledVector(dir, remaining);
+    }
+
+    this.tracer(origin, end, o.beamTime);
   }
 
   /** Sword parry: turn every enemy shot in `meshes` back on its owner. */
@@ -116,10 +171,14 @@ export class Projectiles {
         const hit = this.ray.intersectObjects(targets, false)[0];
         if (hit) {
           this.impactFlash(hit.point);
-          if (hit.object.userData.part !== undefined && p.kind !== 'enemy') {
+          const onTarget = hit.object.userData.part !== undefined && p.kind !== 'enemy';
+          if (onTarget) {
             this.hooks.onEnemyHit(this.enemies.hit(hit.object as THREE.Mesh, p.damage));
           }
-          dead = true;
+          // A piercing round keeps going through TARGETS only — walls always stop
+          // it, or the railgun would shoot through the arena itself.
+          if (onTarget && p.pierce > 0) p.pierce--;
+          else dead = true;
         }
       }
 
@@ -149,10 +208,31 @@ export class Projectiles {
         this.flashes.splice(i, 1);
       }
     }
+
+    // Hitscan tracers: the only evidence a shot happened, so they fade rather
+    // than blink out — you need long enough to see where the line went.
+    for (let i = this.beams.length - 1; i >= 0; i--) {
+      const b = this.beams[i];
+      b.t -= dt;
+      const mat = b.line.material as THREE.LineBasicMaterial;
+      mat.opacity = Math.max(0, b.t / b.life);
+      if (b.t <= 0) {
+        this.gfx.scene.remove(b.line);
+        b.line.geometry.dispose();
+        mat.dispose();
+        this.beams.splice(i, 1);
+      }
+    }
   }
 
   clear() {
     while (this.list.length) this.despawn(this.list.length - 1);
+    while (this.beams.length) {
+      const b = this.beams.pop()!;
+      this.gfx.scene.remove(b.line);
+      b.line.geometry.dispose();
+      (b.line.material as THREE.Material).dispose();
+    }
   }
 
   private despawn(i: number) {
@@ -161,6 +241,18 @@ export class Projectiles {
     p.mesh.geometry.dispose();
     (p.mesh.material as THREE.Material).dispose();
     this.list.splice(i, 1);
+  }
+
+  /** The visible line a hitscan shot leaves behind, faded out by update(). */
+  private tracer(from: THREE.Vector3, to: THREE.Vector3, life: number) {
+    const line = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([from.clone(), to.clone()]),
+      new THREE.LineBasicMaterial({
+        color: 0x7dd3fc, transparent: true, opacity: 1, depthTest: false,
+      }),
+    );
+    this.gfx.scene.add(line);
+    this.beams.push({ line, t: life, life: Math.max(life, 1e-3) });
   }
 
   private impactFlash(at: THREE.Vector3) {
