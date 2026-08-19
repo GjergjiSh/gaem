@@ -36,6 +36,7 @@ export class Hud {
     timing: { run: number; splits: string[]; best: number | null },
     ab: string,
     lookMode = '',
+    viewMode = '',
   ) {
     const h = V.lenH(p.vel);
     const cap = currentCap(p);
@@ -60,6 +61,7 @@ export class Hud {
       ``,
       `WASD move · Space jump · Shift dash · Ctrl slide`,
       `air into a wall = wallrun (auto-runs) · Space = eject`,
+      `view     ${viewMode}   [V to switch]`,
       `camera: ${lookMode}`,
       `it drifts back behind you when you let go`,
       `R restart · F1 panel · T A/B${ab ? `  [${ab}]` : ''}`,

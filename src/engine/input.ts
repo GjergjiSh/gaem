@@ -24,6 +24,7 @@ export class Input {
   mouseIdle = 0;
 
   restart = false;
+  toggleView = false;
   /** True once a pointer-lock request has been rejected — surfaced in the HUD. */
   lockBlocked = false;
   private down = new Set<string>();
@@ -37,6 +38,7 @@ export class Input {
       if (e.repeat) return;
       this.down.add(e.code);
       if (e.code === 'KeyR') this.restart = true;
+      if (e.code === 'KeyV') this.toggleView = true;
       if (KEYS.jump.includes(e.code)) { this.intent.jump.pressed = true; e.preventDefault(); }
       if (KEYS.dash.includes(e.code)) this.intent.dash.pressed = true;
       if (KEYS.slide.includes(e.code)) this.intent.slide.pressed = true;
@@ -82,10 +84,9 @@ export class Input {
       }
       this.mouseIdle = 0;
       this.intent.yaw -= dx * T.camera.sensitivity;
-      this.intent.pitch = clamp(
-        this.intent.pitch - dy * T.camera.sensitivity,
-        T.camera.pitchMin, T.camera.pitchMax,
-      );
+      const lo = T.camera.firstPerson ? T.camera.pitchMinFP : T.camera.pitchMin;
+      const hi = T.camera.firstPerson ? T.camera.pitchMaxFP : T.camera.pitchMax;
+      this.intent.pitch = clamp(this.intent.pitch - dy * T.camera.sensitivity, lo, hi);
     });
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   }

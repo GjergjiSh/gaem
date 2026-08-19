@@ -5,7 +5,7 @@
 // structure automatically, so adding a param here is all it takes to get a slider.
 
 /** Bump when defaults change meaningfully — invalidates saved localStorage tunes. */
-export const TUNING_VERSION = 6;
+export const TUNING_VERSION = 7;
 
 export const T = {
   world: {
@@ -59,7 +59,8 @@ export const T = {
     coyoteTime: 0.1,
     bufferTime: 0.15,
     refundJumpOnDash: true,
-    verticalAim: 0.35,    // how much camera pitch tilts an air dash
+    verticalAim: 0.35,    // how much camera pitch tilts an air dash (third person)
+    verticalAimFP: 1.0,   // in first person you expect to dash exactly where you look
   },
 
   slide: {
@@ -133,6 +134,17 @@ export const T = {
   },
 
   camera: {
+    // Flip live from the panel (or the V key). The movement solver is unaffected by
+    // this — it only ever consumed yaw/pitch — so both modes share one tune.
+    firstPerson: false,
+    // --- first-person only
+    eyeHeight: 0.72,      // above the capsule CENTRE, which sits 0.9 above the feet
+    fpRollScale: 0.3,     // wall/slide roll is far more nauseating from the eyes
+    bobAmount: 0.045,     // head bob height; 0 disables
+    bobRate: 1.15,
+    pitchMinFP: -1.45,    // you need to look near-straight up/down in first person
+    pitchMaxFP: 1.45,
+    // --- third-person only
     distance: 5.2,
     height: 1.65,
     shoulder: 0.55,
@@ -199,6 +211,12 @@ export const META: Record<string, { min?: number; max?: number; step?: number; d
   'bhop/airWishSpeed': { min: 0, max: 8, step: 0.05, doc: 'THE bhop knob. 0 disables strafe gain.' },
   'bhop/window': { min: 0, max: 0.5, step: 0.005 },
   'camera/followDelay': { min: 0, max: 3, step: 0.05 },
+  'camera/eyeHeight': { min: -0.5, max: 1.5, step: 0.01 },
+  'camera/fpRollScale': { min: 0, max: 1, step: 0.01 },
+  'camera/bobAmount': { min: 0, max: 0.25, step: 0.005 },
+  'camera/pitchMinFP': { min: -1.55, max: 0, step: 0.01 },
+  'camera/pitchMaxFP': { min: 0, max: 1.55, step: 0.01 },
+  'dash/verticalAimFP': { min: 0, max: 1.5, step: 0.01 },
   'wall/maxAngle': { min: 0, max: 0.8, step: 0.01 },
   'wall/capBonus': { min: 1, max: 3, step: 0.05 },
   'wall/detectDist': { min: 0.4, max: 2, step: 0.05 },

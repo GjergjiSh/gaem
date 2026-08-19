@@ -110,6 +110,15 @@ export class Panel {
 
   refresh() { this.pane.refresh(); }
 
+  /**
+   * Record a change made outside the panel (a hotkey, say) so it persists like any
+   * slider move and the widget shows the new value instead of going stale.
+   */
+  noteOverride(path: string, value: number | boolean) {
+    this.overrides[path] = value;
+    this.refresh();
+  }
+
   toggle() {
     const el = this.pane.element.parentElement as HTMLElement;
     el.style.display = el.style.display === 'none' ? '' : 'none';

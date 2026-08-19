@@ -89,6 +89,9 @@ function finish() {
  * depends on the player steering the mouse themselves.
  */
 function autoFollowCamera(dt: number) {
+  // Never in first person: there the camera IS your aim, so moving it for you is
+  // both disorienting and a fight for control.
+  if (T.camera.firstPerson) return;
   if (T.camera.autoFollow <= 0) return;
   if (input.mouseIdle < T.camera.followDelay) return;
   if (V.lenH(player.vel) < T.camera.followMinSpeed) return;
@@ -119,6 +122,18 @@ function frame(now: number) {
   input.sample(raw);
 
   if (input.restart) { input.restart = false; restart(); }
+  if (input.toggleView) {
+    input.toggleView = false;
+    T.camera.firstPerson = !T.camera.firstPerson;
+    panel.noteOverride('camera/firstPerson', T.camera.firstPerson);
+    if (!T.camera.firstPerson) gfx.resetCamera(player, input.intent.yaw);
+    // Third person clamps pitch tighter, so carry the view back into range.
+    input.intent.pitch = V.clamp(
+      input.intent.pitch,
+      T.camera.firstPerson ? T.camera.pitchMinFP : T.camera.pitchMin,
+      T.camera.firstPerson ? T.camera.pitchMaxFP : T.camera.pitchMax,
+    );
+  }
 
   acc += raw * T.world.timeScale;
   let steps = 0;
@@ -156,7 +171,8 @@ function frame(now: number) {
     ghost.visible = true;
   }
 
-  hud.update(player, { run: run.time, splits: run.splits, best }, panel.abLabel, input.lookMode);
+  hud.update(player, { run: run.time, splits: run.splits, best }, panel.abLabel, input.lookMode,
+    T.camera.firstPerson ? 'first person' : 'third person');
   requestAnimationFrame(frame);
 }
 

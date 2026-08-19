@@ -650,3 +650,56 @@ player turning the mouse themselves. Auto-follow there would fight the tech.
 
 Measured: 105° → 3° in 0.6 s during no-input flight; 180° → 9° in 0.5 s while wallrunning; and
 0.0° movement during a pure strafe.
+
+---
+
+## 14. First person / third person toggle
+
+**[DECIDED] Both views ship, switchable live.** `camera.firstPerson` in the tuning panel, or the
+**V** key mid-run.
+
+The solver needed **zero** changes, which was the whole bet of DESIGN.md rule 1: movement only ever
+consumed `yaw` and `pitch` from `Intent`, and never knew what the camera did with them. Verified by
+running the same measurements in both modes:
+
+| | third person | first person |
+|---|---|---|
+| jump apex | 2.475 m | 2.475 m |
+| run terminal speed | 11.000 | 11.000 |
+| dash distance | 5.293 m | 5.293 m |
+| dash exit speed | 27.185 | 27.185 |
+| slide boost | 6.975 | 6.975 |
+
+Identical to three decimals. Both views share one tune, so tuning done in one carries to the other.
+
+### What differs, and why
+
+- **Camera transform.** First person puts the camera at the eye (`camera.eyeHeight`, 0.72 above the
+  capsule centre = 1.62 m above the feet) and sets rotation straight from yaw/pitch in `YXZ` order.
+  The spring arm, collision pull-in and shoulder offset simply don't run.
+- **Auto-follow is hard-disabled in first person.** There the camera *is* your aim; moving it for
+  you is disorienting and fights for control. Verified inert (0.0° of drift) while still active in
+  third person (104.5°).
+- **Roll is scaled by `camera.fpRollScale`** (0.3). The 0.22 rad wallrun bank that reads well over
+  the shoulder is nauseating from the eyes.
+- **Pitch limits widen** (`pitchMinFP` / `pitchMaxFP`, ±1.45 rad) — you need to look near-straight
+  up and down. Switching back to third person re-clamps the pitch into its tighter range.
+- **Dash vertical aim differs by design**: `dash.verticalAim` 0.35 over the shoulder,
+  `verticalAimFP` 1.0 in first person, where you expect to go exactly where you look. Measured
+  looking up 0.8 rad: dash direction y of 0.244 vs 0.583. This is the one place the solver reads a
+  camera flag; tuning is plain shared data inside `core/`, so no engine dependency is introduced.
+- **Speed feedback needed a replacement channel.** Third person shows speed by extending the arm
+  (`camera.speedDistance`), which has no first-person equivalent. Head bob fills the gap:
+  `camera.bobAmount` / `bobRate`, driven by *distance travelled* rather than time so it stays in
+  step with your stride. Verified 0.090 m of eye travel while running and 0.0000 m standing still.
+
+Switching to third person calls `resetCamera()` so the arm snaps to the player instead of slinging
+in from wherever the eye was.
+
+### Design note
+
+Third person was chosen (§4 Q1) because hack-and-slash is coming. First-person melee is a different
+game — though Ghostrunner is exactly that, so it's a proven direction rather than a contradiction.
+Keeping both means the choice can be made on feel with a real movement system underneath, instead of
+up front. The cost of keeping both is small: one branch in `render.ts` and a handful of
+mode-specific tuning values.

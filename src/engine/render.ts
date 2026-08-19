@@ -16,6 +16,8 @@ export class Renderer {
   private arm = T.camera.distance;
   private roll = 0;
   private fov = T.camera.fovBase;
+  private eyeDrop = 0;      // smoothed crouch dip, first person
+  private bobPhase = 0;
 
 
   constructor(canvas: HTMLCanvasElement) {
@@ -94,27 +96,80 @@ export class Renderer {
   update(p: Player, i: Intent, dt: number, col: CollisionWorld) {
     const yaw = i.yaw, pitch = i.pitch;
     const pos = new THREE.Vector3(p.pos.x, p.pos.y, p.pos.z);
+    const sliding = p.state === 'sliding';
+    const fp = T.camera.firstPerson;
 
+    // The body still exists in first person, it's just not drawn — keeping its
+    // transform live means switching modes mid-run never shows a stale pose.
     this.player.position.copy(pos);
     this.player.rotation.y = p.facing;
-    const sliding = p.state === 'sliding';
     this.player.scale.y = V.damp(this.player.scale.y, sliding ? 0.55 : 1, 14, dt);
+    this.player.visible = !fp;
 
-    // --- spring arm
+    const over = Math.max(0, V.lenH(p.vel) - currentCap(p)) / T.momentum.hardCap;
+
+    // Roll reads much stronger from the eyes than over the shoulder, so first
+    // person scales it down rather than using a separate set of values.
+    let wantRoll = sliding ? T.camera.slideRoll
+      : p.state === 'wallrunning' ? T.camera.wallRoll * p.wallSide
+        : 0;
+    if (fp) wantRoll *= T.camera.fpRollScale;
+    this.roll = V.damp(this.roll, wantRoll, 10, dt);
+
+    if (fp) this.firstPerson(p, yaw, pitch, dt, sliding);
+    else this.thirdPerson(p, yaw, pitch, dt, col, over);
+
+    // Third person shows speed by extending the arm; first person has no arm, so
+    // FOV and head bob carry that job alone.
+    const wantFov = T.camera.fovBase
+      + (p.state === 'dashing' ? T.camera.fovDash : 0)
+      + (p.state === 'wallrunning' ? T.camera.fovDash * 0.5 : 0)
+      + over * T.camera.fovSpeed;
+    this.fov = V.damp(this.fov, wantFov, T.camera.fovRate, dt);
+    if (Math.abs(this.camera.fov - this.fov) > 0.01) {
+      this.camera.fov = this.fov;
+      this.camera.updateProjectionMatrix();
+    }
+
+    this.renderer.render(this.scene, this.camera);
+  }
+
+  /** Eyes at the capsule, orientation straight from yaw/pitch. */
+  private firstPerson(p: Player, yaw: number, pitch: number, dt: number, sliding: boolean) {
+    this.eyeDrop = V.damp(this.eyeDrop, sliding ? T.camera.slideHeight : 0, 12, dt);
+
+    // Bob is driven by distance travelled, not time, so it stays in step with your
+    // stride instead of wobbling while you stand still.
+    const speed = V.lenH(p.vel);
+    if (p.grounded && speed > 0.5) this.bobPhase += speed * dt * T.camera.bobRate;
+    const bobT = V.clamp(speed / T.ground.maxSpeed, 0, 1);
+    const bob = Math.sin(this.bobPhase * Math.PI) * T.camera.bobAmount * bobT;
+
+    this.camera.position.set(
+      p.pos.x,
+      p.pos.y + T.camera.eyeHeight - this.eyeDrop + bob,
+      p.pos.z,
+    );
+    // YXZ is the standard FPS order: yaw about world Y, then pitch, then roll.
+    this.camera.rotation.set(pitch, yaw, this.roll, 'YXZ');
+  }
+
+  /** Spring arm over the shoulder, with collision pull-in. */
+  private thirdPerson(
+    p: Player, yaw: number, pitch: number, dt: number, col: CollisionWorld, over: number,
+  ) {
+    const sliding = p.state === 'sliding';
     const drop = sliding ? T.camera.slideHeight : 0;
-    const target = new THREE.Vector3(pos.x, pos.y + T.camera.height - drop, pos.z);
+    const target = new THREE.Vector3(p.pos.x, p.pos.y + T.camera.height - drop, p.pos.z);
     this.camTarget.lerp(target, 1 - Math.exp(-T.camera.lagPos * dt));
 
     const cp = Math.cos(pitch), sp = Math.sin(pitch);
     const fwd = new THREE.Vector3(-Math.sin(yaw) * cp, sp, -Math.cos(yaw) * cp);
     const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
 
-    // Overspeed extends the arm — reads as "you are going fast" in third person.
-    const over = Math.max(0, V.lenH(p.vel) - currentCap(p)) / T.momentum.hardCap;
-    // Pull the camera out as you go faster — the wider view is what makes speed
-    // readable in third person, and it keeps obstacles on screen long enough to react.
     const speedT = V.clamp(V.lenH(p.vel) / T.momentum.hardCap, 0, 1);
-    let want = T.camera.distance + T.camera.speedDistance * speedT + T.camera.distance * over * 0.35;
+    let want = T.camera.distance + T.camera.speedDistance * speedT
+      + T.camera.distance * over * 0.35;
 
     const dir = fwd.clone().negate();
     const hit = col.ray(
@@ -133,24 +188,17 @@ export class Renderer {
     this.camPos.lerp(desired, 1 - Math.exp(-T.camera.lagRot * dt));
     this.camera.position.copy(this.camPos);
     this.camera.lookAt(this.camTarget);
-
-    // roll + fov feedback
-    const wantRoll = sliding ? T.camera.slideRoll
-      : p.state === 'wallrunning' ? T.camera.wallRoll * p.wallSide
-        : 0;
-    this.roll = V.damp(this.roll, wantRoll, 10, dt);
     this.camera.rotateZ(this.roll);
+  }
 
-    const wantFov = T.camera.fovBase
-      + (p.state === 'dashing' ? T.camera.fovDash : 0)
-      + (p.state === 'wallrunning' ? T.camera.fovDash * 0.5 : 0)
-      + over * T.camera.fovSpeed;
-    this.fov = V.damp(this.fov, wantFov, T.camera.fovRate, dt);
-    if (Math.abs(this.camera.fov - this.fov) > 0.01) {
-      this.camera.fov = this.fov;
-      this.camera.updateProjectionMatrix();
-    }
-
-    this.renderer.render(this.scene, this.camera);
+  /** Snap the arm to the player so switching modes doesn't sling the camera in. */
+  resetCamera(p: Player, yaw: number) {
+    this.camTarget.set(p.pos.x, p.pos.y + T.camera.height, p.pos.z);
+    this.camPos.set(
+      this.camTarget.x + Math.sin(yaw) * T.camera.distance,
+      this.camTarget.y,
+      this.camTarget.z + Math.cos(yaw) * T.camera.distance,
+    );
+    this.arm = T.camera.distance;
   }
 }

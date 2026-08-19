@@ -196,7 +196,10 @@ function doDash(p: Player, i: Intent) {
     // No stick input: dash where the camera is looking.
     dir = V.v3(-Math.sin(i.yaw), 0, -Math.cos(i.yaw));
   }
-  dir.y = Math.sin(i.pitch) * T.dash.verticalAim;
+  // First person expects a dash to go exactly where you look; over the shoulder a
+  // full-strength vertical component reads as the character launching oddly.
+  const aim = T.camera.firstPerson ? T.dash.verticalAimFP : T.dash.verticalAim;
+  dir.y = Math.sin(i.pitch) * aim;
   p.dashDir = V.norm(dir);
   p.dashTime = T.dash.duration;
   p.dashEntrySpeed = V.lenH(p.vel);
