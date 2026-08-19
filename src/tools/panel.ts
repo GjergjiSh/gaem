@@ -22,7 +22,14 @@ export class Panel {
 
   constructor(private onChange: () => void) {
     this.pane = new Pane({ title: 'Tuning  ·  F1 hides' });
-    (this.pane.element.parentElement as HTMLElement).style.zIndex = '20';
+    // The schema outgrew the screen — without an explicit scroll container the
+    // lower folders are simply unreachable.
+    const host = this.pane.element.parentElement as HTMLElement;
+    host.style.zIndex = '20';
+    host.style.maxHeight = 'calc(100vh - 16px)';
+    host.style.overflowY = 'auto';
+    host.style.overflowX = 'hidden';
+    host.style.overscrollBehavior = 'contain';
 
     for (const group of Object.keys(T) as (keyof typeof T)[]) {
       const folder = this.pane.addFolder({ title: group, expanded: group === 'ground' });

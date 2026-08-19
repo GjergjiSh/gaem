@@ -46,7 +46,6 @@ function restart() {
   input.intent.yaw = 0;
   input.intent.pitch = 0;
   run = newRun();
-  gfx.clearTrail();
   ghost.visible = bestPath !== null;
 }
 
@@ -130,7 +129,6 @@ function frame(now: number) {
   }
   if (steps === MAX_STEPS) acc = 0; // don't let a stall snowball
 
-  gfx.pushTrail(player.pos);
   autoFollowCamera(raw);
   gfx.update(player, input.intent, raw, world);
 

@@ -112,6 +112,36 @@ for (let i = 0; i < 3; i++) {
   });
 }
 
+// --- wall-jump corridors: three pairs of parallel slabs facing each other across a
+// gap. Wallruns are deliberately short and steep now, so the way to stay airborne is
+// to bounce wall-to-wall — which needs facing surfaces close enough to cross in one
+// ejection. Vertical, not slanted: unambiguous wallrun surfaces with no bank to fight.
+// Gap and length are coupled to wall.jumpOut / jumpKeepAlong: you must cross the
+// gap before the along-wall component carries you out the open end. At ~13 u/s
+// outward and ~13 u/s along, a 6.5m gap takes ~0.5s, so the wall needs to be a
+// good deal longer than 6.5m or you sail straight out the side.
+const CORRIDOR_GAP = 6.5;
+const CORRIDOR_R = 20;
+for (let i = 0; i < 3; i++) {
+  const theta = (i / 3) * Math.PI * 2 + Math.PI / 3;
+  const radial = { x: Math.sin(theta), z: Math.cos(theta) };
+  const tangent = { x: Math.cos(theta), z: -Math.sin(theta) };
+  // Yaw by theta + 90deg so the slab's thin axis (local Z) points across the gap.
+  const q = axisAngle(0, 1, 0, theta + Math.PI / 2);
+  for (const side of [1, -1]) {
+    brushes.push({
+      p: [
+        radial.x * CORRIDOR_R + tangent.x * side * (CORRIDOR_GAP / 2),
+        6,
+        radial.z * CORRIDOR_R + tangent.z * side * (CORRIDOR_GAP / 2),
+      ],
+      s: [19, 13, 1],
+      q,
+      c: WALL,
+    });
+  }
+}
+
 // --- low blocks: vault targets and slide cover, scattered off-axis so the arena
 // never reads as symmetrical from the inside.
 const lowBlocks: [number, number, number][] = [

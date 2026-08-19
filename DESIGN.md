@@ -532,3 +532,70 @@ instead of looking like a broken build.
 
 **For free look, open `http://localhost:5173` in a normal browser tab** — the preview pane will
 always be drag-look.
+
+---
+
+## 12. Iteration 4 — bunnyhop, bounded wallrunning, arena wall corridors
+
+### Bunnyhop
+
+Two halves, and the second is the one with a trick to it.
+
+**Landing must not scrub speed.** With a jump already buffered, ground friction is skipped and
+overspeed decays at the gentle air rate instead of the ground rate, so the landing tick doesn't
+eat momentum you're about to reuse.
+
+**Air-strafing must be able to add speed.** This needs the classic Quake accelerate with a
+deliberately tiny wish speed (`bhop.airWishSpeed`, 1.7): when the stick points near-perpendicular
+to your velocity, the dot product is close to zero, leaving headroom to accelerate into. That
+headroom *is* the speed gain.
+
+Critically, it cannot be paired with `redirect()` — rotating velocity toward the stick destroys
+the perpendicular relationship the gain depends on. So **pure strafe input (A or D with no
+forward) selects the bhop path; any forward input keeps the responsive redirect control.** One
+stance for chaining speed, one for steering, chosen by what you're holding.
+
+Measured over 9 hops with the chain bonus neutralised, so this is bhop alone:
+
+| input | speed |
+|---|---|
+| strafe + steady mouse turn | 11.0 → 12.5 → 13.4 → 14.2 → 14.5 → 15.2 → 16.2 → 17.5 → **18.3** |
+| straight line, no strafe | 11.0 → 11.0 → 11.0 → 11.0 (pinned at cap) |
+
+Skill is rewarded, mashing jump is not. `bhop.airWishSpeed` is the knob: larger is easier and
+less skilful, 0 disables strafe gain entirely.
+
+### Wallruns are bounded now
+
+- **Steeper, faster fall.** Gravity starts at 40% immediately (no hang) and ramps to 190% —
+  harder than normal gravity — over 0.5 s. A run lasts well under a second.
+- **`wall.maxChain` (3)** consecutive wallruns before you must touch ground. Cleared only by
+  landing, so the hexagon's six faces can't be chained round and round forever.
+- **Auto-run.** Once attached, the character runs along the wall on its own — no held input,
+  Genji-style. You steer with the wall, not the stick.
+- **No crouching on walls.** `canSlide` now requires `grounded`; sliding is a ground move.
+- **Ejection angle is fully explicit.** `jumpOut` / `jumpUp` / `jumpKeepAlong` define it with no
+  hidden speed-preservation clamp, so the three sliders actually describe the arc you get.
+
+Measured in a corridor: three bounces alternating right → left → right, chain 1/3 → 2/3 → 3/3,
+each ejecting at ~18 u/s with vy 11.7, then the fourth attach is refused and you land. Each
+bounce loses ~1.5 m of height, so wall chains are for traversal and repositioning, not climbing —
+raise `wall.jumpUp` if you want them to gain height.
+
+### Arena: wall-jump corridors
+
+Three pairs of vertical parallel slabs (19 m long, 6.5 m gap) at radius 20. Vertical rather than
+slanted, so there's no bank to fight.
+
+**The gap and the wall length are coupled to the wall-jump tuning**, which is not obvious until it
+bites: at ~13 u/s outward and ~13 u/s along the wall, crossing a 6.5 m gap takes ~0.5 s, during
+which you travel ~6.5 m along the wall. The first attempt used 11 m walls and every ejection sailed
+out the open end before reaching the opposite face — exactly one bounce, never two. If you retune
+`jumpOut` or `jumpKeepAlong`, re-check that corridors are still long enough.
+
+### Also
+
+- **Blue trajectory trail removed** — geometry, update calls and all.
+- **Tuning panel scrolls.** The schema outgrew the viewport (940 px of content in a 612 px panel)
+  and the lower folders were simply unreachable. It now has an explicit max-height and
+  `overflow-y: auto`.

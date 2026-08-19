@@ -5,8 +5,6 @@ import { currentCap } from '../core/solver';
 import type { CollisionWorld, Intent, Player } from '../core/types';
 import { brushes, triggers } from '../levels';
 
-const TRAIL_POINTS = 900;
-
 export class Renderer {
   scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(T.camera.fovBase, 1, 0.1, 600);
@@ -19,10 +17,6 @@ export class Renderer {
   private roll = 0;
   private fov = T.camera.fovBase;
 
-  private trail: THREE.Line;
-  private trailPos: Float32Array;
-  private trailCount = 0;
-  showTrail = true;
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -82,14 +76,6 @@ export class Renderer {
     this.player.add(nose);
     this.scene.add(this.player);
 
-    this.trailPos = new Float32Array(TRAIL_POINTS * 3);
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(this.trailPos, 3));
-    g.setDrawRange(0, 0);
-    this.trail = new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0x38bdf8 }));
-    this.trail.frustumCulled = false;
-    this.scene.add(this.trail);
-
     this.resize();
     addEventListener('resize', () => this.resize());
   }
@@ -99,23 +85,6 @@ export class Renderer {
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
-  }
-
-  pushTrail(p: { x: number; y: number; z: number }) {
-    if (this.trailCount >= TRAIL_POINTS) {
-      this.trailPos.copyWithin(0, 3);
-      this.trailCount = TRAIL_POINTS - 1;
-    }
-    const i = this.trailCount * 3;
-    this.trailPos[i] = p.x; this.trailPos[i + 1] = p.y; this.trailPos[i + 2] = p.z;
-    this.trailCount++;
-    this.trail.geometry.attributes.position.needsUpdate = true;
-    this.trail.geometry.setDrawRange(0, this.trailCount);
-  }
-
-  clearTrail() {
-    this.trailCount = 0;
-    this.trail.geometry.setDrawRange(0, 0);
   }
 
   /**
@@ -182,7 +151,6 @@ export class Renderer {
       this.camera.updateProjectionMatrix();
     }
 
-    this.trail.visible = this.showTrail;
     this.renderer.render(this.scene, this.camera);
   }
 }

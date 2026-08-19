@@ -5,7 +5,7 @@
 // structure automatically, so adding a param here is all it takes to get a slider.
 
 /** Bump when defaults change meaningfully — invalidates saved localStorage tunes. */
-export const TUNING_VERSION = 5;
+export const TUNING_VERSION = 6;
 
 export const T = {
   world: {
@@ -83,25 +83,39 @@ export const T = {
     detectDist: 0.85,     // how far to probe sideways for a wall
     minSpeed: 5,          // below this you slide off instead of running
     maxAngle: 0.35,       // radians from vertical still counted as a runnable wall
-    maxTime: 2.5,         // hard backstop; the gravity arc should end it first
+    maxTime: 1.1,         // hard backstop; the gravity arc should end it first
     // Gravity ramps in over the run instead of being constant: you attach nearly
     // weightless, hang, then arc downward with increasing pull. That arc — not a
     // timer — is what should take you off the wall.
-    gravityStart: 0.0,
-    gravityEnd: 1.0,
-    gravityRamp: 1.15,    // seconds from start to end of the ramp
-    upBoost: 2.5,         // instant vertical kick on attach
+    gravityStart: 0.4,    // you start dropping immediately, never hang
+    gravityEnd: 1.9,       // and end up falling harder than normal gravity
+    gravityRamp: 0.5,     // seconds from start to end of the ramp
+    upBoost: 2.2,         // instant vertical kick on attach
     entryVyMax: 2,        // clamp on inherited climb speed, so the arc starts
                           // the same way whether you crept or rocketed onto the wall
-    runAccel: 70,         // acceleration along the wall
+    runAccel: 85,         // auto-run acceleration along the wall (no input needed)
     capBonus: 1.5,        // wallruns get a raised speed ceiling too
-    jumpOut: 9,           // wall-jump impulse along the wall normal
-    jumpUp: 11.5,         // wall-jump vertical impulse
+    jumpOut: 13,          // wall-jump impulse along the wall normal — this is what
+                          // throws you across a gap to the opposite wall
+    jumpUp: 12,           // wall-jump vertical impulse
+    jumpKeepAlong: 0.7,   // fraction of along-wall speed the jump carries through.
+                          // out/up/keepAlong together define the ejection angle.
+    maxChain: 3,          // consecutive wallruns allowed before you must touch ground
     coyoteTime: 0.16,     // grace after leaving a wall
     cooldown: 0.18,       // stops instantly re-attaching to the same wall
     refillJumps: true,
     refillDash: true,
     stickAssist: 14,      // pull toward the wall, keeps you glued through corners
+  },
+
+  bhop: {
+    // Classic bunnyhop. Two halves: land-and-rehop must not scrub your speed, and
+    // air-strafing must be able to ADD speed. The second half needs a deliberately
+    // tiny wish-speed cap — you gain because the dot product of velocity and a
+    // perpendicular stick direction is near zero, leaving headroom to accelerate into.
+    airWishSpeed: 1.7,    // the small cap. Larger = easier but less skilful.
+    airAccel: 105,
+    window: 0.16,         // land within this of a queued jump and you keep everything
   },
 
   momentum: {
@@ -178,6 +192,12 @@ export const META: Record<string, { min?: number; max?: number; step?: number; d
   'wall/gravityEnd': { min: 0, max: 2, step: 0.01 },
   'wall/gravityRamp': { min: 0.1, max: 4, step: 0.05, doc: 'Shorter = you arc off the wall sooner.' },
   'camera/autoFollow': { min: 0, max: 10, step: 0.1, doc: '0 disables the drift-behind entirely.' },
+  'wall/maxChain': { min: 1, max: 8, step: 1, doc: 'Wallruns before you must land. Stops endless wall travel.' },
+  'wall/jumpKeepAlong': { min: 0, max: 1.5, step: 0.01 },
+  'wall/jumpOut': { min: 0, max: 30, step: 0.5 },
+  'wall/jumpUp': { min: 0, max: 30, step: 0.5 },
+  'bhop/airWishSpeed': { min: 0, max: 8, step: 0.05, doc: 'THE bhop knob. 0 disables strafe gain.' },
+  'bhop/window': { min: 0, max: 0.5, step: 0.005 },
   'camera/followDelay': { min: 0, max: 3, step: 0.05 },
   'wall/maxAngle': { min: 0, max: 0.8, step: 0.01 },
   'wall/capBonus': { min: 1, max: 3, step: 0.05 },

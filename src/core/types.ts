@@ -70,6 +70,7 @@ export interface Player {
   wallCooldown: number;
   lastWallX: number;  // so you can't re-attach to the wall you just left
   lastWallZ: number;
+  wallChain: number;  // wallruns since last touching the ground
 
   chain: number;      // consecutive tech links
   chainTimer: number;

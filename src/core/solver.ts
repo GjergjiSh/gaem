@@ -36,6 +36,7 @@ export function makePlayer(spawn: V3): Player {
     wallCooldown: 0,
     lastWallX: 0,
     lastWallZ: 0,
+    wallChain: 0,
     chain: 0,
     chainTimer: 0,
     alive: true,
@@ -94,6 +95,22 @@ function redirect(vel: V3, wish: V3, rate: number, dt: number): V3 {
   return V.v3((nx / l) * h, vel.y, (nz / l) * h);
 }
 
+/**
+ * Classic Quake air acceleration. The wish speed is deliberately tiny, so when your
+ * stick direction is near-perpendicular to your velocity the dot product is close to
+ * zero and there is headroom to accelerate into — that headroom IS the bunnyhop
+ * speed gain. Note it must NOT be paired with redirect(): rotating velocity toward
+ * the stick destroys the perpendicular relationship the gain depends on.
+ */
+function accelerateClassic(vel: V3, wish: V3, accel: number, wishSpeed: number, dt: number): V3 {
+  if (V.lenH(wish) < 1e-6) return vel;
+  const current = vel.x * wish.x + vel.z * wish.z;
+  const add = wishSpeed - current;
+  if (add <= 0) return vel;
+  const step = Math.min(accel * dt, add);
+  return V.v3(vel.x + wish.x * step, vel.y, vel.z + wish.z * step);
+}
+
 function applyFriction(vel: V3, friction: number, dt: number): V3 {
   const h = V.lenH(vel);
   if (h < 1e-6) return vel;
@@ -105,7 +122,9 @@ function bleedOverspeed(p: Player, dt: number) {
   const cap = currentCap(p);
   const h = V.lenH(p.vel);
   if (h <= cap) return;
-  const scale = p.grounded ? 1 : T.momentum.airDecayScale;
+  // A jump already queued means we're bunnyhopping, not standing — decay at the
+  // gentle air rate so the landing tick doesn't eat the speed we're about to reuse.
+  const scale = (p.grounded && p.bufJump <= 0) ? 1 : T.momentum.airDecayScale;
   const next = Math.max(cap, h - T.momentum.overspeedDecay * scale * dt);
   p.vel = V.setLenH(p.vel, Math.min(next, T.momentum.hardCap));
 }
@@ -144,15 +163,18 @@ function doJump(p: Player, speedBonus = 1) {
 /** Kick off a wall: outward along the normal, plus a solid vertical pop. */
 function doWallJump(p: Player) {
   const n = p.wallNormal;
-  const h = V.lenH(p.vel);
-  // Keep the along-wall component, add the outward kick.
-  const along = V.projectOnPlane(V.v3(p.vel.x, 0, p.vel.z), n);
+  // Ejection angle comes entirely from jumpOut / jumpUp / jumpKeepAlong, with no
+  // hidden speed-preservation clamp, so the three sliders fully describe the arc
+  // and you can actually aim this at the opposite wall.
+  const along = V.scale(
+    V.projectOnPlane(V.v3(p.vel.x, 0, p.vel.z), n),
+    T.wall.jumpKeepAlong,
+  );
   p.vel = V.v3(
     along.x + n.x * T.wall.jumpOut,
     T.wall.jumpUp,
     along.z + n.z * T.wall.jumpOut,
   );
-  if (V.lenH(p.vel) < h) p.vel = V.setLenH(p.vel, h); // never lose speed to a wall jump
   p.bufJump = 0;
   p.wallCoyote = 0;
   p.wallCooldown = T.wall.cooldown;
@@ -188,6 +210,9 @@ function doDash(p: Player, i: Intent) {
 }
 
 function canSlide(p: Player) {
+  // Sliding is a ground move. Without the explicit grounded test you can crouch
+  // while stuck to a wall, which looks and reads wrong.
+  if (!p.grounded || p.state === 'wallrunning') return false;
   return p.slideCooldown <= 0 && V.lenH(p.vel) >= T.slide.minSpeed;
 }
 
@@ -215,6 +240,10 @@ function endSlide(p: Player) {
 function attachWall(p: Player, rawNormal: V3): boolean {
   if (Math.abs(rawNormal.y) > Math.sin(T.wall.maxAngle)) return false;
 
+  // Hard stop on endless wall travel. Cleared only by touching the ground, so a
+  // hex arena's six faces can't be chained round and round forever.
+  if (p.wallChain >= T.wall.maxChain) return false;
+
   const n = V.norm(V.v3(rawNormal.x, 0, rawNormal.z));
   if (V.lenH(n) < 1e-4) return false;
   if (n.x * p.lastWallX + n.z * p.lastWallZ > 0.85) return false;
@@ -237,6 +266,7 @@ function attachWall(p: Player, rawNormal: V3): boolean {
   // buffered press fires as a wall jump on the very next tick and you're flung off
   // a wallrun you never got to hold.
   p.bufJump = 0;
+  p.wallChain++;
   if (T.wall.refillJumps) p.jumpsLeft = T.jump.maxJumps;
   if (T.wall.refillDash) p.dashCharges = T.dash.maxCharges;
   registerTech(p);
@@ -292,12 +322,12 @@ function updateWallrunning(p: Player, i: Intent, wish: V3, col: CollisionWorld, 
   const gScale = V.lerp(T.wall.gravityStart, T.wall.gravityEnd, ramp * ramp);
   p.vel.y -= T.world.gravityRise * gScale * dt;
 
-  // Accelerate along the wall in whichever direction we're already travelling.
+  // Auto-run: once you're on the wall the character keeps running along it on its
+  // own, no held input required. You steer with the wall, not the stick.
   const tangent = V.norm(V.v3(-p.wallNormal.z, 0, p.wallNormal.x));
   const sign = (p.vel.x * tangent.x + p.vel.z * tangent.z) >= 0 ? 1 : -1;
   const runDir = V.scale(tangent, sign);
-  const forwardInput = Math.max(0, wish.x * runDir.x + wish.z * runDir.z);
-  p.vel = accelerate(p.vel, runDir, T.wall.runAccel * forwardInput, currentCap(p), dt);
+  p.vel = accelerate(p.vel, runDir, T.wall.runAccel, currentCap(p), dt);
 
   // Glue: a constant pull into the wall keeps you attached around corners.
   p.vel.x -= p.wallNormal.x * T.wall.stickAssist * dt;
@@ -317,7 +347,7 @@ function updateGrounded(p: Player, i: Intent, wish: V3, dt: number) {
   if (V.lenH(wish) > 1e-6) {
     p.vel = redirect(p.vel, wish, T.ground.redirect, dt);
     p.vel = accelerate(p.vel, wish, T.ground.accel, currentCap(p), dt);
-  } else {
+  } else if (p.bufJump <= 0) {
     p.vel = applyFriction(p.vel, T.ground.friction, dt);
   }
   p.vel.y = Math.min(p.vel.y, 0);
@@ -329,9 +359,18 @@ function updateGrounded(p: Player, i: Intent, wish: V3, dt: number) {
 
 function updateAirborne(p: Player, i: Intent, wish: V3, col: CollisionWorld, dt: number) {
   gravity(p, dt);
-  p.vel = redirect(p.vel, wish, T.air.redirect, dt);
-  p.vel = accelerate(p.vel, wish, T.air.accel * T.air.control, currentCap(p), dt);
-  if (V.lenH(wish) < 1e-6) p.vel = applyFriction(p.vel, T.air.friction, dt);
+
+  // Pure strafe (A or D with no forward input) is the bunnyhop stance: skip redirect
+  // and use the classic small-wish-speed accel so turning the mouse gains speed.
+  // Any forward input returns to the responsive redirect-based control.
+  const pureStrafe = Math.abs(i.moveX) > 0.1 && Math.abs(i.moveY) < 0.1;
+  if (pureStrafe) {
+    p.vel = accelerateClassic(p.vel, wish, T.bhop.airAccel, T.bhop.airWishSpeed, dt);
+  } else {
+    p.vel = redirect(p.vel, wish, T.air.redirect, dt);
+    p.vel = accelerate(p.vel, wish, T.air.accel * T.air.control, currentCap(p), dt);
+    if (V.lenH(wish) < 1e-6) p.vel = applyFriction(p.vel, T.air.friction, dt);
+  }
 
   // A wall jump stays available briefly after leaving the wall.
   if (p.bufJump > 0 && p.wallCoyote > 0) return doWallJump(p);
@@ -488,6 +527,7 @@ export function step(p: Player, i: Intent, col: CollisionWorld, dt: number) {
     p.wallCoyote = 0;
     p.lastWallX = 0;
     p.lastWallZ = 0;
+    p.wallChain = 0;
     if (p.state === 'airborne' || p.state === 'wallrunning') {
       // Buffered slide on landing — lets you slide the instant you touch down.
       if (p.bufSlide > 0 && canSlide(p)) doSlide(p);
