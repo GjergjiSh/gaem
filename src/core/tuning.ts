@@ -5,7 +5,7 @@
 // structure automatically, so adding a param here is all it takes to get a slider.
 
 /** Bump when defaults change meaningfully — invalidates saved localStorage tunes. */
-export const TUNING_VERSION = 12;
+export const TUNING_VERSION = 13;
 
 export const T = {
   world: {
@@ -209,6 +209,79 @@ export const T = {
     projDrop: 30,
     projSize: 0.07,
     damage: 0.45,       // per pellet, x the shared head/body damage
+  },
+
+  flamer: {
+    // Slot 4. The only weapon with no discrete shot: you hold it and a cone in
+    // front of you is on fire. Short range is the whole balance — inside it
+    // nothing survives the hold, outside it you are carrying a brick. Damage is
+    // per TICK, so the real number is damage/tick, and the fuel is your
+    // willingness to stand there.
+    tick: 0.045,        // seconds between damage ticks while held
+    range: 15,          // how far the cone reaches
+    cone: 0.2,          // cone half-angle at full range, radians
+    damage: 0.16,       // per tick, x the shared head/body damage
+    puffs: 3,           // flame puffs spawned per tick
+    puffLife: 0.45,     // seconds a puff lives
+    puffSpeed: 26,      // how fast puffs travel out
+    puffSize: 0.5,      // puff radius at birth
+    puffGrow: 5.5,      // radius gained per second — the cone widens as it goes
+  },
+
+  rocket: {
+    // Slot 5. Slow, heavy, and it does not need to touch anything: the blast is
+    // the weapon and the direct hit is a bonus. Aim at feet, not at heads.
+    cycle: 1.3,         // the gap between rockets
+    speed: 48,          // slow enough to dodge, which is the point
+    drop: 3,            // barely any — it is powered, not thrown
+    size: 0.24,
+    damage: 1.4,        // direct hit, x the shared head/body damage
+    blastRadius: 7,     // metres; damage falls off linearly to zero at the edge
+    blastDamage: 3.5,   // at the centre, x the shared head/body damage
+  },
+
+  sam: {
+    // Slot 6. Shoulder tubes, fired in a burst, alternating left and right. The
+    // missiles do NOT fly straight: they wander hard and only loosely correct
+    // back onto the aim line, so a burst paints an area rather than a point.
+    // That is the weapon — you are not sniping, you are saturating.
+    cycle: 2.2,         // the gap between bursts
+    burst: 6,           // missiles per burst
+    burstDelay: 0.07,   // seconds between launches inside a burst
+    // The radius, in METRES, of the area a burst paints around whatever the
+    // crosshair is on. Each missile is sent to its own point inside this disc,
+    // which is what makes a salvo cover ground instead of converging to a dot —
+    // and metres are a thing you can picture, where a launch cone in radians is
+    // a number you have to fire to understand.
+    paint: 4,
+    speed: 34,
+    size: 0.16,
+    damage: 0.6,        // the impact itself; the blast is what kills
+    // Lateral acceleration, and how fast it swings. Amplitude goes as
+    // wander/freq^2, so these two fight each other hard: halving the frequency
+    // quadruples the weave. Measured at these values the missiles swing about
+    // 6 m off the line and still land within 2 m of their mark.
+    wander: 240,
+    wanderFreq: 1.8,
+    // Straight off the rail for this long before the weave builds. Measured at
+    // 34 m/s that is about five metres of clean boost, which is what keeps a
+    // salvo fired from a rooftop out of the rooftop.
+    armTime: 0.16,
+    homing: 3.2,        // pull toward its own target point. 0 = drunk
+    // On contact the missile STICKS and burns for this long before going off.
+    // The delay is the read: you get a moment to see where the burst landed and
+    // to be somewhere else, and the target gets a moment to know it is over.
+    stick: 0.45,
+    blastRadius: 5,
+    // Deliberately under a one-shot kill on its own. The SAM kills by
+    // saturation -- two overlapping blasts, or a stick plus a neighbour -- which
+    // is the difference between it and the rocket launcher.
+    blastDamage: 1.8,
+    shoulder: 0.42,     // metres either side of centre the tubes sit
+    // Where the burst goes when the crosshair is on nothing. Normally the aim
+    // point is whatever the crosshair actually hits, so pointing at a wall ten
+    // metres away paints that wall rather than a spot far behind it.
+    converge: 60,
   },
 
   enemy: {
@@ -672,6 +745,38 @@ export const META: Record<string, { min?: number; max?: number; step?: number; d
   'railgun/beamTime': { min: 0.02, max: 1, step: 0.01, doc: 'How long the tracer lingers.' },
   'railgun/beamWidth': { min: 0.01, max: 0.5, step: 0.005, doc: 'Core radius in metres.' },
   'railgun/beamGlow': { min: 1, max: 8, step: 0.1, doc: 'Halo radius, x the core.' },
+  'flamer/tick': { min: 0.02, max: 0.3, step: 0.005, doc: 'Seconds between damage ticks while held.' },
+  'flamer/range': { min: 3, max: 40, step: 0.5, doc: 'How far the cone reaches.' },
+  'flamer/cone': { min: 0.05, max: 0.8, step: 0.01, doc: 'Cone half-angle at full range.' },
+  'flamer/damage': { min: 0, max: 2, step: 0.01, doc: 'Per TICK. Real damage is this over tick.' },
+  'flamer/puffs': { min: 1, max: 10, step: 1, doc: 'Flame puffs per tick. Visual only.' },
+  'flamer/puffLife': { min: 0.1, max: 2, step: 0.05 },
+  'flamer/puffSpeed': { min: 5, max: 80, step: 1 },
+  'flamer/puffSize': { min: 0.1, max: 3, step: 0.05, doc: 'Puff radius at birth.' },
+  'flamer/puffGrow': { min: 0, max: 20, step: 0.5, doc: 'Radius gained per second.' },
+  'rocket/cycle': { min: 0.2, max: 5, step: 0.05 },
+  'rocket/speed': { min: 10, max: 160, step: 1, doc: 'Slow is the point — it can be dodged.' },
+  'rocket/drop': { min: 0, max: 40, step: 0.5 },
+  'rocket/size': { min: 0.05, max: 1, step: 0.01 },
+  'rocket/damage': { min: 0, max: 8, step: 0.05, doc: 'Direct hit only. The blast is separate.' },
+  'rocket/blastRadius': { min: 0, max: 25, step: 0.5, doc: 'Falls off linearly to zero at the edge.' },
+  'rocket/blastDamage': { min: 0, max: 10, step: 0.05, doc: 'At the centre of the blast.' },
+  'sam/cycle': { min: 0.2, max: 8, step: 0.05, doc: 'Between bursts.' },
+  'sam/burst': { min: 1, max: 16, step: 1, doc: 'Missiles per burst, alternating shoulders.' },
+  'sam/burstDelay': { min: 0.01, max: 0.5, step: 0.01, doc: 'Between launches inside a burst.' },
+  'sam/paint': { min: 0, max: 20, step: 0.5, doc: 'Radius in metres a burst spreads over.' },
+  'sam/speed': { min: 5, max: 120, step: 1 },
+  'sam/size': { min: 0.05, max: 0.8, step: 0.01 },
+  'sam/damage': { min: 0, max: 5, step: 0.05, doc: 'The impact. The blast is separate.' },
+  'sam/wander': { min: 0, max: 600, step: 10, doc: 'Lateral accel. Weave goes as wander/freq^2.' },
+  'sam/wanderFreq': { min: 0.4, max: 8, step: 0.1, doc: 'Swings per second. Low = wide weave.' },
+  'sam/armTime': { min: 0, max: 1, step: 0.02, doc: 'Straight boost before the weave builds.' },
+  'sam/homing': { min: 0, max: 8, step: 0.1, doc: 'Pull toward its target point. 0 = drunk.' },
+  'sam/stick': { min: 0, max: 2, step: 0.05, doc: 'Seconds glued to a target before it goes off.' },
+  'sam/blastRadius': { min: 0, max: 20, step: 0.5 },
+  'sam/blastDamage': { min: 0, max: 8, step: 0.05 },
+  'sam/shoulder': { min: 0, max: 1.5, step: 0.02, doc: 'Tube offset either side of centre.' },
+  'sam/converge': { min: 5, max: 200, step: 5, doc: 'Range at which the salvo crosses the crosshair.' },
   'slam/speed': { min: 10, max: 140, step: 1, doc: 'Downward speed the slam holds.' },
   'slam/keepH': { min: 0, max: 1, step: 0.05, doc: '0 = straight down, 1 = keeps all your run.' },
   'slam/minHeight': { min: 0, max: 20, step: 0.5, doc: 'Clear air needed under you before C will slam.' },

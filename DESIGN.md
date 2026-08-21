@@ -2210,3 +2210,86 @@ overhangs on a track that had none.
   `?url`, so the files stay where they were dropped instead of being copied into
   `public/`. All 56 are emitted into a build whether used or not — worth
   trimming if the 35 MB `dist` ever matters.
+
+---
+
+## 28. Three weapons about area
+
+The arsenal could pick targets three ways and cover ground none. These three do
+nothing precisely.
+
+`GunStats` grew a `mode` instead of another boolean. `hitscan: boolean` was
+already one flag deciding one branch; a second and a third would be flags that
+can contradict each other, and there is no meaning for a gun that is both
+hitscan and a flamethrower. A tag has exactly the states that exist.
+
+### Flamethrower — a cone, not a thousand bullets
+
+Modelling fire as a stream of tiny projectiles is the obvious move and it is
+wrong twice: the damage ends up proportional to the frame rate, and whether you
+hit becomes a matter of how the particles happened to scatter. So the flame is a
+**cone test on a fixed tick**, and the puffs are decoration with no bearing on
+anything. Line of sight is checked as well as angle, because an angle alone
+burns people through walls.
+
+Measured: 3.56 damage/s to 15 m in a 23-degree cone, killing in 0.56 s — against
+1.54/s for the rifle and 2.00/s for the railgun. It is the highest damage in the
+game and it only exists inside 15 metres.
+
+### Rocket — the blast is the weapon
+
+A direct hit does 4.9 against 2 hit points, but that is not the point of it: the
+splash alone kills out to **3.0 m** of a 7 m blast, so the shot is at feet and
+at floors. Blast damage falls off linearly and is checked for line of sight from
+the explosion outward, so a wall between you and it is cover — without that the
+rocket kills through the level.
+
+At 48 m/s it takes 0.63 s to cross 30 m. It is meant to be dodgeable.
+
+### SAM — six missiles that do not fly straight
+
+Both shoulders, alternating, six missiles 0.07 s apart. They weave, they stick
+to what they touch, and they go off half a second later.
+
+**Seeking a point, not a direction.** The first version steered each missile
+back toward the direction it was fired along, which is not self-correcting:
+homing fixes which way a missile is pointing and never fixes where it *is*, so
+every metre of swerve is permanent. Measured, the salvo was 15 m off the line at
+60 m and getting worse with range. Seeking a point closes the loop — the missile
+wanders off and then has to come back.
+
+**Each missile gets its own point.** Sending all six to the same place makes a
+worse rocket launcher, not a different weapon. Each is sent to a point scattered
+inside `paint` metres of whatever the crosshair is actually on (a raycast, so
+pointing at a wall ten metres away paints that wall rather than a spot behind
+it). `paint` is in metres because metres are a thing you can picture; a launch
+cone in radians is a number you have to fire to understand.
+
+**The weave is quadratically expensive.** A sinusoidal lateral acceleration
+displaces by `wander / omega^2`. The first pass used 26 m/s² at 7 Hz, which
+works out at about **a centimetre** — the missiles were dead straight and the
+whole character of the weapon was missing. Metres of weave need a low frequency
+and a big number, hence defaults that look violent: 240 m/s² at 1.8 Hz.
+
+**Arming.** At full strength from launch, a missile is already metres off course
+while it is beside your shoulder, so a salvo fired while standing on a platform
+sticks to the platform. The wander eases in over `armTime`, which buys about
+5.4 m of clean boost — and is also what a missile actually does.
+
+Measured, at 20/40/60 m: each missile swings about 5 m off its own line, and the
+impacts land 3.1 m (median) to 5.5 m (p90) from the aim point. That is the
+weapon: you cannot place a missile, you can only choose a region.
+
+| | flamer | rocket | sam |
+|---|---|---|---|
+| kills a dummy by | holding it for 0.56 s | one hit, or splash within 3.0 m | a stick, or two blasts |
+| reaches | 15 m | anywhere, slowly | anywhere, unpredictably |
+| lands where you aimed | yes | yes | within about 3 m |
+
+### One shared trap
+
+Both the blast and the flame cone iterate `aliveTargets()`, which is one entry
+per dummy. The obvious `aliveMeshes` is per body PART — an explosion would have
+found the same dummy five times and hit it five times over, and the head among
+those parts would have quietly applied the headshot multiplier to splash damage.
+Area weapons deal body damage, flat: fire has no head to find.

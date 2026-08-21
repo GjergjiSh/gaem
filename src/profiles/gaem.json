@@ -76,6 +76,14 @@
     "pellets": 11,
     "projSpeed": 96
   },
+  "sam": {
+    "cycle": 1.9000000000000001,
+    "burst": 12,
+    "paint": 2,
+    "speed": 97,
+    "wander": 440,
+    "shoulder": 1.5
+  },
   "enemy": {
     "scale": 1
   },

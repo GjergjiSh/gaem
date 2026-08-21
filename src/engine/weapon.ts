@@ -1,7 +1,14 @@
-// The arsenal. Three guns in slots 1-3. The rifle and the shotgun fire real
-// PROJECTILES with drop, so you lead your shots; the railgun is HITSCAN and lands
-// the instant you click. That split is the point — two weapons ask you to read
-// the fight, one asks you to already be right.
+// The arsenal. Six weapons in slots 1-6, and each one asks a different question.
+//
+//   1 rifle      a projectile with drop — lead your shots
+//   2 shotgun    a cone of the same, lethal up close and useless across the map
+//   3 railgun    HITSCAN: it lands the instant you click, so you must already be right
+//   4 flamer     no shot at all, just a cone that is on fire while you hold it
+//   5 rocket     slow and heavy, and the blast is the weapon — aim at feet
+//   6 sam        both shoulders, six missiles, they weave in and stick before going off
+//
+// The first three are about precision at increasing cost. The last three are
+// about area, at the cost of being able to pick a target at all.
 //
 // Q swaps back to the last gun you held, CS/Doom style, which is the switch you
 // actually use in a fight; the digits are for picking.
@@ -22,7 +29,20 @@ import type { Input } from './input';
 import type { Enemies } from './enemies';
 import type { Projectiles } from './projectiles';
 
+/**
+ * How a gun puts damage into the world. Everything else about a gun is numbers;
+ * this is the one thing that is a different code path, so it is a tag rather
+ * than a pile of booleans that can contradict each other.
+ */
+type FireMode =
+  | 'bullet'      // a travelling round with drop — lead your shots
+  | 'hitscan'     // resolved on the frame you click
+  | 'flame'       // no round at all: a cone, re-tested every tick
+  | 'rocket'      // one slow round, and the blast is the weapon
+  | 'missiles';   // a burst off both shoulders that wanders in and sticks
+
 interface GunStats {
+  mode: FireMode;
   cycle: number;      // seconds between shots
   /** Shots before the long reload. 1 = every shot costs `cycle`. */
   barrels: number;
@@ -34,8 +54,6 @@ interface GunStats {
   spread: number;     // cone half-angle, radians
   damage: number;     // per shot/pellet, x the shared head/body damage
   pierce: number;     // targets a shot passes through before it stops
-  /** Instant ray instead of a projectile. The ballistics below go unread. */
-  hitscan: boolean;
   beamTime: number;   // hitscan only: how long the tracer lingers
   projSpeed: number;
   projDrop: number;
@@ -51,6 +69,7 @@ const GUNS: Gun[] = [
   {
     name: 'rifle',
     stats: () => ({
+      mode: 'bullet',
       cycle: T.rifle.boltTime,
       barrels: 1,
       reload: 0,
@@ -59,7 +78,6 @@ const GUNS: Gun[] = [
       spread: T.rifle.spread,
       damage: T.rifle.damage,
       pierce: 0,
-      hitscan: false,
       beamTime: 0,
       projSpeed: T.rifle.projSpeed,
       projDrop: T.rifle.projDrop,
@@ -69,6 +87,7 @@ const GUNS: Gun[] = [
   {
     name: 'shotgun',
     stats: () => ({
+      mode: 'bullet',
       // Two shells when a reload time is set, one when it is not. The gun's
       // whole character changes on that one number and nothing else moves.
       cycle: T.shotgun.pumpTime,
@@ -79,7 +98,6 @@ const GUNS: Gun[] = [
       spread: T.shotgun.spread,
       damage: T.shotgun.damage,
       pierce: 0,
-      hitscan: false,
       beamTime: 0,
       projSpeed: T.shotgun.projSpeed,
       projDrop: T.shotgun.projDrop,
@@ -89,6 +107,7 @@ const GUNS: Gun[] = [
   {
     name: 'railgun',
     stats: () => ({
+      mode: 'hitscan',
       cycle: T.railgun.chargeTime,
       barrels: 1,
       reload: 0,
@@ -97,11 +116,74 @@ const GUNS: Gun[] = [
       spread: T.railgun.spread,
       damage: T.railgun.damage,
       pierce: Math.max(0, Math.round(T.railgun.pierce)),
-      hitscan: true,
       beamTime: T.railgun.beamTime,
       projSpeed: 0,
       projDrop: 0,
       projSize: 0,
+    }),
+  },
+  {
+    name: 'flamer',
+    stats: () => ({
+      mode: 'flame',
+      // The "cycle" is the damage tick. Holding the trigger is the weapon, so
+      // it is auto by construction rather than by choice.
+      cycle: T.flamer.tick,
+      barrels: 1,
+      reload: 0,
+      auto: true,
+      pellets: 1,
+      // Reported as spread so the reticle blooms to the cone: the flamethrower's
+      // range is the thing you have to judge, and it should be on screen.
+      spread: T.flamer.cone,
+      damage: T.flamer.damage,
+      pierce: 0,
+      beamTime: 0,
+      projSpeed: 0,
+      projDrop: 0,
+      projSize: 0,
+    }),
+  },
+  {
+    name: 'rocket',
+    stats: () => ({
+      mode: 'rocket',
+      cycle: T.rocket.cycle,
+      barrels: 1,
+      reload: 0,
+      auto: false,
+      pellets: 1,
+      spread: 0,
+      damage: T.rocket.damage,
+      pierce: 0,
+      beamTime: 0,
+      projSpeed: T.rocket.speed,
+      projDrop: T.rocket.drop,
+      projSize: T.rocket.size,
+    }),
+  },
+  {
+    name: 'sam',
+    stats: () => ({
+      mode: 'missiles',
+      // The gap between BURSTS. The burst itself is drained by update(), and
+      // has to fit inside this or you would be able to overlap two salvos.
+      cycle: Math.max(
+        T.sam.cycle,
+        Math.max(1, Math.round(T.sam.burst)) * T.sam.burstDelay + 0.1,
+      ),
+      barrels: 1,
+      reload: 0,
+      auto: false,
+      pellets: 1,
+      // Reported so the reticle blooms to roughly the area a burst covers.
+      spread: Math.atan2(T.sam.paint, Math.max(T.sam.converge, 1)),
+      damage: T.sam.damage,
+      pierce: 0,
+      beamTime: 0,
+      projSpeed: T.sam.speed,
+      projDrop: 0,
+      projSize: T.sam.size,
     }),
   },
 ];
@@ -116,6 +198,15 @@ export class Weapon {
   private cycle = 0;      // seconds left in the fire cycle
   /** Barrels already fired since the last reload. Only the shotgun uses it. */
   private fired = 0;
+  /**
+   * Missiles still to leave the tubes, and the countdown to the next one. A
+   * burst outlives the trigger pull on purpose — once the salvo is away it is
+   * away, and swapping weapons mid-burst should not swallow it.
+   */
+  private burstLeft = 0;
+  private burstT = 0;
+  /** Which shoulder the next missile comes off. Alternating is the whole look. */
+  private shoulder = 1;
   private raise = 0;      // seconds left of the swap animation
   private root!: HTMLDivElement;
   private dot!: HTMLDivElement;
@@ -144,6 +235,7 @@ export class Weapon {
     this.gfx.adsT = this.adsT;
     this.cycle = Math.max(0, this.cycle - dt);
     this.raise = Math.max(0, this.raise - dt);
+    this.drainBurst(dt);
 
     if (this.input.weaponSlot !== null) {
       const want = this.input.weaponSlot;
@@ -192,6 +284,65 @@ export class Weapon {
     this.styleKey = '';   // the new gun's spread changes the reticle bloom
   }
 
+  /**
+   * Let the queued missiles out, one every burstDelay, alternating shoulders.
+   * Driven from update() rather than from fire() so the salvo keeps launching
+   * while you are already moving, aiming somewhere else, or holding nothing.
+   */
+  private drainBurst(dt: number) {
+    if (this.burstLeft <= 0) return;
+    this.burstT -= dt;
+    while (this.burstLeft > 0 && this.burstT <= 0) {
+      this.launchMissile();
+      this.burstLeft--;
+      this.burstT += Math.max(T.sam.burstDelay, 1e-3);
+    }
+  }
+
+  private launchMissile() {
+    const cam = this.gfx.camera;
+    cam.updateMatrixWorld();
+    const fwd = new THREE.Vector3();
+    cam.getWorldDirection(fwd);
+    const right = new THREE.Vector3().crossVectors(fwd, cam.up).normalize();
+    const up = new THREE.Vector3().crossVectors(right, fwd).normalize();
+
+    // Off the shoulder, not out of the middle of your face. The tubes alternate
+    // so a burst visibly comes off both sides.
+    this.shoulder = -this.shoulder;
+    const origin = cam.position.clone()
+      .addScaledVector(right, this.shoulder * T.sam.shoulder)
+      .addScaledVector(up, 0.18)
+      .addScaledVector(fwd, 0.3);
+
+    // Every missile gets its OWN target point, scattered around whatever the
+    // crosshair is on. That is what paints an area: send them all to one point
+    // and six missiles converge into a single explosion, which is a worse
+    // rocket launcher rather than a different weapon.
+    const seek = this.projectiles.aimPoint(cam.position, fwd, T.sam.converge);
+    const a = Math.random() * Math.PI * 2;
+    const r = Math.sqrt(Math.random()) * T.sam.paint;
+    seek.addScaledVector(right, Math.cos(a) * r).addScaledVector(up, Math.sin(a) * r);
+
+    const dir = seek.clone().sub(origin).normalize();
+    this.projectiles.spawn(origin, dir.multiplyScalar(T.sam.speed), 'player', -1, {
+      seek,
+      size: T.sam.size,
+      drop: 0,
+      range: T.weapon.range,
+      damage: T.sam.damage,
+      pierce: 0,
+      color: 0xbae6fd,
+      wander: T.sam.wander,
+      wanderFreq: T.sam.wanderFreq,
+      wanderRamp: T.sam.armTime,
+      homing: T.sam.homing,
+      stick: T.sam.stick,
+      blastRadius: T.sam.blastRadius,
+      blastDamage: T.sam.blastDamage,
+    });
+  }
+
   private fire() {
     const g = this.gun.stats();
     // Double barrel: the short pump between the two, the long break-open after
@@ -220,6 +371,41 @@ export class Weapon {
     const right = new THREE.Vector3().crossVectors(fwd, cam.up).normalize();
     const up = new THREE.Vector3().crossVectors(right, fwd).normalize();
 
+    if (g.mode === 'flame') {
+      this.projectiles.flame(origin, fwd, {
+        range: T.flamer.range,
+        cone: T.flamer.cone,
+        damage: T.flamer.damage,
+        puffs: Math.max(1, Math.round(T.flamer.puffs)),
+        puffLife: T.flamer.puffLife,
+        puffSpeed: T.flamer.puffSpeed,
+        puffSize: T.flamer.puffSize,
+        puffGrow: T.flamer.puffGrow,
+      });
+      return;
+    }
+
+    if (g.mode === 'missiles') {
+      // fire() only opens the tubes. drainBurst() is what empties them.
+      this.burstLeft = Math.max(1, Math.round(T.sam.burst));
+      this.burstT = 0;
+      return;
+    }
+
+    if (g.mode === 'rocket') {
+      this.projectiles.spawn(origin, fwd.clone().multiplyScalar(g.projSpeed), 'player', -1, {
+        size: g.projSize,
+        drop: g.projDrop,
+        range: T.weapon.range,
+        damage: g.damage,
+        pierce: 0,
+        color: 0xffb454,
+        blastRadius: T.rocket.blastRadius,
+        blastDamage: T.rocket.blastDamage,
+      });
+      return;
+    }
+
     for (let i = 0; i < g.pellets; i++) {
       const dir = fwd.clone();
       if (g.spread > 0) {
@@ -231,7 +417,7 @@ export class Weapon {
         dir.addScaledVector(up, Math.sin(a) * r);
         dir.normalize();
       }
-      if (g.hitscan) {
+      if (g.mode === 'hitscan') {
         this.projectiles.hitscan(origin, dir, {
           range: T.weapon.range,
           damage: g.damage,
@@ -264,9 +450,10 @@ export class Weapon {
 
   hudLine() {
     const g = this.gun.stats();
-    const state = this.raise > 0 ? 'raise'
-      : this.cycle > 0 ? (g.barrels > 1 && this.fired === 0 ? 'reload' : 'cycle')
-        : 'READY';
+    const state = this.burstLeft > 0 ? 'FIRING'
+      : this.raise > 0 ? 'raise'
+        : this.cycle > 0 ? (g.barrels > 1 && this.fired === 0 ? 'reload' : 'cycle')
+          : 'READY';
     // Clamped as well as fixed at the source: a HUD string is never worth a
     // thrown exception in the render loop.
     const left = Math.max(0, Math.min(g.barrels, g.barrels - this.fired));

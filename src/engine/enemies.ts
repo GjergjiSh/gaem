@@ -219,6 +219,25 @@ export class Enemies {
     return { idx: hit.object.userData.enemy, dist: hit.distance, point: hit.point.clone() };
   }
 
+  /**
+   * Living dummies as ONE target each, at chest height — what area weapons
+   * need. Iterating `aliveMeshes` instead is a trap: it is per body PART, so a
+   * blast or a flame cone would find the same dummy five times and hit it five
+   * times over, and the head among those parts would silently apply the
+   * headshot multiplier to splash damage.
+   */
+  aliveTargets(): { idx: number; pos: THREE.Vector3 }[] {
+    const out: { idx: number; pos: THREE.Vector3 }[] = [];
+    this.dummies.forEach((d, idx) => {
+      if (!d.alive) return;
+      d.root.updateMatrixWorld();
+      // Chest height. `root` sits at the feet, and a dummy is 1.8 m before the
+      // scale slider, so half of that is the middle of the body.
+      out.push({ idx, pos: d.root.position.clone().setY(d.root.position.y + 0.9 * T.enemy.scale) });
+    });
+    return out;
+  }
+
   /** Feet positions of living dummies — the sword's targets. */
   alivePositions(): { idx: number; pos: THREE.Vector3 }[] {
     return this.dummies
