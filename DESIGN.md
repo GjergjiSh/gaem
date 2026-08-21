@@ -2044,6 +2044,43 @@ Platforms are found by **shape** — a slab under 1.6 m thick with a footprint o
 quietly skip any platform that had been resized in the editor, and "some of them
 got it" is the worst available outcome.
 
+### The hook that was never called
+
+Every edit in the level editor restarted the game and threw you back out of it.
+The plugin had suppression for exactly this — and it was dead code.
+
+`handleHotUpdate` is still in Vite's plugin types, but under Rolldown it is
+never invoked; `hotUpdate` is. So every save fell through to the default, and
+the default here is not subtle: `main.ts` self-accepts with
+`import.meta.hot.accept(() => location.reload())`, because the game has too much
+global state to hot-swap. Any HMR update that reaches the entry module is a page
+reload by construction. Editor save, file write, watcher, `location.reload()`.
+
+The map key was wrong too, and would have missed even if the hook had run: Vite
+reports hook paths with forward slashes on Windows, while `path.resolve` returns
+backslashes.
+
+The rewrite also drops the timestamp window in favour of comparing the file's
+content against what was written. A window only guesses at "did we do this?",
+and both ways of guessing wrong are bad — reload the page under someone
+mid-drag, or silently swallow a real edit. The content answers it. It also has
+to survive being asked twice, because `hotUpdate` fires once per environment
+(client and ssr), so nothing is consumed on first use.
+
+Measured against an isolated copy of the repo, so no other session's writes
+could be mistaken for the thing under test:
+
+| | before | after |
+|---|---|---|
+| five editor saves | 5x `hmr /src/main.ts` → 5 reloads | silence |
+| an external edit | reaches the page | reaches the page |
+| a save right after an external edit | reload | silence, and on disk |
+
+Keeping the middle row is the whole difficulty. An earlier attempt at this bug
+stopped watching both directories, which did stop the reloads and also stopped
+Vite ever noticing a regenerated track — so a level edited on disk never reached
+the running game and looked like the edit had silently failed.
+
 ---
 
 ## 27. Art, without letting art touch the physics
