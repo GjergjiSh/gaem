@@ -42,6 +42,7 @@ export class RapierWorld implements CollisionWorld {
 
   private buildLevel(brushes: Brush[]) {
     for (const b of brushes) {
+      if (b.d) continue;                 // decor: visuals only, never a collider
       let d: RAPIER.ColliderDesc;
       if (b.kind === 'pyramid') {
         // Square pyramid = convex hull of the four base corners plus the apex.

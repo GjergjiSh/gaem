@@ -6,6 +6,7 @@
 
 import * as THREE from 'three';
 import { T } from '../core/tuning';
+import { instance, materialsOf, disposeInstance, type Instance } from './models';
 import { level } from '../levels';
 import type { V3 } from '../core/vec';
 import type { Projectiles } from './projectiles';
@@ -18,12 +19,30 @@ const FLASH = 0xff3333;
 interface Dummy {
   root: THREE.Group;
   parts: THREE.Mesh[];
+  /** The visible robot. Null only while its glTF is still in flight. */
+  body: Instance | null;
+  /** Cloned per dummy, so a hit flash tints ONE robot and not the whole map. */
+  mats: THREE.MeshStandardMaterial[];
+  action: string;
   hp: number;
   alive: boolean;
   fallT: number;   // 0..1 death tip-over animation
   flashT: number;  // hit flash time remaining
   fireT: number;   // seconds until this dummy may shoot again
 }
+
+/**
+ * The robots, from assets/robots-pack. Each is rigged with the same 20 clips, so
+ * one set of names drives all four and picking a different body per spawn costs
+ * nothing but the index.
+ */
+export const ROBOTS = ['George', 'Leela', 'Mike', 'Stan'];
+const CLIP = {
+  idle: 'Idle',
+  death: 'Death',
+  hit: 'HitRecieve_1',
+  shoot: 'Shoot',
+};
 
 export class Enemies {
   private dummies: Dummy[] = [];
@@ -46,6 +65,7 @@ export class Enemies {
     for (const d of this.dummies) {
       this.group.remove(d.root);
       for (const p of d.parts) (p.material as THREE.Material).dispose();
+      if (d.body) disposeInstance(d.body.object);
     }
     this.dummies = [];
     const j = exact ? 0 : T.enemy.spawnJitter;
@@ -70,6 +90,7 @@ export class Enemies {
     for (const p of d.parts) {
       (p.material as THREE.MeshLambertMaterial).emissive.setHex(on ? 0x2a3550 : 0);
     }
+    for (const m of d.mats) m.emissive?.setHex(on ? 0x2a3550 : 0);
   }
 
   private spawn(x: number, y: number, z: number) {
@@ -99,12 +120,49 @@ export class Enemies {
     box('limb', BODY_COLOR, 0.2, 0.85, 0.2, -0.15, 0.42);   // legs
     box('limb', BODY_COLOR, 0.2, 0.85, 0.2, 0.15, 0.42);
 
+    // The boxes stay: they are the hitboxes, the head/body damage split, and
+    // the raycast targets, and none of that should depend on a mesh an artist
+    // drew. They just stop being drawn. material.visible rather than
+    // object.visible, because only the former leaves raycasting alone.
+    const robot = instance(ROBOTS[idx % ROBOTS.length], { uniform: true, animate: true });
+    if (robot) {
+      for (const m of parts) (m.material as THREE.Material).visible = false;
+      // Fitted to a unit cube, so this scale IS the robot's height in metres,
+      // and it stands on the group origin, which is the spawn's feet position.
+      const h = 1.8 * k;
+      robot.object.scale.setScalar(h);
+      robot.object.position.y = h / 2;
+      root.add(robot.object);
+    }
+
     this.group.add(root);
     this.dummies.push({
-      root, parts, hp: T.weapon.enemyHp, alive: true, fallT: 0, flashT: 0,
+      root, parts, body: robot, mats: robot ? materialsOf(robot.object) : [],
+      action: '',
+      hp: T.weapon.enemyHp, alive: true, fallT: 0, flashT: 0,
       // Random initial delay so a fresh lap doesn't greet you with one volley.
       fireT: Math.random() * T.enemy.fireInterval,
     });
+  }
+
+  /**
+   * Cross-fade a dummy into one of its clips. Names come from the pack and are
+   * the same on all four robots. A one-shot (death, flinch) clamps on its last
+   * frame instead of snapping back to a pose that would undo the story.
+   */
+  private play(d: Dummy, name: string, once = false) {
+    if (!d.body?.mixer || d.action === name) return;
+    const clip = d.body.clips.find((c) => c.name === name);
+    if (!clip) return;
+    const next = d.body.mixer.clipAction(clip);
+    next.reset();
+    if (once) { next.setLoop(THREE.LoopOnce, 1); next.clampWhenFinished = true; }
+    else next.setLoop(THREE.LoopRepeat, Infinity);
+    const prevName = d.action;
+    const prev = prevName && d.body.clips.find((c) => c.name === prevName);
+    if (prev) d.body.mixer.clipAction(prev).crossFadeTo(next.play(), 0.18, false);
+    else next.fadeIn(0.15).play();
+    d.action = name;
   }
 
   /** Every hittable mesh of every living dummy — raycast targets. */
@@ -201,21 +259,29 @@ export class Enemies {
     const target = new THREE.Vector3(playerPos.x, playerPos.y, playerPos.z);
 
     for (const d of this.dummies) {
+      d.body?.mixer?.update(dt);
       if (d.flashT > 0) {
         d.flashT -= dt;
         const on = d.flashT > 0;
         for (const p of d.parts) {
           (p.material as THREE.MeshLambertMaterial).emissive.setHex(on ? FLASH : 0);
         }
+        for (const m of d.mats) m.emissive?.setHex(on ? FLASH : 0);
       }
       if (!d.alive) {
-        if (d.fallT < 1) {
+        // The pack ships a Death clip, so use it and leave the root alone. The
+        // hand-rolled tip-over is still here for a dummy whose model has not
+        // arrived: something has to read as "dead" either way.
+        if (d.body?.mixer) {
+          this.play(d, CLIP.death, true);
+        } else if (d.fallT < 1) {
           d.fallT = Math.min(1, d.fallT + dt * 3);
           // Rotate about the feet (group origin) so the corpse tips, not floats.
           d.root.rotation.x = (-Math.PI / 2) * (1 - Math.pow(1 - d.fallT, 3));
         }
         continue;
       }
+      this.play(d, CLIP.idle);
 
       // Disarmed from the panel (enemy/shoot). The timer is re-rolled instead of
       // frozen so re-arming staggers them again rather than firing the whole room
@@ -235,6 +301,10 @@ export class Enemies {
       if (this.ray.intersectObjects(walls, false).length > 0) continue;
 
       d.fireT = T.enemy.fireInterval;
+      // Turn to face what it is shooting at. A robot firing out of its own back
+      // is worse than a box doing it, because a box has no front.
+      d.root.rotation.y = Math.atan2(dir.x, dir.z);
+      this.play(d, CLIP.shoot, true);
       projectiles.spawn(muzzle, dir.multiplyScalar(T.enemy.projSpeed), 'enemy',
         this.dummies.indexOf(d));
     }

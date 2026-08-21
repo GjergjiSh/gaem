@@ -119,6 +119,23 @@ const brushes: Brush[] = [];
 const box = (p: [number, number, number], s: [number, number, number], c: number, q?: Q) =>
   brushes.push(q ? { p, s, q, c } : { p, s, c });
 
+/**
+ * The same box, wearing a model from the kit. The collider is unchanged — the
+ * model is stretched to it — so dressing the track cannot alter how it plays.
+ */
+const modelled = (
+  p: [number, number, number], s: [number, number, number], c: number, m: string, q?: Q,
+) => { box(p, s, c, q); brushes[brushes.length - 1].m = m; };
+
+/**
+ * Scenery. `d: true` keeps it out of the physics world entirely, which is the
+ * only reason a track this dense with props is still a track you can carry
+ * speed through: none of it is a thing to hit.
+ */
+const deco = (
+  p: [number, number, number], s: [number, number, number], m: string, q?: Q,
+) => { box(p, s, 0xffffff, q); Object.assign(brushes[brushes.length - 1], { m, d: true }); };
+
 // --- the two crossings, declared up here because the road has to know about
 // them: where the track passes over a deck it is a plaza, not a ledge.
 const HIGH = pathAt(Math.PI / 2);      // (0, +H, 0)
@@ -233,12 +250,27 @@ for (const slot of slots) {
 
   const len = d1 - d0;
   const c = at(mid);
-  box(
-    [c.x, c.y, c.z],
-    [ROAD_W, ROAD_T, len],
-    slot.k % 2 ? ROAD_A : ROAD_B,
-    orient(headingAt(mid), -slopeAt(mid), 0),
-  );
+  const q = orient(headingAt(mid), -slopeAt(mid), 0);
+  modelled([c.x, c.y, c.z], [ROAD_W, ROAD_T, len],
+    slot.k % 2 ? ROAD_A : ROAD_B, 'Platform_4x4_Empty', q);
+
+  // Dressing, all of it decor. A light at each end so the platform reads as a
+  // place before you can make out its edges, a rail down the outside of the
+  // turn, and one tall silhouette per slot so no two look the same at speed.
+  const side = sideAt(mid);
+  const surf = ROAD_T / 2;
+  for (const end of [-1, 1]) {
+    const e = at(mid + end * (len / 2 - 3));
+    deco([e.x + side.x * 12.2, e.y + surf + 2.6, e.z + side.z * 12.2], [1.8, 5.2, 1.8],
+      'Light_Street_1', axisAngle(0, 1, 0, headingAt(mid)));
+  }
+  const tall = ['Antenna_1', 'Antenna_2', 'AC_Stacked', 'Computer_Large'][slot.k % 4];
+  const t = at(mid - len * 0.2);
+  deco([t.x - side.x * 12.8, t.y + surf + 2.0, t.z - side.z * 12.8], [3.0, 4.0, 3.0],
+    tall, axisAngle(0, 1, 0, headingAt(mid) + slot.k));
+  const sgn = at(mid + len * 0.25);
+  deco([sgn.x - side.x * 12.2, sgn.y + surf + 2.8, sgn.z - side.z * 12.2], [0.25, 2.4, 3.4],
+    ['Sign_1', 'Sign_2', 'Sign_3', 'Sign_4'][slot.k % 4], axisAngle(0, 1, 0, headingAt(mid)));
 }
 
 // --- the walls: one per join -------------------------------------------------
@@ -295,10 +327,11 @@ function wallSpan(from: P3, to: P3) {
   const flat = Math.hypot(dx, dz);
   const len = Math.hypot(flat, dy);
   if (len < 0.5) return;
-  box(
+  modelled(
     [(from.x + to.x) / 2, (from.y + to.y) / 2 + WALL_H / 2 - 1, (from.z + to.z) / 2],
     [1.2, WALL_H, len],
     BANKWALL,
+    'Support_Long',
     orient(Math.atan2(dx, dz), -Math.atan2(dy, flat), 0),
   );
 }
@@ -359,8 +392,10 @@ for (const slot of slots) {
 //
 // Every leg has a fallback (grapple, gas), so it reads as a skill line rather
 // than a lock.
-box([HIGH.x, HIGH_DECK.top - 0.8, HIGH.z], [HIGH_DECK.w, 1.6, HIGH_DECK.d], DECK);
-box([LOW.x, LOW_DECK.top - 0.8, LOW.z], [LOW_DECK.w, 1.6, LOW_DECK.d], DECK);
+modelled([HIGH.x, HIGH_DECK.top - 0.8, HIGH.z], [HIGH_DECK.w, 1.6, HIGH_DECK.d],
+  DECK, 'Platform_4x4_Empty');
+modelled([LOW.x, LOW_DECK.top - 0.8, LOW.z], [LOW_DECK.w, 1.6, LOW_DECK.d],
+  DECK, 'Platform_4x4_Empty');
 
 // --- leg 1: the Super gap ----------------------------------------------------
 // A runway west off the high deck, then 30m of nothing with the landing 8m down. Measured against the tune: a run jump carries 10m and a plain

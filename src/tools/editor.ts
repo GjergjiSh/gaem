@@ -42,6 +42,7 @@ import type { Renderer } from '../engine/render';
 import type { RapierWorld } from '../engine/physics';
 import type { Enemies } from '../engine/enemies';
 import { typingInAField } from '../engine/input';
+import { MODEL_NAMES, warm } from '../engine/models';
 import type { V3 } from '../core/vec';
 
 const BRUSH_COLOR = 0x8b5cf6;
@@ -79,6 +80,9 @@ export class Editor {
   private toolbar!: HTMLDivElement;
   private levelSelect!: HTMLSelectElement;
   private status!: HTMLSpanElement;
+  private modelSelect!: HTMLSelectElement;
+  private decorBox!: HTMLLabelElement;
+  private decorCheck!: HTMLInputElement;
   /** Unsaved edits pending, and the debounce timer that will write them. */
   private dirty = false;
   private saveT = 0;
@@ -644,12 +648,58 @@ export class Editor {
     }
   }
 
+  /** Give every selected brush a model — or take it away with the empty entry. */
+  private setModel(name: string) {
+    const hit = this.selection.filter((s) => s.kind === 'brush');
+    if (!hit.length) return;
+    for (const s of hit) {
+      const b = level.brushes[s.index];
+      if (!b) continue;
+      if (name) b.m = name; else delete b.m;
+    }
+    this.touch();
+    const idx = hit.map((s) => s.index);
+    // The model may not be in memory yet; rebuild once it lands rather than
+    // leaving the box showing and no way to tell whether the pick took.
+    if (name) warm(name, () => this.rebuildVisual(idx));
+    this.rebuildVisual(idx);
+  }
+
+  /**
+   * Decor is drawn and never collided with. Toggling it needs the physics world
+   * rebuilt, which happens on exit — the same as every other geometry edit.
+   */
+  private setDecor(on: boolean) {
+    const hit = this.selection.filter((s) => s.kind === 'brush');
+    if (!hit.length) return;
+    for (const s of hit) {
+      const b = level.brushes[s.index];
+      if (!b) continue;
+      if (on) b.d = true; else delete b.d;
+    }
+    this.touch();
+    this.rebuildVisual(hit.map((s) => s.index));
+  }
+
   private refreshStatus() {
     if (!this.status) return;
     const n = this.selection.length;
     const held = this.clip
       ? `  clip ${this.clip.brushes.length + this.clip.enemies.length}`
       : '';
+    // Reflect the selection rather than the last thing picked, or the widgets
+    // start lying the moment you click something else.
+    if (this.modelSelect) {
+      const brushes = this.selection
+        .filter((s) => s.kind === 'brush')
+        .map((s) => level.brushes[s.index])
+        .filter(Boolean);
+      const models = new Set(brushes.map((b) => b.m ?? ''));
+      this.modelSelect.value = models.size === 1 ? [...models][0] : '';
+      this.modelSelect.disabled = brushes.length === 0;
+      this.decorCheck.checked = brushes.length > 0 && brushes.every((b) => b.d === true);
+      this.decorCheck.disabled = brushes.length === 0;
+    }
     const save = this.savedNote ? `  ·  ${this.savedNote}`
       : (CAN_WRITE ? '' : '  ·  localStorage only');
     this.status.textContent = `${n ? `${n} selected` : 'nothing selected'}${held}${save}`;
@@ -706,6 +756,28 @@ export class Editor {
     }
     this.levelSelect.onchange = () => this.switchLevel(this.levelSelect.value);
     this.toolbar.append(this.levelSelect);
+
+    // Model picker. Applies to every selected brush, which is what makes
+    // dressing a level bearable: box-select a row of railings, pick once.
+    this.modelSelect = document.createElement('select');
+    this.modelSelect.style.cssText = this.levelSelect.style.cssText;
+    for (const [text, value] of [['— no model —', ''], ...MODEL_NAMES.map((n) => [n, n])]) {
+      const o = document.createElement('option');
+      o.value = value;
+      o.textContent = text;
+      this.modelSelect.append(o);
+    }
+    this.modelSelect.onchange = () => this.setModel(this.modelSelect.value);
+    this.toolbar.append(this.modelSelect);
+
+    this.decorBox = document.createElement('label');
+    this.decorBox.style.cssText = 'display:flex; gap:4px; align-items:center; opacity:.85;';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.onchange = () => this.setDecor(cb.checked);
+    this.decorBox.append(cb, document.createTextNode('decor'));
+    this.decorCheck = cb;
+    this.toolbar.append(this.decorBox);
 
     btn('save json (backup)', () => this.download());
     btn('load json', () => this.upload());

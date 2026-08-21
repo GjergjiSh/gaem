@@ -4,6 +4,7 @@ import * as V from '../core/vec';
 import { currentCap } from '../core/solver';
 import type { CollisionWorld, Intent, Player } from '../core/types';
 import { level } from '../levels';
+import { instance, warm } from './models';
 
 /** Unit square pyramid: 1x1 base centred at y=-0.5, apex at (0, 0.5, 0). */
 function pyramidGeometry(): THREE.BufferGeometry {
@@ -33,6 +34,9 @@ export class Renderer {
   /** 0..1 scope amount, written by the weapon each frame. Pulls FOV in. */
   adsT = 0;
   private levelGroup = new THREE.Group();
+  private sky!: THREE.HemisphereLight;
+  private sun!: THREE.DirectionalLight;
+  private fill!: THREE.DirectionalLight;
 
   private camPos = new THREE.Vector3(0, 5, 10);
   private camTarget = new THREE.Vector3();
@@ -49,10 +53,16 @@ export class Renderer {
     this.scene.background = new THREE.Color(0x0b0d12);
     this.scene.fog = new THREE.Fog(0x0b0d12, 90, 320);
 
-    this.scene.add(new THREE.HemisphereLight(0x9fb4ff, 0x1a1a22, 1.1));
-    const sun = new THREE.DirectionalLight(0xffffff, 1.4);
-    sun.position.set(30, 60, 20);
-    this.scene.add(sun);
+    this.sky = new THREE.HemisphereLight(0x9fb4ff, 0x1a1a22, T.light.sky);
+    this.scene.add(this.sky);
+    this.sun = new THREE.DirectionalLight(0xffffff, T.light.sun);
+    this.sun.position.set(30, 60, 20);
+    this.scene.add(this.sun);
+    // From behind and below the key. The kit's models are dark and unlit faces
+    // read as holes without something to catch them.
+    this.fill = new THREE.DirectionalLight(0xbfd4ff, T.light.fill);
+    this.fill.position.set(-40, 25, -30);
+    this.scene.add(this.fill);
 
     // The camera goes IN the scene so anything parented to it — the sword
     // viewmodel, its slash — is part of the traversal and actually gets drawn.
@@ -87,6 +97,18 @@ export class Renderer {
    * geometry with mesh.scale = brush size, so an editor gizmo dragging
    * position/rotation/scale IS the brush transform — no conversion layer.
    */
+  /** Solid brushes only — what a projectile or a wave can actually be stopped by. */
+  get wallMeshes(): THREE.Mesh[] {
+    return this.brushMeshes.filter((m) => !m.userData.decor);
+  }
+
+  /** Lights follow the sliders. Three assignments a frame is not worth an event. */
+  private syncLights() {
+    this.sky.intensity = T.light.sky;
+    this.sun.intensity = T.light.sun;
+    this.fill.intensity = T.light.fill;
+  }
+
   buildLevel() {
     for (const child of [...this.levelGroup.children]) {
       this.levelGroup.remove(child);
@@ -107,11 +129,35 @@ export class Renderer {
       else if (b.r) m.rotation.set(b.r[0], b.r[1], b.r[2]);
       m.scale.set(b.s[0], b.s[1], b.s[2]);
       m.userData.brushIndex = i;
+      m.userData.decor = b.d === true;
       // Edge lines ride along as a child, so every gizmo drag moves them too.
-      m.add(new THREE.LineSegments(
+      const edges = new THREE.LineSegments(
         pyramid ? PYRAMID_EDGES : BOX_EDGES,
         new THREE.LineBasicMaterial({ color: 0x000000, opacity: 0.35, transparent: true }),
-      ));
+      );
+      m.add(edges);
+
+      // A model, if this brush names one. It is a CHILD of the box rather than
+      // a replacement for it: the box keeps its place in brushMeshes as the
+      // raycast target for the sword, the Getsuga and the editor, keeps its
+      // brushIndex, and — because it is unit geometry scaled to the brush —
+      // stretches the model to the collider exactly, live, as you drag a handle.
+      if (b.m) {
+        const inst = instance(b.m);
+        if (inst) {
+          m.add(inst.object);
+          // The box itself stops drawing, but stays raycastable and selectable.
+          // material.visible, not object.visible: the renderer skips it either
+          // way, and only this one leaves the raycast alone.
+          (m.material as THREE.Material).visible = false;
+          edges.visible = false;
+        } else {
+          // Not in memory yet. Fetch it and rebuild once, rather than popping
+          // in a frame later with the box still showing underneath.
+          warm(b.m, () => this.buildLevel());
+        }
+      }
+
       this.levelGroup.add(m);
       this.brushMeshes.push(m);
     }
@@ -132,6 +178,7 @@ export class Renderer {
 
   /** Draw the scene with the camera exactly as-is — the editor's render path. */
   renderOnly() {
+    this.syncLights();
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -197,6 +244,7 @@ export class Renderer {
       this.camera.updateProjectionMatrix();
     }
 
+    this.syncLights();
     this.renderer.render(this.scene, this.camera);
   }
 

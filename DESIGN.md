@@ -2043,3 +2043,84 @@ Platforms are found by **shape** — a slab under 1.6 m thick with a footprint o
 10 m — rather than by an exact size match. Matching `[22,1,16]` exactly would
 quietly skip any platform that had been resized in the editor, and "some of them
 got it" is the worst available outcome.
+
+---
+
+## 27. Art, without letting art touch the physics
+
+`assets/` holds a platform kit (52 props) and four rigged robots. Wiring them in
+had one hard rule: **nothing an artist drew may change how the game plays.** The
+movement is the thing this project is, and every number in §20–§26 was measured
+against brushes. So models decorate colliders; they never become them.
+
+### Unit space is what keeps the two apart
+
+`models.ts` fits every model into a **1×1×1 cube centred on the origin**, and
+that one decision does all the work. A brush mesh already carries unit geometry
+scaled to the brush's size — that is what makes the editor gizmo work — so a
+unit-fitted model added as its *child* is stretched to the collider exactly, for
+free, live, while you drag a handle.
+
+The box itself does not go away. It stops drawing (`material.visible = false`,
+not `object.visible` — only the former leaves raycasting alone) and stays in
+`brushMeshes` as the target for the sword, the Getsuga and editor selection,
+keeping its `brushIndex`. The deck you stand on and the deck you see are the
+same object.
+
+### Decor: drawn, never collided with
+
+A prop that is a collider is an obstacle, and this game has already learned what
+obstacles on a running surface cost. `Brush.d` marks a brush as decor: the
+physics world skips it outright, and the impact/line-of-sight raycasts read
+`wallMeshes` (solid only) rather than `brushMeshes`, so an antenna cannot eat a
+Getsuga or give a dummy cover.
+
+Measured after dressing both tracks:
+
+| | before | after |
+|---|---|---|
+| loop-course colliders | 75 | **75** (+132 decor) |
+| figure8 colliders | 113 | **113** (+64 decor) |
+| road lanes blocked, any body height | 0 | **0** |
+| figure8 joins walled | 13 / 2 deck / 1 part | unchanged |
+
+Props are mounted just *outside* the deck edge rather than on it. Decor cannot
+block you, but running through a lamppost looks worse than not having one, and a
+railing you pass through reads as a bug. Outside the edge it reads as
+edge-mounted, which is what street furniture on a raised road actually is.
+
+### The robots
+
+Rigged, with 20 clips each. The dummies keep their boxes — head, body, limbs —
+because those are the hitboxes, the head/body damage split and the raycast
+targets, and none of that should depend on a mesh someone drew. The boxes simply
+stop being drawn, and a robot stands in their place, fitted uniformly so it is
+not squashed to a capsule's proportions.
+
+What the clips buy: **Idle** standing, **Death** on the kill (the hand-rolled
+tip-over is still there for a dummy whose model has not arrived — something has
+to read as dead either way), **HitRecieve** on a hit, **Shoot** when firing, and
+the dummy now turns to face what it is shooting at. A robot firing out of its own
+back is worse than a box doing it, because a box has no front.
+
+Materials are cloned per instance. glTF shares one material across every copy of
+a model, so tinting a single dummy red on a hit would flash the whole map — the
+same trap as sharing a geometry, one level up.
+
+### The rest of it
+
+- `light.sky` / `light.sun` / `light.fill` in the tune. The kit's materials sit
+  around 0.17 grey with zero metalness, much darker than the flat colours the
+  placeholder boxes used, so the look needs dialling in live rather than
+  guessing in code. The fill light exists so unlit faces are dim, not black.
+- The editor gets a **model dropdown** and a **decor** checkbox, both applying to
+  the whole selection — box-select a row of railings, pick once — and both
+  showing the selection's actual state rather than the last thing picked.
+- Models load before the first frame (`preloadModels`), so the world is never
+  briefly made of placeholder boxes that then pop. Anything a level names is
+  collected from every built-in up front; anything else warms on demand and
+  triggers one rebuild when it lands.
+- Every `.gltf` under `/assets` is registered by an `import.meta.glob` with
+  `?url`, so the files stay where they were dropped instead of being copied into
+  `public/`. All 56 are emitted into a build whether used or not — worth
+  trimming if the 35 MB `dist` ever matters.

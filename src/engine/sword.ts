@@ -483,7 +483,7 @@ export class Sword {
       // with its wingtip carrying on is the right read anyway.
       this.ray.set(w.group.position, w.dir);
       this.ray.far = step;
-      const wall = this.ray.intersectObjects(this.gfx.brushMeshes, false)[0];
+      const wall = this.ray.intersectObjects(this.gfx.wallMeshes, false)[0];
       if (wall) {
         w.group.position.copy(wall.point);
         w.fade = FADE;

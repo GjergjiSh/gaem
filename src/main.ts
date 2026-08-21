@@ -8,18 +8,22 @@ import { Renderer } from './engine/render';
 import { Panel } from './tools/panel';
 import { Hud } from './tools/hud';
 import { Editor } from './tools/editor';
-import { Enemies } from './engine/enemies';
+import { Enemies, ROBOTS } from './engine/enemies';
+import { preloadModels } from './engine/models';
 import { Weapon } from './engine/weapon';
 import { Projectiles } from './engine/projectiles';
 import { Sword } from './engine/sword';
 import { Hook } from './engine/hook';
 import { Rings } from './tools/rings';
-import { level } from './levels';
+import { level, LEVEL_MODELS } from './levels';
 
 const FIXED = 1 / 120;
 const MAX_STEPS = 8;
 
 await initPhysics();
+// Models before anything builds a scene, so the world is never briefly made of
+// placeholder boxes that then pop. Everything else loads on demand.
+await preloadModels([...ROBOTS, ...LEVEL_MODELS]);
 
 const canvas = document.getElementById('view') as HTMLCanvasElement;
 const world = new RapierWorld(level.brushes, level.spawn);
@@ -227,7 +231,7 @@ function frame(now: number) {
   weapon.update(raw);
   sword.update(raw, player);
   hook.update(raw, player);
-  enemies.update(raw, player.pos, projectiles, gfx.brushMeshes);
+  enemies.update(raw, player.pos, projectiles, gfx.wallMeshes);
   projectiles.update(raw, player.pos);
   rings.update(raw, {
     stamina: player.stamina / T.stamina.max,

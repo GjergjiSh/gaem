@@ -109,7 +109,7 @@ export class Projectiles {
       if (remaining <= 0) break;
       this.ray.set(from, dir);
       this.ray.far = remaining;
-      const targets = [...this.enemies.aliveMeshes, ...this.gfx.brushMeshes];
+      const targets = [...this.enemies.aliveMeshes, ...this.gfx.wallMeshes];
       const hit = this.ray.intersectObjects(targets, false)[0];
       if (!hit) break;
 
@@ -170,8 +170,8 @@ export class Projectiles {
         this.ray.far = dist;
         // Player + reflected shots hurt dummies; enemy shots only care about walls.
         const targets = p.kind === 'enemy'
-          ? this.gfx.brushMeshes
-          : [...this.enemies.aliveMeshes, ...this.gfx.brushMeshes];
+          ? this.gfx.wallMeshes
+          : [...this.enemies.aliveMeshes, ...this.gfx.wallMeshes];
         const hit = this.ray.intersectObjects(targets, false)[0];
         if (hit) {
           this.impactFlash(hit.point);

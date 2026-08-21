@@ -388,6 +388,16 @@ export const T = {
     spreadScale: 260,
   },
 
+  light: {
+    // The glTF kit's materials sit around 0.17 grey with no metalness, which is
+    // a lot darker than the flat colours the placeholder boxes used. These are
+    // here so the look can be dialled in live rather than guessed at in code.
+    sky: 1.1,           // hemisphere fill from above
+    sun: 1.6,           // the key light
+    fill: 0.55,         // a second light facing the other way, so unlit faces
+                        // are dim rather than black
+  },
+
   meters: {
     // Four flat bars stacked in the top-right corner: fuel, stamina, sword,
     // getsuga. They used to be big arcs flanking the crosshair, which put them
@@ -646,6 +656,9 @@ export const META: Record<string, { min?: number; max?: number; step?: number; d
   'crosshair/thickness': { min: 1, max: 10, step: 1 },
   'crosshair/gap': { min: 0, max: 60, step: 1, doc: 'Centre to the inner end of each tick.' },
   'crosshair/opacity': { min: 0.1, max: 1, step: 0.05 },
+  'light/sky': { min: 0, max: 4, step: 0.05 },
+  'light/sun': { min: 0, max: 6, step: 0.05 },
+  'light/fill': { min: 0, max: 4, step: 0.05, doc: 'Back light. 0 = unlit faces go black.' },
   'meters/width': { min: 40, max: 400, step: 2, doc: 'Bar length in px.' },
   'meters/height': { min: 2, max: 24, step: 1, doc: 'Bar thickness in px.' },
   'meters/gap': { min: 0, max: 30, step: 1, doc: 'Px between stacked bars.' },

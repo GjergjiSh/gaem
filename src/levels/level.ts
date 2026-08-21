@@ -78,6 +78,19 @@ for (const [path, mod] of Object.entries(TRACK_MODULES)) {
 export const LEVEL_NAMES = Object.keys(BUILTINS).sort();
 
 /**
+ * Every model any built-in level names, so they can all be fetched before the
+ * first frame. Cheap to compute (the levels are already in memory) and it means
+ * switching tracks in the editor never shows a box where a platform should be.
+ */
+export const LEVEL_MODELS: string[] = (() => {
+  const set = new Set<string>();
+  for (const make of Object.values(BUILTINS)) {
+    for (const b of make().brushes) if (b.m) set.add(b.m);
+  }
+  return [...set];
+})();
+
+/**
  * Fold a just-written track back into the in-memory copies, so re-picking it
  * from the dropdown gives what is on disk rather than what was bundled at boot.
  */
