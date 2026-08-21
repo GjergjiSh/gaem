@@ -929,7 +929,8 @@ export class Editor {
     this.toolbar.append(this.status);
 
     const help = document.createElement('span');
-    help.textContent = 'WASD+QE fly · shift fast · shift+click multi · ctrl+C/V/D';
+    help.textContent = 'click select · ctrl+drag BOX SELECT · shift+click add · '
+      + 'WASD+QE fly (shift fast) · 1/2/3 move/rot/scale · ctrl+C/V/D · del';
     help.style.cssText = 'opacity:.45; padding-left:6px;';
     this.toolbar.append(help);
 
