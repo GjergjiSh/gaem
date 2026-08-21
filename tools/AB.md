@@ -35,26 +35,35 @@ your tree; it never travels the other way automatically.
 
 ## The loop
 
+**You, once:** start the play server in your own terminal and leave it.
+
+```sh
+cd Repos/gaem-play
+npm run play          # http://localhost:5174
+```
+
+That is the only command on your side. It is yours, in your terminal, and
+nothing else will start one behind your back.
+
 **Me, when a feature is finished and verified:**
 
 ```
-npm run publish
+npm run deploy
 ```
 
-That moves the `playable` ref. It writes nothing into your tree — deliberately.
-Deploying into a running server would trip its watcher and reload the page under
-you, which is the thing this whole arrangement exists to prevent.
+That writes the new code straight into your tree and commits it there. You do
+nothing.
 
-**You, whenever you are between runs:**
+It can push directly because **the page no longer reloads itself**. `main.ts`
+used to answer HMR with a bare `location.reload()`, which yanked the game out
+from under whoever was playing — the exact problem the two trees exist to solve.
+Now it hands the update to `tools/updates.ts`: Vite has already fetched the new
+modules, the running page keeps its snapshot, and a badge appears saying a build
+is waiting. It applies itself the moment you pause, or immediately if you click
+it. Never mid-run.
 
-```
-npm run update        # in Repos/gaem-play
-```
-
-It brings across the published code, skips everything you own, commits the code
-on `play-local`, and prints what changed. Then reload the tab.
-
-Nothing is automatic. The game only ever changes under you when you ask it to.
+`npm run update` still exists as a manual pull if you ever want one, but nothing
+requires it.
 
 ## First-time setup
 
@@ -79,6 +88,9 @@ And start it:
 cd ../gaem-play && npm run play         # http://localhost:5174
 ```
 
+`npm run play` refuses to run from the dev tree. Serving the wrong tree on the
+right port looks like it worked, which is worse than an error.
+
 ## Reading a bug report
 
 The HUD's first line is `branch@sha`. `play-local@abc1234` is your tree,
@@ -87,8 +99,10 @@ play` after an update if you want the stamp to match.
 
 ## Things worth knowing
 
-- `npm run update` does not delete files that the published commit removed. If I
-  delete a source file, say so and run `git clean` on your side.
+- A deploy does not delete files that the commit removed. If I delete a source
+  file, say so and run `git clean` on your side.
+- Nothing but you ever starts a server. If a port is busy and you did not start
+  it, that is a bug — say so.
 - Your tree will always show your tunes and levels as uncommitted changes in
   `git status`. That is correct — it is how you can see what is yours.
 - Running both servers means two node processes and two copies of `assets/`

@@ -20,7 +20,8 @@
 // exactly as it did before because its centroid is its own origin.
 //
 // Keys: 1/2/3 move/rotate/scale · WASD+QE fly (shift = fast) · shift+click adds
-// to the selection · ctrl+C/V copy and paste · Delete removes.
+// to the selection · ctrl+drag box-selects · ctrl+C/V copy and paste ·
+// Delete removes.
 //
 // All edits mutate `level` (the live singleton) directly. Visuals rebuild
 // immediately; physics colliders rebuild on exit / level switch, which is when
@@ -95,6 +96,11 @@ export class Editor {
   private modeButtons: Record<string, HTMLButtonElement> = {};
   private snap = true;
   private downAt = { x: 0, y: 0 };
+  /** Live box-select. Null when not dragging one. */
+  private marquee: { x0: number; y0: number; x1: number; y1: number; add: boolean } | null = null;
+  private marqueeEl!: HTMLDivElement;
+  /** Orbit's own enabled flag, parked while a box drag borrows the mouse. */
+  private orbitWas = false;
   /** Held keys for the fly camera. The map is 268m across; orbiting to the far
    *  side of it one drag at a time is not navigation. */
   private flyKeys = new Set<string>();
@@ -126,15 +132,55 @@ export class Editor {
     this.gizmo.addEventListener('objectChange', () => this.writeBack());
     this.applySnap();
 
+    this.buildMarquee();
+
     canvas.addEventListener('pointerdown', (e) => {
       this.downAt = { x: e.clientX, y: e.clientY };
+      if (!this.active || e.button !== 0) return;
+      if (!(e.ctrlKey || e.metaKey)) return;
+      // Never over the gizmo: ctrl-dragging an axis handle should still move
+      // the thing you are holding.
+      if ((this.gizmo as any).dragging || (this.gizmo as any).axis) return;
+      e.preventDefault();
+      // OrbitControls has already seen this same pointerdown — its listener was
+      // registered first and there is no ordering trick that beats it. But its
+      // MOVE handler re-checks `enabled` every event, so switching it off here
+      // stops the drag from also spinning the camera.
+      this.orbitWas = this.orbit.enabled;
+      this.orbit.enabled = false;
+      this.marquee = { x0: e.clientX, y0: e.clientY, x1: e.clientX, y1: e.clientY, add: e.shiftKey };
+      this.drawMarquee();
     });
+
+    canvas.addEventListener('pointermove', (e) => {
+      if (!this.marquee) return;
+      this.marquee.x1 = e.clientX;
+      this.marquee.y1 = e.clientY;
+      this.drawMarquee();
+    });
+
     canvas.addEventListener('pointerup', (e) => {
+      if (this.marquee) return;      // the window handler below owns this gesture
       if (!this.active || e.button !== 0) return;
       if (Math.hypot(e.clientX - this.downAt.x, e.clientY - this.downAt.y) > 4) return;
       if ((this.gizmo as any).dragging || (this.gizmo as any).axis) return;
       this.pick(e.clientX, e.clientY, e.shiftKey);
     });
+
+    // Finishing the drag is on WINDOW, because letting go outside the viewport
+    // still has to end it or the rectangle stays painted on screen. Only the
+    // finish, though — the click-pick above stays on the canvas, or a click on
+    // a toolbar button would bubble up here and select whatever is behind it.
+    addEventListener('pointerup', () => {
+      if (!this.marquee) return;
+      const m = this.marquee;
+      this.endMarquee();
+      // A ctrl-click that never really moved is a click. Treat it as one rather
+      // than selecting the empty set and wiping what was held.
+      if (Math.hypot(m.x1 - m.x0, m.y1 - m.y0) <= 4) this.pick(m.x0, m.y0, m.add);
+      else this.boxSelect(m);
+    });
+    addEventListener('pointercancel', () => { if (this.marquee) this.endMarquee(); });
 
     addEventListener('keydown', (e) => {
       if (typingInAField(e)) return;
@@ -147,6 +193,7 @@ export class Editor {
         if (e.code === 'KeyD') { e.preventDefault(); this.duplicateSelected(); }
         return;                      // ctrl+W etc. must not also fly the camera
       }
+      if (e.code === 'Escape' && this.marquee) { this.endMarquee(); return; }
       if (e.code === 'Delete' || e.code === 'Backspace') this.deleteSelected();
       if (e.code === 'Digit1') this.setMode('translate');
       if (e.code === 'Digit2') this.setMode('rotate');
@@ -199,6 +246,8 @@ export class Editor {
     this.active = false;
     document.body.classList.remove('editing');
     this.toolbar.style.display = 'none';
+    // F2 mid-drag: the rectangle would otherwise stay painted over the game.
+    if (this.marquee) this.endMarquee();
     this.clearSelection();
     this.orbit.enabled = false;
     this.gizmo.enabled = false;
@@ -247,6 +296,93 @@ export class Editor {
     this.orbit.update();
   }
 
+  // ------------------------------------------------------------ box select
+
+  private buildMarquee() {
+    this.marqueeEl = document.createElement('div');
+    this.marqueeEl.style.cssText = `
+      position:fixed; z-index:25; display:none; pointer-events:none;
+      border:1px solid rgba(125,211,252,.95);
+      background:rgba(56,189,248,.14);`;
+    document.body.append(this.marqueeEl);
+  }
+
+  private drawMarquee() {
+    const m = this.marquee;
+    if (!m) { this.marqueeEl.style.display = 'none'; return; }
+    this.marqueeEl.style.display = 'block';
+    this.marqueeEl.style.left = `${Math.min(m.x0, m.x1)}px`;
+    this.marqueeEl.style.top = `${Math.min(m.y0, m.y1)}px`;
+    this.marqueeEl.style.width = `${Math.abs(m.x1 - m.x0)}px`;
+    this.marqueeEl.style.height = `${Math.abs(m.y1 - m.y0)}px`;
+  }
+
+  private endMarquee() {
+    this.marquee = null;
+    this.marqueeEl.style.display = 'none';
+    this.orbit.enabled = this.orbitWas;
+  }
+
+  /**
+   * Everything whose CENTRE falls inside the rectangle.
+   *
+   * Centres rather than outlines, deliberately. Testing a projected bounding box
+   * for overlap sounds more generous, but the decks here are 22 metres across —
+   * their screen box covers most of the viewport, so almost any drag anywhere
+   * would sweep up every platform in sight. "Put the box around the middles of
+   * the things you want" is a rule you can aim with.
+   *
+   * No occlusion test: something behind a platform still selects. This is an
+   * editor, and the thing you cannot see is usually exactly the thing you were
+   * trying to get at.
+   */
+  private boxSelect(m: { x0: number; y0: number; x1: number; y1: number; add: boolean }) {
+    const canvas = this.gfx.renderer.domElement;
+    const r = canvas.getBoundingClientRect();
+    const cam = this.gfx.camera;
+    cam.updateMatrixWorld();
+
+    const lo = { x: Math.min(m.x0, m.x1), y: Math.min(m.y0, m.y1) };
+    const hi = { x: Math.max(m.x0, m.x1), y: Math.max(m.y0, m.y1) };
+    const world = new THREE.Vector3();
+
+    /** Screen position, or null if it is behind the camera. */
+    const onScreen = (p: THREE.Vector3) => {
+      // View space first: the camera looks down -Z, so anything at z >= 0 is
+      // behind it. project() alone is not enough — it flips the sign of points
+      // behind the lens and lands them back inside the rectangle.
+      const view = p.clone().applyMatrix4(cam.matrixWorldInverse);
+      if (view.z >= 0) return null;
+      const ndc = p.clone().project(cam);
+      return {
+        x: r.left + (ndc.x * 0.5 + 0.5) * r.width,
+        y: r.top + (-ndc.y * 0.5 + 0.5) * r.height,
+      };
+    };
+    const inside = (p: { x: number; y: number } | null) =>
+      !!p && p.x >= lo.x && p.x <= hi.x && p.y >= lo.y && p.y <= hi.y;
+
+    if (!m.add) this.clearSelection();
+
+    for (const mesh of this.gfx.brushMeshes) {
+      const index = mesh.userData.brushIndex;
+      if (index === undefined) continue;
+      mesh.getWorldPosition(world);
+      if (!inside(onScreen(world))) continue;
+      this.addToSelection('brush', index, true);
+    }
+    // aliveTargets is one entry per DUMMY at chest height. Going through the
+    // hit meshes instead would offer the same robot a dozen times, once per
+    // bone box, and put its selection marker on a shin.
+    for (const t of this.enemies.aliveTargets()) {
+      if (!inside(onScreen(t.pos))) continue;
+      this.addToSelection('enemy', t.idx, true);
+    }
+
+    // Once, at the end. refreshStatus rides along and reports the new count.
+    this.rebuildPivot();
+  }
+
   // ------------------------------------------------------------ selection
 
   private pick(cx: number, cy: number, add: boolean) {
@@ -284,7 +420,12 @@ export class Editor {
     this.addToSelection(kind, index);
   }
 
-  private addToSelection(kind: Sel['kind'], index: number) {
+  /**
+   * `defer` skips the pivot rebuild, for callers adding many at once. Rebuilding
+   * per item re-parents the whole selection every time, which is quadratic — a
+   * box drag over a few hundred brushes would visibly hitch.
+   */
+  private addToSelection(kind: Sel['kind'], index: number, defer = false) {
     const obj = kind === 'enemy'
       ? this.enemies.rootOf(index)
       : this.gfx.brushMeshes[index];
@@ -292,7 +433,7 @@ export class Editor {
     if (this.selection.some((s) => s.kind === kind && s.index === index)) return;
     this.selection.push({ kind, index, obj, home: obj.parent });
     this.highlight(kind, index, true);
-    this.rebuildPivot();
+    if (!defer) this.rebuildPivot();
   }
 
   /** Re-establish a selection from indices, after a rebuild invalidated the objects. */

@@ -10,6 +10,7 @@ import { Hud } from './tools/hud';
 import { Editor } from './tools/editor';
 import { Pause } from './tools/pause';
 import { Wheel } from './tools/wheel';
+import { updates } from './tools/updates';
 import { Enemies, ROBOTS } from './engine/enemies';
 import { preloadModels } from './engine/models';
 import { Weapon } from './engine/weapon';
@@ -221,6 +222,9 @@ function frame(now: number) {
   // clears shootPressed whether or not time passed — so a zero-length frame
   // still fires a shot into a frozen world.
   if (pause.active) {
+    // Frozen is the one moment a reload costs nothing, so a build waiting on
+    // disk takes it here rather than mid-run.
+    updates.applyWhenIdle(true);
     gfx.update(player, input.intent, 0, world);
     hud.update(player, { run: run.time, splits: run.splits, best }, panel.abLabel, input.lookMode,
       T.camera.firstPerson ? 'first person' : 'third person',
@@ -332,4 +336,6 @@ requestAnimationFrame(frame);
 };
 
 // Vite HMR: keep the tune, drop the stale module.
-if (import.meta.hot) import.meta.hot.accept(() => location.reload());
+// A new build does NOT interrupt a run. See tools/updates.ts — the page holds
+// its snapshot and reloads when the game is paused, or when you click the badge.
+if (import.meta.hot) import.meta.hot.accept(() => updates.arrived());
