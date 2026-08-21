@@ -4,3 +4,6 @@ dist/
 # devsave writes <file>.tmp and renames it into place. A crash between the two
 # leaves one behind, and `git add -A` can catch one mid-write.
 *.tmp
+
+# scratch output from the verify tools
+.verify-tmp/

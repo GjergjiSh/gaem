@@ -188,6 +188,9 @@ const GUNS: Gun[] = [
   },
 ];
 
+/** Slot order, for anything that has to draw the arsenal — the weapon wheel. */
+export const GUN_NAMES = GUNS.map((g) => g.name);
+
 export class Weapon {
   /** 0..1 smoothed scope amount — the renderer turns this into FOV. */
   adsT = 0;

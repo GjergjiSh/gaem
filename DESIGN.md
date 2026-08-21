@@ -2430,3 +2430,101 @@ Verified with `npm run verify:slam`, which compiles `core/` and steps the real
 solver against a stub world — jump-cancel, the dive, the additivity, and that a
 plain ground slam still slams, still applies `keepH`, and still refuses with the
 floor right there.
+
+---
+
+## 31. One clock, and robots you can stand on
+
+### Pause and the weapon wheel are the same lever
+
+Escape freezes the game; holding E fans the arsenal out and slows the world to a
+fifth. Both are time control, so there is one mechanism — but it is a
+**multiplication, never an assignment**:
+
+```ts
+const scale = T.world.timeScale * wheel.timeScale;
+```
+
+`world.timeScale` is a slider someone has dialled in. A wheel that wrote to it
+would hand back a different tune than it found, and the panel would start lying.
+
+The bigger fix was that slow motion did not previously exist. `acc += raw *
+T.world.timeScale` scaled **only the solver**; weapons, animations, projectiles
+and the camera all took `raw`. Halving that is not slow motion, it is the player
+being slowed down while the world carries on. Every per-frame system now takes
+the scaled `dt`.
+
+**Pause is not a scale of zero.** A zero-length frame still runs every system,
+and systems consume input edges unconditionally — the weapon clears
+`shootPressed` whether or not time passed — so a frozen game would still fire
+the shot you clicked. Pause skips the simulation outright and only renders.
+
+Escape also drops pointer lock and the browser gives us no say in it. That is
+correct behaviour for a paused game, so the only thing to handle is coming back:
+a click resumes *and* recaptures, because the canvas's own lock request rides
+the same gesture.
+
+### The wheel has no cursor
+
+The pointer is locked, so there is nothing on screen to move. The wheel reads
+the same raw mouse deltas the look would have used, with `input.suppressLook`
+stopping the camera reading them at the same time — otherwise choosing a gun
+spins you round.
+
+Selection is by **direction, not position**. You flick toward a slice; how far
+past the dead zone does not matter. That is what makes it usable with a rocket
+in the air. Slice 0 sits at the top and they run clockwise:
+
+```
+a = atan2(dy, dx) + PI/2      // screen y grows down, so up is -PI/2
+pick = round(a / step) mod n
+```
+
+Verified over all 360 degrees: every slice centre selects itself, up is slice 0,
+and no direction maps outside the ring. Releasing E below the dead zone commits
+nothing, which reads as "changed my mind" rather than as picking whatever a
+cursor happened to be nearest.
+
+### Robots are solid, and the solver must not know
+
+Living dummies are now cylinders in the physics world — solid to the character,
+stand-on-able, and never pushing back. A cylinder rather than a capsule because
+a rounded top is not something you can stand on, and standing on them is most of
+the point.
+
+The dangerous half is the second one. **The solver rays the world constantly** —
+clear air under a slam, a ledge to vault, a wall to run, a cable's line of sight
+— and every one of those questions is about the *level*. If a robot can answer
+any of them, standing next to one silently changes how you move, and movement is
+the thing this project protects hardest.
+
+So collision groups split the two:
+
+| | membership | seen by |
+|---|---|---|
+| level | `LEVEL` | the character, and every ray |
+| enemy | `ENEMY` | the character only |
+| `ray` / `rayHit` | `RAY_LEVEL` | level only |
+| ground probe in `move()` | `RAY_STAND` | level **and** enemies |
+
+The ground probe is the single deliberate exception: standing on a robot's head
+should ground you, and that is the one question where a robot is a legitimate
+answer.
+
+Colliders are kinematic rather than fixed, because the meathook hauls bodies
+across the map and being moved should be a first-class operation rather than a
+static body being poked.
+
+Verified against real Rapier by `npm run verify:collision`: you stop short of a
+robot instead of walking through it, you can stand on one and be *grounded*, a
+ray straight down through one reports the floor at 6 m rather than the robot, a
+ray through its chest reports nothing at all, a real wall still stops a solver
+ray, `enemy.collide` off walks straight through, and a hauled robot leaves no
+invisible wall behind. And the load-bearing one: **200 steps over a step-up
+produce a bit-for-bit identical path with and without enemies in the world.**
+
+One trap worth recording. Rapier's query pipeline is empty until the world
+steps, so a ray into a freshly built world reports nothing — *including through
+solid level geometry*. This never shows up in the game because `move()` steps as
+part of its job, but it made the first run of the test look like the collision
+groups were excluding everything, when the groups were right all along.

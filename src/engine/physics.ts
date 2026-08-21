@@ -10,6 +10,33 @@ import type { Brush } from '../levels/types';
 
 export async function initPhysics() { await RAPIER.init(); }
 
+/*
+ * Collision groups. The point of them here is one guarantee: enemy bodies are
+ * solid to the CHARACTER and invisible to the solver's raycasts.
+ *
+ * The solver rays the world constantly — clear air under a slam, a ledge to
+ * vault, a wall to run, a cable's line of sight — and every one of those
+ * questions is about the level. Let a robot answer them and standing next to
+ * one silently changes how you move, which is the one thing that must not
+ * happen. So the public ray/rayHit test LEVEL only, and the ground probe inside
+ * move() is the single exception: it tests both, because standing on a robot's
+ * head should ground you.
+ *
+ * Packed as (membership << 16) | filter. Two collide when each one's filter
+ * includes the other's membership.
+ */
+const G_LEVEL = 0b0001;
+const G_ENEMY = 0b0010;
+const G_CHAR = 0b0100;
+const G_RAY = 0b1000;
+
+const groups = (membership: number, filter: number) => ((membership << 16) | filter) >>> 0;
+
+/** A ray that sees the level and nothing else. */
+const RAY_LEVEL = groups(G_RAY, G_LEVEL);
+/** ...and one that also sees the robots, for the ground probe. */
+const RAY_STAND = groups(G_RAY, G_LEVEL | G_ENEMY);
+
 export class RapierWorld implements CollisionWorld {
   world: RAPIER.World;
   controller: RAPIER.KinematicCharacterController;
@@ -17,6 +44,10 @@ export class RapierWorld implements CollisionWorld {
   collider: RAPIER.Collider;
 
   private levelColliders: RAPIER.Collider[] = [];
+  private enemyBodies: RAPIER.RigidBody[] = [];
+  private enemyColliders: RAPIER.Collider[] = [];
+  /** Shape of the current enemy colliders, so a slider change rebuilds them. */
+  private enemyKey = '';
 
   constructor(brushes: Brush[], spawn: V3) {
     this.world = new RAPIER.World({ x: 0, y: 0, z: 0 }); // gravity is the solver's job
@@ -27,7 +58,8 @@ export class RapierWorld implements CollisionWorld {
       RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(spawn.x, spawn.y, spawn.z),
     );
     this.collider = this.world.createCollider(
-      RAPIER.ColliderDesc.capsule(halfHeight, T.character.radius),
+      RAPIER.ColliderDesc.capsule(halfHeight, T.character.radius)
+        .setCollisionGroups(groups(G_CHAR, G_LEVEL | G_ENEMY)),
       this.body,
     );
 
@@ -59,6 +91,7 @@ export class RapierWorld implements CollisionWorld {
       d.setTranslation(b.p[0], b.p[1], b.p[2]);
       if (b.q) d.setRotation({ x: b.q[0], y: b.q[1], z: b.q[2], w: b.q[3] });
       else if (b.r) d.setRotation(euler(b.r[0], b.r[1], b.r[2]));
+      d.setCollisionGroups(groups(G_LEVEL, G_CHAR | G_RAY));
       this.levelColliders.push(this.world.createCollider(d));
     }
   }
@@ -68,6 +101,51 @@ export class RapierWorld implements CollisionWorld {
     for (const c of this.levelColliders) this.world.removeCollider(c, false);
     this.levelColliders = [];
     this.buildLevel(brushes);
+  }
+
+  /**
+   * Living dummies, as things in the way. Called every frame with their feet
+   * positions — they barely move, but the grapple hauls them, so a stale
+   * collider would be an invisible wall where a robot used to be.
+   *
+   * A cylinder rather than a capsule: a rounded top is not a thing you can
+   * stand on, and standing on them is most of what this is for.
+   */
+  syncEnemies(feet: { pos: { x: number; y: number; z: number } }[]) {
+    const h = 1.8 * T.enemy.scale;
+    const half = Math.max(0.05, h / 2);
+    const radius = Math.max(0.05, T.enemy.colliderRadius * T.enemy.scale);
+    const key = T.enemy.collide ? `${feet.length}|${half.toFixed(3)}|${radius.toFixed(3)}` : '';
+
+    if (key !== this.enemyKey) {
+      for (const c of this.enemyColliders) this.world.removeCollider(c, false);
+      for (const b of this.enemyBodies) this.world.removeRigidBody(b);
+      this.enemyColliders = [];
+      this.enemyBodies = [];
+      this.enemyKey = key;
+      if (!key) return;
+      for (const f of feet) {
+        // Kinematic, not fixed: being moved is a first-class operation for a
+        // body the meathook can drag across the map.
+        const body = this.world.createRigidBody(
+          RAPIER.RigidBodyDesc.kinematicPositionBased()
+            .setTranslation(f.pos.x, f.pos.y + half, f.pos.z),
+        );
+        this.enemyBodies.push(body);
+        this.enemyColliders.push(this.world.createCollider(
+          RAPIER.ColliderDesc.cylinder(half, radius)
+            .setCollisionGroups(groups(G_ENEMY, G_CHAR | G_RAY)),
+          body,
+        ));
+      }
+      return;
+    }
+    if (!key) return;
+    for (let i = 0; i < feet.length; i++) {
+      this.enemyBodies[i].setNextKinematicTranslation(
+        { x: feet[i].pos.x, y: feet[i].pos.y + half, z: feet[i].pos.z },
+      );
+    }
   }
 
   /** Tuning values that Rapier caches internally need re-pushing when sliders move. */
@@ -123,8 +201,11 @@ export class RapierWorld implements CollisionWorld {
     const r = T.character.radius * 0.7;
     const samples: [number, number][] = [[0, 0], [r, 0], [-r, 0], [0, r], [0, -r]];
     for (const [ox, oz] of samples) {
+      // RAY_STAND, not the public rayHit: this is the one question where a
+      // robot is a legitimate answer. Everything the solver asks is about the
+      // level, and gets RAY_LEVEL.
       const hit = this.rayHit(
-        V.v3(next.x + ox, next.y, next.z + oz), V.v3(0, -1, 0), reach,
+        V.v3(next.x + ox, next.y, next.z + oz), V.v3(0, -1, 0), reach, RAY_STAND,
       );
       if (!hit) continue;
       if (hit.normal.y >= cos) { walkable = true; groundNormal = hit.normal; break; }
@@ -146,18 +227,23 @@ export class RapierWorld implements CollisionWorld {
     return { pos: next, grounded, groundNormal, hitWall, wallNormal };
   }
 
+  /** LEVEL only. Every question the solver asks about the world comes here. */
   ray(from: V3, dir: V3, maxDist: number): number | null {
     const hit = this.world.castRay(
       new RAPIER.Ray(from, dir), maxDist, true,
-      undefined, undefined, this.collider,
+      undefined, RAY_LEVEL, this.collider,
     );
     return hit ? hit.timeOfImpact : null;
   }
 
-  rayHit(from: V3, dir: V3, maxDist: number): RayHit | null {
+  /**
+   * As `ray`, with the surface normal. `filter` defaults to the level alone;
+   * move()'s ground probe is the only caller that widens it to include robots.
+   */
+  rayHit(from: V3, dir: V3, maxDist: number, filter = RAY_LEVEL): RayHit | null {
     const hit = this.world.castRayAndGetNormal(
       new RAPIER.Ray(from, dir), maxDist, true,
-      undefined, undefined, this.collider,
+      undefined, filter, this.collider,
     );
     if (!hit) return null;
     let n = V.v3(hit.normal.x, hit.normal.y, hit.normal.z);
