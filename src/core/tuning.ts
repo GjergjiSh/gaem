@@ -5,7 +5,7 @@
 // structure automatically, so adding a param here is all it takes to get a slider.
 
 /** Bump when defaults change meaningfully — invalidates saved localStorage tunes. */
-export const TUNING_VERSION = 13;
+export const TUNING_VERSION = 14;
 
 export const T = {
   world: {
@@ -368,6 +368,13 @@ export const T = {
     reelSpeed: 14,      // metres/sec the rope itself shortens while reeling
     reelCap: 42,        // speed ceiling the reel accelerates toward
     payOutSpeed: 11,    // metres/sec the rope lengthens while holding back
+    // --- diving, on the slam key
+    // C on the rope is NOT the ground slam. It drives you down and pays cable
+    // out at the same time, which drops you under the anchor and makes the arc
+    // longer rather than cutting it short. It layers on top of WASD, so you can
+    // dive and reel at once and the two just add.
+    diveAccel: 58,      // downward accel while the slam key is held on the rope
+    divePayOut: 16,     // extra metres/sec of cable while diving
     // A reel that only pulls flat drags you into the wall below the anchor. This
     // adds lift while reeling, so a grapple onto a ledge arcs UP and over it.
     reelLift: 8,
@@ -548,6 +555,10 @@ export const T = {
   // dash comes out harder so you can leave the crater in the direction you like.
   slam: {
     enabled: true,
+    // Jump out of a slam. The move commits you to the floor, and having no way
+    // out of it is what makes people stop pressing C. Cancelling forfeits the
+    // landing window, so it costs something without needing a rule to say so.
+    jumpCancel: true,
     speed: 62,          // downward speed the slam holds, m/s
     keepH: 0,           // fraction of horizontal speed kept. 0 = dead vertical
     minHeight: 2.5,     // metres of clear air needed under you before C will slam
@@ -777,6 +788,8 @@ export const META: Record<string, { min?: number; max?: number; step?: number; d
   'sam/blastDamage': { min: 0, max: 8, step: 0.05 },
   'sam/shoulder': { min: 0, max: 1.5, step: 0.02, doc: 'Tube offset either side of centre.' },
   'sam/converge': { min: 5, max: 200, step: 5, doc: 'Range at which the salvo crosses the crosshair.' },
+  'grapple/diveAccel': { min: 0, max: 200, step: 1, doc: 'Downward accel while diving on the rope.' },
+  'grapple/divePayOut': { min: 0, max: 60, step: 1, doc: 'Extra cable per second while diving.' },
   'slam/speed': { min: 10, max: 140, step: 1, doc: 'Downward speed the slam holds.' },
   'slam/keepH': { min: 0, max: 1, step: 0.05, doc: '0 = straight down, 1 = keeps all your run.' },
   'slam/minHeight': { min: 0, max: 20, step: 0.5, doc: 'Clear air needed under you before C will slam.' },

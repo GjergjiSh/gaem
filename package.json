@@ -9,7 +9,8 @@
     "play": "vite --port 5174 --strictPort",
     "publish": "node tools/publish.mjs",
     "update": "node tools/update-play.mjs",
-    "verify:enemies": "node tools/verify-enemies.mjs"
+    "verify:enemies": "node tools/verify-enemies.mjs",
+    "verify:slam": "node tools/verify-slam.mjs"
   },
   "keywords": [],
   "author": "",

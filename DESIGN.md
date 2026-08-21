@@ -2391,3 +2391,42 @@ itself rather than to an assumed height above the feet.
 `aliveMeshes` is now cached and invalidated on death or rebuild — it is read
 once per projectile per frame plus once per pierce pass, and rebuilding it was
 affordable at 6 boxes but is not free at 17.
+
+---
+
+## 30. C means down, and down is not always a slam
+
+Two changes to the same button, both about not throwing away what you had.
+
+### Jump cancels the slam
+
+The slam committed you to the floor with no way out, which is the reason to stop
+pressing it. Jump now ends it.
+
+The cancel has to run **before** the state machine. The slam owns velocity
+outright — `updateSlam` clamps `vel.y` to `-slam.speed` every tick, after the
+state has run — so airborne would apply the jump and the slam would clamp it
+straight back down on the same tick. Cancelling forfeits the landing window
+(`slamBoost`), so it costs something without needing a rule to say so.
+
+### C on a rope is a dive
+
+`trySlam` used to call `releaseGrapple`. It was written as "cancels everything",
+and the rope was on the list — so the button you press to go down threw away the
+swing you had just set up.
+
+Now the rope keeps it, and C becomes a dive: downward acceleration **and** cable
+paid out, together. Driving down alone only swings you faster through the same
+arc; paying out at the same time is what drops you under the anchor and makes
+the path longer. It is read on `held`, not `pressed`, so how deep you go is how
+long you hold it.
+
+It layers on WASD rather than replacing it, which is the point — forward already
+reels in, so dive-while-reeling is a real combination and not a mode. Measured
+over a quarter second: dive alone +4.00 m of cable, reel alone -3.50 m, both
++0.50 m. Exactly additive, because the dive is another term and not a branch.
+
+Verified with `npm run verify:slam`, which compiles `core/` and steps the real
+solver against a stub world — jump-cancel, the dive, the additivity, and that a
+plain ground slam still slams, still applies `keepH`, and still refuses with the
+floor right there.
