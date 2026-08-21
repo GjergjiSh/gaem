@@ -274,8 +274,12 @@ function endSlide(p: Player) {
 // ---------------------------------------------------------------- ground slam
 
 /**
- * C, in the air only. Cancels everything — the dash you were in, the wallrun you
- * were on, the rope you were hanging from — and drives you straight at the floor.
+ * C, in the air only. Cancels the dash you were in and the wallrun you were on,
+ * and drives you straight at the floor.
+ *
+ * NOT the rope. C while hooked is a dive — see the dive block in updateGrapple.
+ * Slamming off a cable threw away the swing you had just set up, and the button
+ * you press to go down is the button you want for going down on a rope too.
  *
  * It is not a damage move and it costs nothing. What it buys is the window after
  * it: `slam.boostTime` seconds where the dash comes out at `slam.dashBoost`, so
@@ -286,6 +290,8 @@ function endSlide(p: Player) {
 function trySlam(p: Player, i: Intent, col: CollisionWorld): boolean {
   if (!T.slam.enabled || !i.slam.pressed || p.slamming) return false;
   if (p.grounded || p.state === 'grounded' || p.state === 'sliding') return false;
+  // Hooked: the rope keeps it. C becomes a dive, handled by updateGrapple.
+  if (p.grappling) return false;
   // Needs real air under you. Measured, not timed: a state clock gets reset by
   // every dash and wallrun, and the thing that actually makes a slam meaningless
   // is having nowhere to fall. It also closes the exploit of tapping C a hand's
@@ -296,7 +302,6 @@ function trySlam(p: Player, i: Intent, col: CollisionWorld): boolean {
   p.slamming = true;
   p.vel = V.v3(p.vel.x * T.slam.keepH, -T.slam.speed, p.vel.z * T.slam.keepH);
   if (p.state === 'wallrunning') detachWall(p);
-  if (p.grappling) releaseGrapple(p, false);
   p.vaultT = 0;                 // no hopping a ledge on the way down
   enter(p, 'airborne');
   registerTech(p);
@@ -658,6 +663,18 @@ function updateGrapple(p: Player, i: Intent, col: CollisionWorld, dt: number) {
     }
   }
 
+  // --- C on the rope: dive. Down AND out, together. Driving down alone just
+  // swings you faster through the same arc; paying cable out at the same time
+  // is what drops you under the anchor and lengthens the path. Held, not
+  // pressed, so the depth of the dive is how long you hold it, and it layers on
+  // WASD rather than replacing it — dive while reeling and the two lengths add.
+  if (T.slam.enabled && i.slam.held) {
+    p.vel.y -= g.diveAccel * dt;
+    for (const c of p.cables) {
+      if (c.on) c.len = Math.min(g.maxLen, c.len + g.divePayOut * dt);
+    }
+  }
+
   if (p.grappleReel > 0) {
     // Pull along the AVERAGE of the live cables, once — applying the reel per
     // cable would double the yank whenever both are attached.
@@ -1013,6 +1030,12 @@ export function step(p: Player, i: Intent, col: CollisionWorld, dt: number) {
 
   const wish = wishDir(i);
   const wasGrounded = p.grounded;
+
+  // Jump out of a slam. This has to happen BEFORE the state machine: the slam
+  // owns velocity outright, so airborne would apply the jump and updateSlam
+  // would clamp it straight back down on the same tick. Cancelling forfeits the
+  // landing boost, which is the cost, and needs no rule of its own.
+  if (p.slamming && T.slam.jumpCancel && i.jump.pressed) p.slamming = false;
 
   // Before the state machine: a slam cancels whatever you were doing, so the
   // state it cancels should not get a tick of its own first.

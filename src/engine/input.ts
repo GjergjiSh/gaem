@@ -76,6 +76,18 @@ export class Input {
 
   restart = false;
   toggleView = false;
+  /** Escape edge — pause. Consumed by main. */
+  pausePressed = false;
+  /**
+   * Mouse motion steers the weapon wheel instead of the camera while this is
+   * set. The wheel has no cursor to move — the pointer is locked — so it reads
+   * the same deltas the look does, and the look has to stop reading them or
+   * choosing a gun would spin you round.
+   */
+  suppressLook = false;
+  /** Motion accumulated while suppressLook is on, in raw mouse px. */
+  wheelX = 0;
+  wheelY = 0;
   /** True once a pointer-lock request has been rejected — surfaced in the HUD. */
   lockBlocked = false;
   private down = new Set<string>();
@@ -92,6 +104,7 @@ export class Input {
       if (GAME_CODES.has(e.code)) e.preventDefault();
       if (e.repeat) return;
       this.down.add(e.code);
+      if (e.code === 'Escape') this.pausePressed = true;
       if (e.code === 'KeyR') this.restart = true;
       if (e.code === 'KeyV') this.toggleView = true;
       if (e.code === 'KeyQ') this.weaponSwap = true;
@@ -198,6 +211,11 @@ export class Input {
         return;
       }
       this.mouseIdle = 0;
+      if (this.suppressLook) {
+        this.wheelX += dx;
+        this.wheelY += dy;
+        return;
+      }
       // Scoped aim slows the mouse — precision without a separate scope state.
       const sens = T.camera.sensitivity * (this.adsHeld ? T.weapon.adsSensScale : 1);
       this.intent.yaw -= dx * sens;
@@ -207,6 +225,10 @@ export class Input {
     });
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   }
+
+  /** E held: the weapon wheel is open. Read from `down`, so a lost keyup
+   *  (alt-tab mid-hold) closes it with everything else rather than sticking. */
+  get wheelHeld() { return this.down.has('KeyE'); }
 
   get pointerLocked() { return this.locked; }
   get lookMode() {

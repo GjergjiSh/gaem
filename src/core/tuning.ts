@@ -5,14 +5,17 @@
 // structure automatically, so adding a param here is all it takes to get a slider.
 
 /** Bump when defaults change meaningfully — invalidates saved localStorage tunes. */
-export const TUNING_VERSION = 13;
+export const TUNING_VERSION = 15;
 
 export const T = {
   world: {
     gravityRise: 36,      // downward accel while moving up
     gravityFall: 62,      // downward accel while falling — higher makes jumps feel snappier
     maxFallSpeed: 60,
-    timeScale: 1,         // global hitstop / slow-mo hook, reserved for combat
+    // Global slow-mo. The pause overlay and the weapon wheel do NOT write here —
+    // they multiply their own factor on top, or opening the wheel would
+    // overwrite whatever you had dialled in and hand it back wrong.
+    timeScale: 1,
   },
 
   ground: {
@@ -211,6 +214,19 @@ export const T = {
     damage: 0.45,       // per pellet, x the shared head/body damage
   },
 
+  wheel: {
+    // Hold E: the arsenal fans out and the world slows down. Drag to a slice,
+    // let go to take it. Slowing time is what makes it a choice you get to make
+    // mid-fight rather than a menu you retreat into.
+    enabled: true,
+    timeScale: 0.2,     // how far the world slows while it is open
+    radius: 190,        // px from centre to the middle of a slice
+    thickness: 86,      // px of ring
+    deadZone: 26,       // px of drag before a slice is picked at all
+    sensitivity: 1.1,   // px of cursor per px of mouse — the wheel has no cursor
+    fade: 0.09,         // seconds to fade in and out
+  },
+
   flamer: {
     // Slot 4. The only weapon with no discrete shot: you hold it and a cone in
     // front of you is on fire. Short range is the whole balance — inside it
@@ -293,6 +309,11 @@ export const T = {
     projSize: 0.3,
     projDrop: 0,        // their shots fly straight by default
     spawnJitter: 4,     // random +/- metres applied to each spawn point per respawn
+    // Living dummies are solid: you bump into them and you can stand on them.
+    // They never move you and they never push back — a cylinder in the way, not
+    // a body in a physics sense.
+    collide: true,
+    colliderRadius: 0.5,  // metres, x enemy.scale
   },
 
   sword: {
@@ -368,6 +389,13 @@ export const T = {
     reelSpeed: 14,      // metres/sec the rope itself shortens while reeling
     reelCap: 42,        // speed ceiling the reel accelerates toward
     payOutSpeed: 11,    // metres/sec the rope lengthens while holding back
+    // --- diving, on the slam key
+    // C on the rope is NOT the ground slam. It drives you down and pays cable
+    // out at the same time, which drops you under the anchor and makes the arc
+    // longer rather than cutting it short. It layers on top of WASD, so you can
+    // dive and reel at once and the two just add.
+    diveAccel: 58,      // downward accel while the slam key is held on the rope
+    divePayOut: 16,     // extra metres/sec of cable while diving
     // A reel that only pulls flat drags you into the wall below the anchor. This
     // adds lift while reeling, so a grapple onto a ledge arcs UP and over it.
     reelLift: 8,
@@ -548,6 +576,10 @@ export const T = {
   // dash comes out harder so you can leave the crater in the direction you like.
   slam: {
     enabled: true,
+    // Jump out of a slam. The move commits you to the floor, and having no way
+    // out of it is what makes people stop pressing C. Cancelling forfeits the
+    // landing window, so it costs something without needing a rule to say so.
+    jumpCancel: true,
     speed: 62,          // downward speed the slam holds, m/s
     keepH: 0,           // fraction of horizontal speed kept. 0 = dead vertical
     minHeight: 2.5,     // metres of clear air needed under you before C will slam
@@ -625,6 +657,7 @@ export const META: Record<string, { min?: number; max?: number; step?: number; d
   'weapon/projSpeed': { min: 10, max: 300, step: 1, doc: 'Muzzle velocity.' },
   'weapon/projDrop': { min: 0, max: 80, step: 0.5, doc: 'Bullet drop. 0 = laser.' },
   'weapon/projSize': { min: 0.03, max: 0.6, step: 0.01 },
+  'enemy/colliderRadius': { min: 0.1, max: 2, step: 0.05, doc: 'Solid radius, x enemy scale.' },
   'enemy/scale': { min: 0.5, max: 4, step: 0.05, doc: 'Dummy size multiplier.' },
   'enemy/fireInterval': { min: 0.2, max: 6, step: 0.1 },
   'enemy/projSpeed': { min: 2, max: 80, step: 0.5 },
@@ -745,6 +778,12 @@ export const META: Record<string, { min?: number; max?: number; step?: number; d
   'railgun/beamTime': { min: 0.02, max: 1, step: 0.01, doc: 'How long the tracer lingers.' },
   'railgun/beamWidth': { min: 0.01, max: 0.5, step: 0.005, doc: 'Core radius in metres.' },
   'railgun/beamGlow': { min: 1, max: 8, step: 0.1, doc: 'Halo radius, x the core.' },
+  'wheel/timeScale': { min: 0.02, max: 1, step: 0.01, doc: 'World speed while the wheel is open.' },
+  'wheel/radius': { min: 60, max: 400, step: 5, doc: 'Centre to the middle of a slice, px.' },
+  'wheel/thickness': { min: 20, max: 200, step: 2, doc: 'Ring thickness, px.' },
+  'wheel/deadZone': { min: 0, max: 200, step: 2, doc: 'Drag before anything is picked.' },
+  'wheel/sensitivity': { min: 0.2, max: 4, step: 0.05, doc: 'Cursor px per mouse px.' },
+  'wheel/fade': { min: 0, max: 0.5, step: 0.01 },
   'flamer/tick': { min: 0.02, max: 0.3, step: 0.005, doc: 'Seconds between damage ticks while held.' },
   'flamer/range': { min: 3, max: 40, step: 0.5, doc: 'How far the cone reaches.' },
   'flamer/cone': { min: 0.05, max: 0.8, step: 0.01, doc: 'Cone half-angle at full range.' },
@@ -777,6 +816,8 @@ export const META: Record<string, { min?: number; max?: number; step?: number; d
   'sam/blastDamage': { min: 0, max: 8, step: 0.05 },
   'sam/shoulder': { min: 0, max: 1.5, step: 0.02, doc: 'Tube offset either side of centre.' },
   'sam/converge': { min: 5, max: 200, step: 5, doc: 'Range at which the salvo crosses the crosshair.' },
+  'grapple/diveAccel': { min: 0, max: 200, step: 1, doc: 'Downward accel while diving on the rope.' },
+  'grapple/divePayOut': { min: 0, max: 60, step: 1, doc: 'Extra cable per second while diving.' },
   'slam/speed': { min: 10, max: 140, step: 1, doc: 'Downward speed the slam holds.' },
   'slam/keepH': { min: 0, max: 1, step: 0.05, doc: '0 = straight down, 1 = keeps all your run.' },
   'slam/minHeight': { min: 0, max: 20, step: 0.5, doc: 'Clear air needed under you before C will slam.' },

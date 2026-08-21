@@ -8,6 +8,8 @@ import { Renderer } from './engine/render';
 import { Panel } from './tools/panel';
 import { Hud } from './tools/hud';
 import { Editor } from './tools/editor';
+import { Pause } from './tools/pause';
+import { Wheel } from './tools/wheel';
 import { Enemies, ROBOTS } from './engine/enemies';
 import { preloadModels } from './engine/models';
 import { Weapon } from './engine/weapon';
@@ -42,6 +44,8 @@ const projectiles = new Projectiles(gfx, enemies, {
   onPlayerHit: () => { hitsTaken++; rings.flash(); },
 });
 const weapon = new Weapon(input, gfx, enemies, projectiles);
+const pause = new Pause();
+const wheel = new Wheel(input, weapon);
 const sword = new Sword(input, gfx, enemies, projectiles, (r) => weapon.markerFor(r));
 const hook = new Hook(input, gfx, enemies, world, (r) => weapon.markerFor(r));
 
@@ -201,7 +205,37 @@ function frame(now: number) {
   // otherwise consume.
   hook.preStep(player);
 
-  acc += raw * T.world.timeScale;
+  // --- the clock. Three independent factors multiplied, never assigned: the
+  // wheel writing world.timeScale would hand back a different tune than it
+  // found, and the panel's slider has to keep meaning what it says.
+  if (input.pausePressed) { input.pausePressed = false; pause.toggle(editor.active); }
+  // Real time on purpose — a menu that slowed down with the world it is slowing
+  // would take five times as long to open.
+  wheel.update(raw, pause.active || editor.active);
+
+  const scale = T.world.timeScale * wheel.timeScale;
+  const dt = pause.active ? 0 : raw * scale;
+
+  // Pause skips the simulation outright rather than stepping it with dt 0.
+  // Systems that consume an input edge do it unconditionally — the weapon
+  // clears shootPressed whether or not time passed — so a zero-length frame
+  // still fires a shot into a frozen world.
+  if (pause.active) {
+    gfx.update(player, input.intent, 0, world);
+    hud.update(player, { run: run.time, splits: run.splits, best }, panel.abLabel, input.lookMode,
+      T.camera.firstPerson ? 'first person' : 'third person',
+      `PAUSED   ${weapon.hudLine()}`);
+    requestAnimationFrame(frame);
+    return;
+  }
+
+  // Robots become obstacles here, from last frame's positions. They barely move
+  // -- only the meathook hauls them -- so a frame of lag is invisible, and doing
+  // it before the fixed steps means the solver sees a world that is consistent
+  // for the whole tick rather than shifting under it.
+  world.syncEnemies(enemies.alivePositions());
+
+  acc += dt;
   let steps = 0;
   while (acc >= FIXED && steps < MAX_STEPS) {
     // The run clock starts the moment the player actually asks to move.
@@ -227,13 +261,16 @@ function frame(now: number) {
   }
   if (steps === MAX_STEPS) acc = 0; // don't let a stall snowball
 
-  autoFollowCamera(raw);
-  weapon.update(raw);
-  sword.update(raw, player);
-  hook.update(raw, player);
-  enemies.update(raw, player.pos, projectiles, gfx.wallMeshes);
-  projectiles.update(raw, player.pos);
-  rings.update(raw, {
+  // All of these run on the SCALED clock. Slowing only the solver would leave
+  // bullets, animations and cooldowns running at full speed through a slowed
+  // world, which is not slow motion — it is the player being slowed down.
+  autoFollowCamera(dt);
+  weapon.update(dt);
+  sword.update(dt, player);
+  hook.update(dt, player);
+  enemies.update(dt, player.pos, projectiles, gfx.wallMeshes);
+  projectiles.update(dt, player.pos);
+  rings.update(dt, {
     stamina: player.stamina / T.stamina.max,
     fuel: player.fuel / T.thruster.fuelMax,
     thrusting: player.thrusting,
@@ -243,7 +280,7 @@ function frame(now: number) {
     cooldown: sword.cooldownFrac,
     getsuga: sword.waveFrac,
   });
-  gfx.update(player, input.intent, raw, world);
+  gfx.update(player, input.intent, dt, world);
 
   if (bestPath) {
     const i = Math.min(bestPath.length - 1, Math.floor(run.time / FIXED));
