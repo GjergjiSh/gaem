@@ -43,5 +43,3 @@ export const shortestAngle = (from: number, to: number) => {
   if (d < -Math.PI) d += Math.PI * 2;
   return d;
 };
-
-// A/B pipeline smoke test.
