@@ -7,7 +7,7 @@ up in my diff.
 | | dev (mine) | play (yours) |
 |---|---|---|
 | directory | `Repos/gaem` | `Repos/gaem-play` |
-| branch | `main` | `play-local` |
+| branch | `dev` | `play-local` |
 | server | `npm run dev` → :5173 | `npm run play` → :5174 |
 
 Both are git worktrees of the same repository, so there is one history and one
@@ -65,6 +65,8 @@ git branch playable                     # the "ready to play" marker
 git worktree add -b play-local ../gaem-play playable
 ```
 
+(Already done — this is here so it can be rebuilt.)
+
 Then link the dependencies rather than installing them twice (PowerShell):
 
 ```powershell
@@ -80,7 +82,7 @@ cd ../gaem-play && npm run play         # http://localhost:5174
 ## Reading a bug report
 
 The HUD's first line is `branch@sha`. `play-local@abc1234` is your tree,
-`main@abc1234` is mine. It is read when the server starts, so restart `npm run
+`dev@abc1234` is mine. It is read when the server starts, so restart `npm run
 play` after an update if you want the stamp to match.
 
 ## Things worth knowing
