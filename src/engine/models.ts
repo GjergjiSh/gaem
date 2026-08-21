@@ -59,7 +59,38 @@ const ANCHOR =
 const partForBone = (n: string): HitBox['part'] =>
   (/^Head$/.test(n) ? 'head' : /^(Chest|Torso|Body)$/.test(n) ? 'body' : 'limb');
 
-const loader = new GLTFLoader();
+/**
+ * Every side-car file a glTF might reference — buffers and textures — as
+ * basename -> URL, globbed the same way the models are.
+ *
+ * Two problems, one fix. The sci-fi pack keeps its textures in a sibling
+ * `Textures/` folder but references them by BARE FILENAME, so a relative
+ * resolve looks for them next to the .gltf and finds nothing: every panel
+ * loads untextured. And Vite hashes the files it emits, so even a correct
+ * relative path breaks in a production build, where `Wall.bin` has become
+ * `Wall-a1b2c3.bin`.
+ *
+ * Resolving by basename against what Vite actually emitted answers both, and
+ * without editing a single vendor asset.
+ */
+const SIDECARS: Record<string, string> = {};
+for (const [path, url] of Object.entries(
+  import.meta.glob('/assets/**/*.{bin,png,jpg,jpeg,ktx2,webp}', {
+    query: '?url', import: 'default', eager: true,
+  }),
+)) {
+  SIDECARS[path.split('/').pop()!] = url as string;
+}
+
+const manager = new THREE.LoadingManager();
+manager.setURLModifier((url) => {
+  // Absolute or already-resolved URLs pass through; the ones worth rewriting
+  // are the relative side-cars glTF asks for by name.
+  const name = url.split('?')[0].split('/').pop() ?? '';
+  return SIDECARS[name] ?? url;
+});
+
+const loader = new GLTFLoader(manager);
 const cache = new Map<string, Loaded>();
 const pending = new Map<string, Promise<Loaded | null>>();
 
@@ -206,10 +237,85 @@ export function hitboxesOf(name: string): HitBox[] {
   return got.boxes;
 }
 
+/**
+ * One GPU texture per image FILE, however many models reference it.
+ *
+ * This is not an optimisation, it is the difference between the sci-fi pack
+ * working and not. Every .gltf in it points at the same handful of 2048x2048
+ * PBR maps, and GLTFLoader builds a fresh THREE.Texture per load — so forty-odd
+ * models referencing four maps each is forty-odd separate uploads of the same
+ * pixels, several gigabytes of video memory for about ninety megabytes of
+ * actual texture. Shared, the whole pack costs what one copy costs.
+ *
+ * `parser.associations` is the documented way back from a Texture to the glTF
+ * definition it came from, which is what makes the image URI available as a
+ * key. Nothing else about a loaded texture identifies the file it came out of.
+ */
+const texCache = new Map<string, THREE.Texture>();
+/** Longest edge kept. 2048 maps are more than a 4 m wall panel needs. */
+const TEX_MAX = 1024;
+const TEX_SLOTS = ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap',
+  'emissiveMap', 'alphaMap', 'specularMap'] as const;
+
+/** Halve a texture down to TEX_MAX, in place. No-op off the main thread. */
+function shrink(t: THREE.Texture): THREE.Texture {
+  const img = t.image as { width?: number; height?: number } | undefined;
+  const w = img?.width ?? 0;
+  const h = img?.height ?? 0;
+  if (!w || !h || Math.max(w, h) <= TEX_MAX) return t;
+  if (typeof document === 'undefined') return t;
+  const k = TEX_MAX / Math.max(w, h);
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(w * k));
+  c.height = Math.max(1, Math.round(h * k));
+  c.getContext('2d')?.drawImage(t.image as CanvasImageSource, 0, 0, c.width, c.height);
+  t.image = c;
+  t.needsUpdate = true;
+  return t;
+}
+
+function shareTextures(gltf: { scene: THREE.Object3D; parser: any }) {
+  const json = gltf.parser?.json;
+  const assoc: Map<unknown, { textures?: number }> | undefined = gltf.parser?.associations;
+  if (!json || !assoc) return;
+  const uriOf = (t: THREE.Texture): string | null => {
+    const a = assoc.get(t);
+    if (!a || a.textures === undefined) return null;
+    const src = json.textures?.[a.textures]?.source;
+    if (src === undefined) return null;
+    const uri = json.images?.[src]?.uri;
+    // Embedded images are per-file by definition and their URI is the whole
+    // payload, so there is nothing to share and nothing worth keying on.
+    return typeof uri === 'string' && !uri.startsWith('data:') ? uri : null;
+  };
+  gltf.scene.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const mats = (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) as
+      unknown as Record<string, THREE.Texture | undefined>[];
+    for (const mat of mats) {
+      if (!mat) continue;
+      for (const slot of TEX_SLOTS) {
+        const t = mat[slot];
+        if (!t) continue;
+        const uri = uriOf(t);
+        if (!uri) continue;
+        const got = texCache.get(uri);
+        if (got) {
+          if (got !== t) { mat[slot] = got; t.dispose(); }
+        } else {
+          texCache.set(uri, shrink(t));
+        }
+      }
+    }
+  });
+}
+
 async function load(name: string): Promise<Loaded | null> {
   const url = URLS[name];
   if (!url) return null;
   const gltf = await loader.loadAsync(url);
+  shareTextures(gltf as unknown as { scene: THREE.Object3D; parser: any });
   const skinned = gltf.scene.children.some((c) => c.type === 'SkinnedMesh')
     || gltf.animations.length > 0;
   return { scene: gltf.scene, clips: gltf.animations, skinned };
