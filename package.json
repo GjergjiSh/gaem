@@ -6,14 +6,15 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "check": "tsc --noEmit",
-    "play": "vite --port 5174 --strictPort",
+    "play": "node tools/play.mjs",
     "publish": "node tools/publish.mjs",
     "update": "node tools/update-play.mjs",
     "verify:enemies": "node tools/verify-enemies.mjs",
     "verify:slam": "node tools/verify-slam.mjs",
     "verify:collision": "node tools/verify-collision.mjs",
     "verify": "npm run verify:slam && npm run verify:collision && npm run verify:enemies && npm run verify:boxselect",
-    "verify:boxselect": "node tools/verify-boxselect.mjs"
+    "verify:boxselect": "node tools/verify-boxselect.mjs",
+    "deploy": "node tools/publish.mjs"
   },
   "keywords": [],
   "author": "",
