@@ -12,6 +12,7 @@ import { Enemies } from './engine/enemies';
 import { Weapon } from './engine/weapon';
 import { Projectiles } from './engine/projectiles';
 import { Sword } from './engine/sword';
+import { Hook } from './engine/hook';
 import { Rings } from './tools/rings';
 import { level } from './levels';
 
@@ -38,14 +39,18 @@ const projectiles = new Projectiles(gfx, enemies, {
 });
 const weapon = new Weapon(input, gfx, enemies, projectiles);
 const sword = new Sword(input, gfx, enemies, projectiles, (r) => weapon.markerFor(r));
+const hook = new Hook(input, gfx, enemies, world, (r) => weapon.markerFor(r));
 
-const editor = new Editor(gfx, world, {
+const editor = new Editor(gfx, world, enemies, {
   playerPos: () => player.pos,
   // Exit / level switch invalidates the run, the ghost and the player's spot.
   onWorldChanged: () => {
     best = null;
     bestPath = null;
     acc = 0;
+    // The editor flies on WASD. Without this the keys you were holding when you
+    // hit play are still held by the character, who runs off on their own.
+    input.releaseAll();
     restart();
   },
 });
@@ -77,6 +82,8 @@ function restart() {
   hitsTaken = 0;
   enemies.rebuild();
   projectiles.clear();
+  sword.clear();
+  hook.clear();
   ghost.visible = bestPath !== null;
 }
 
@@ -162,6 +169,7 @@ function frame(now: number) {
   // Editor mode: the sim is frozen, the editor owns the camera, we only draw.
   if (editor.active) {
     editor.update();
+    sword.setHidden(true);
     gfx.renderOnly();
     acc = 0;
     requestAnimationFrame(frame);
@@ -183,6 +191,11 @@ function frame(now: number) {
       T.camera.firstPerson ? T.camera.pitchMaxFP : T.camera.pitchMax,
     );
   }
+
+  // Before the fixed steps: a grapple press aimed at a dummy is a haul, not an
+  // attach, and that decision has to be made on the same click the solver would
+  // otherwise consume.
+  hook.preStep(player);
 
   acc += raw * T.world.timeScale;
   let steps = 0;
@@ -213,6 +226,7 @@ function frame(now: number) {
   autoFollowCamera(raw);
   weapon.update(raw);
   sword.update(raw, player);
+  hook.update(raw, player);
   enemies.update(raw, player.pos, projectiles, gfx.brushMeshes);
   projectiles.update(raw, player.pos);
   rings.update(raw, {
@@ -223,6 +237,7 @@ function frame(now: number) {
     charges: sword.charges,
     maxCharges: T.sword.combo,
     cooldown: sword.cooldownFrac,
+    getsuga: sword.waveFrac,
   });
   gfx.update(player, input.intent, raw, world);
 
@@ -235,7 +250,7 @@ function frame(now: number) {
 
   hud.update(player, { run: run.time, splits: run.splits, best }, panel.abLabel, input.lookMode,
     T.camera.firstPerson ? 'first person' : 'third person',
-    `${weapon.hudLine()}   lap ${laps} · hits ${hitsTaken}`);
+    `${weapon.hudLine()}   lap ${laps} · hits ${hitsTaken}${hook.hauling ? ' · HAULING' : ''}`);
   requestAnimationFrame(frame);
 }
 
@@ -255,6 +270,7 @@ requestAnimationFrame(frame);
   enemies,
   weapon,
   sword,
+  hook,
   projectiles,
   restart,
   autoFollowCamera,

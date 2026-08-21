@@ -35,16 +35,40 @@ export class Enemies {
     this.rebuild();
   }
 
-  /** Rebuild all dummies from the level data — fresh jitter every time. */
-  rebuild() {
+  /**
+   * Rebuild all dummies from the level data — fresh jitter every time.
+   *
+   * `exact` turns the jitter off, which is what the editor needs: you cannot
+   * place a spawn point by dragging a dummy that respawns four metres from where
+   * you dropped it.
+   */
+  rebuild(exact = false) {
     for (const d of this.dummies) {
       this.group.remove(d.root);
       for (const p of d.parts) (p.material as THREE.Material).dispose();
     }
     this.dummies = [];
-    const j = T.enemy.spawnJitter;
+    const j = exact ? 0 : T.enemy.spawnJitter;
     for (const [x, y, z] of level.enemies ?? []) {
       this.spawn(x + (Math.random() * 2 - 1) * j, y, z + (Math.random() * 2 - 1) * j);
+    }
+  }
+
+  /**
+   * The dummy's root transform, for the editor to hang a gizmo off. Everything
+   * else addresses dummies by index; this is the one place that hands out the
+   * object itself, because TransformControls has to attach to something real.
+   */
+  rootOf(idx: number): THREE.Object3D | null {
+    return this.dummies[idx]?.root ?? null;
+  }
+
+  /** Editor selection tint. Separate from the hit flash, which decays on its own. */
+  highlight(idx: number, on: boolean) {
+    const d = this.dummies[idx];
+    if (!d) return;
+    for (const p of d.parts) {
+      (p.material as THREE.MeshLambertMaterial).emissive.setHex(on ? 0x2a3550 : 0);
     }
   }
 
@@ -98,6 +122,43 @@ export class Enemies {
     const d = this.dummies[idx];
     if (!d || !d.alive) return null;
     return d.parts[0].getWorldPosition(new THREE.Vector3());
+  }
+
+  /** Is this dummy still up? */
+  alive(idx: number) { return this.dummies[idx]?.alive === true; }
+
+  /** Feet position of one dummy — the grapple drags this. */
+  positionOf(idx: number): THREE.Vector3 | null {
+    const d = this.dummies[idx];
+    return d ? d.root.position.clone() : null;
+  }
+
+  /** Put a dummy somewhere. The grapple's yank is the only thing that moves them. */
+  dragTo(idx: number, to: THREE.Vector3) {
+    const d = this.dummies[idx];
+    if (d) d.root.position.copy(to);
+  }
+
+  /** Hold this dummy's fire — being hauled through the air should interrupt it. */
+  stagger(idx: number, seconds: number) {
+    const d = this.dummies[idx];
+    if (!d) return;
+    d.fireT = Math.max(d.fireT, seconds);
+    d.flashT = Math.max(d.flashT, 0.12);
+  }
+
+  /**
+   * First living dummy along a ray — the grapple's target test. Returns the
+   * dummy's index rather than the mesh, because the hook grabs the whole body,
+   * not the shin it happened to touch.
+   */
+  hookScan(origin: THREE.Vector3, dir: THREE.Vector3, maxDist: number):
+  { idx: number; dist: number; point: THREE.Vector3 } | null {
+    this.ray.set(origin, dir);
+    this.ray.far = maxDist;
+    const hit = this.ray.intersectObjects(this.aliveMeshes, false)[0];
+    if (!hit) return null;
+    return { idx: hit.object.userData.enemy, dist: hit.distance, point: hit.point.clone() };
   }
 
   /** Feet positions of living dummies — the sword's targets. */
@@ -155,6 +216,11 @@ export class Enemies {
         }
         continue;
       }
+
+      // Disarmed from the panel (enemy/shoot). The timer is re-rolled instead of
+      // frozen so re-arming staggers them again rather than firing the whole room
+      // on the same frame.
+      if (!T.enemy.shoot) { d.fireT = Math.random() * T.enemy.fireInterval; continue; }
 
       d.fireT -= dt;
       if (d.fireT > 0) continue;

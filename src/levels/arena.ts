@@ -6,6 +6,7 @@
 // than a list of hand-placed boxes.
 
 import type { Brush, Trigger } from './types';
+import { axisAngle, qmul } from './geom';
 
 const FLOOR = 0x4b5563;
 const WALL = 0xd97706;
@@ -23,22 +24,6 @@ const WALL_T = 1.5;
 // to climb an unclimbable slope and your vertical speed gets zeroed.
 const WALL_TILT = 0.12;
 const SIDES = 6;
-
-// --- quaternion helpers. Euler order is a trap when you need "yaw, then tilt";
-// composing two axis-angle rotations explicitly removes the ambiguity.
-type Q = [number, number, number, number];
-
-const axisAngle = (x: number, y: number, z: number, a: number): Q => {
-  const s = Math.sin(a / 2);
-  return [x * s, y * s, z * s, Math.cos(a / 2)];
-};
-
-const qmul = (a: Q, b: Q): Q => [
-  a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
-  a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],
-  a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3],
-  a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2],
-];
 
 const brushes: Brush[] = [];
 

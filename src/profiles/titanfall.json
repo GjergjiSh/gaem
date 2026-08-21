@@ -17,13 +17,11 @@
   },
   "air": {
     "accel": 55,
-    "control": 1,
     "redirect": 5.5
   },
   "jump": {
     "speed": 12,
     "doubleJumpSpeed": 11.5,
-    "maxJumps": 2,
     "coyoteTime": 0.15,
     "slideExitBonus": 1.12
   },
@@ -33,9 +31,9 @@
   "slide": {
     "boost": 8.5,
     "friction": 1.6,
-    "capBonus": 3.2,
     "slopeAccel": 130,
     "steerRate": 2.2,
+    "capBonus": 3.2,
     "minTime": 0.3
   },
   "wall": {
@@ -60,16 +58,16 @@
   },
   "momentum": {
     "overspeedDecay": 5,
+    "hardCap": 38,
     "airDecayScale": 0.05,
     "chainBonus": 1.06,
-    "maxChainBonus": 1.5,
-    "hardCap": 38
+    "maxChainBonus": 1.5
   },
   "camera": {
     "firstPerson": true,
+    "bobAmount": 0.02,
     "fovBase": 90,
-    "fovSpeed": 12,
     "fovDash": 8,
-    "bobAmount": 0.02
+    "fovSpeed": 12
   }
 }

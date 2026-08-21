@@ -4,8 +4,12 @@
 import { Pane } from 'tweakpane';
 import { T, DEFAULTS, TUNING_VERSION, inferRange, snapshot, applyProfile } from '../core/tuning';
 import { typingInAField } from '../engine/input';
+import { CAN_WRITE, saveJson, beaconJson, stamp } from './devsave';
 
 const STORE_KEY = `tuning.v${TUNING_VERSION}`;
+/** Which profile file edits are written into. Survives reloads on its own. */
+const ACTIVE_KEY = 'tuning.activeProfile';
+const profilePath = (name: string) => `src/profiles/${name}.json`;
 
 // Built-in game-feel profiles: JSON files in src/profiles/, bundled at build time.
 // Each is applied over code DEFAULTS, so a file only has to list what it changes —
@@ -17,10 +21,40 @@ for (const [path, mod] of Object.entries(PROFILE_MODULES)) {
 }
 const PROFILE_NAMES = Object.keys(PROFILES).sort();
 
-// The tune the game boots into when there is nothing saved. Applied over code
-// DEFAULTS exactly like picking it from the dropdown, so "reset to code defaults"
-// still gets you back to the raw tuning.ts values rather than back to this.
+// The house tune. This is the game's real baseline, not a preset you have to go
+// and pick: BASE below is DEFAULTS with it already applied, and every boot starts
+// from BASE. The raw tuning.ts numbers stay reachable through "reset to code
+// defaults", but nothing ever lands on them by accident.
 const DEFAULT_PROFILE = 'titanfall';
+
+/**
+ * The tune the game boots into: code defaults with the active profile on top.
+ * Reassigned whenever the active profile changes or is written back to disk, so
+ * it always means "what a fresh boot would give me".
+ *
+ * Overrides are stored as a diff against THIS, which is what stops the game ever
+ * coming up on a tune nobody picked: an empty save, a corrupt save and a rich
+ * save all start from the same feel.
+ */
+let BASE: any = baseFor(DEFAULT_PROFILE);
+
+function baseFor(name: string): any {
+  const base = JSON.parse(JSON.stringify(DEFAULTS));
+  if (PROFILES[name]) applyProfile(PROFILES[name], base);
+  return base;
+}
+
+/** How T differs from code defaults — the shape a profile file is stored in. */
+function profileDiff(): any {
+  const out: any = {};
+  for (const group of Object.keys(T)) {
+    const obj = (T as any)[group], def = (DEFAULTS as any)[group];
+    for (const key of Object.keys(obj)) {
+      if (obj[key] !== def[key]) (out[group] ??= {})[key] = obj[key];
+    }
+  }
+  return out;
+}
 
 export class Panel {
   pane: Pane;
@@ -37,6 +71,15 @@ export class Panel {
   private overrides: Record<string, number | boolean | string> = {};
   /** Bound to the built-in profile dropdown. */
   private sel = { profile: '' };
+  /**
+   * The profile file every edit is written straight into. Empty means scratch
+   * mode — "reset to code defaults" puts you there, so that button can never
+   * blank a shipped profile on the next slider move.
+   */
+  private active = '';
+  /** Readonly readout: where the last save went, or why it failed. */
+  private io = { saved: '' };
+  private savedBlade: any = null;
 
   constructor(private onChange: () => void) {
     this.pane = new Pane({ title: 'Tuning  ·  F1 hides' });
@@ -58,13 +101,13 @@ export class Panel {
         if (typeof value === 'boolean' || typeof value === 'string') {
           // Strings get no range: tweakpane turns a '#rrggbb' value into a colour
           // picker on its own, which is exactly what crosshair/color wants.
-          folder.addBinding(obj, key).on('change', () => { this.overrides[path] = obj[key]; });
+          folder.addBinding(obj, key).on('change', () => this.note(path, obj[key]));
         } else {
           const { min, max, step, doc } = inferRange(path, value);
           const opts: Record<string, number> = { min, max };
           if (step !== undefined) opts.step = step;   // omitted = continuous, no quantising
           const b = folder.addBinding(obj, key, opts);
-          b.on('change', () => { this.overrides[path] = obj[key]; });
+          b.on('change', () => this.note(path, obj[key]));
           if (doc) b.element.title = doc;
         }
       }
@@ -73,24 +116,32 @@ export class Panel {
     const io = this.pane.addFolder({ title: 'profiles', expanded: true });
     // Built-in feels. The dropdown and the Alt+1–9 hotkeys both land in
     // loadProfile(), which records the whole diff as overrides so the choice
-    // survives a reload.
+    // survives a reload. The default one is already applied at boot — it is in the
+    // list to switch back to, not because you have to pick it.
     if (PROFILE_NAMES.length) {
       const opts = [{ text: '— pick —', value: '' },
-        ...PROFILE_NAMES.map((n, i) => ({ text: `alt+${i + 1} · ${n}`, value: n }))];
+        ...PROFILE_NAMES.map((n, i) => ({
+          text: `alt+${i + 1} · ${n}${n === DEFAULT_PROFILE ? '  (default)' : ''}`, value: n }))];
       io.addBinding(this.sel, 'profile', { label: 'built-in', options: opts })
         .on('change', (ev) => { if (ev.value) this.loadProfile(ev.value); });
     }
-    io.addButton({ title: 'download json' }).on('click', () => this.download());
+    this.savedBlade = io.addBinding(this.io, 'saved', { readonly: true, label: 'saved' });
+    io.addButton({ title: 'save as new profile...' }).on('click', () => this.saveAs());
+    io.addButton({ title: 'download json (backup)' }).on('click', () => this.download());
     io.addButton({ title: 'copy to clipboard' }).on('click', () => {
       navigator.clipboard.writeText(JSON.stringify(snapshot(), null, 2));
     });
     io.addButton({ title: 'load from file' }).on('click', () => this.upload());
+    // Two different "undo everything", and they are genuinely different: one puts
+    // you back on the house tune, the other strips it off and shows the raw
+    // tuning.ts numbers. Neither writes a profile file — a reset is not an edit,
+    // and a button that could blank titanfall.json in one click is a trap.
+    io.addButton({ title: `reset to ${DEFAULT_PROFILE} (default)` }).on('click', () => {
+      this.setActive(DEFAULT_PROFILE);
+      this.onChange();
+    });
     io.addButton({ title: 'reset to code defaults' }).on('click', () => {
-      this.overrides = {};
-      this.sel.profile = '';
-      localStorage.removeItem(STORE_KEY);
-      applyProfile(DEFAULTS);
-      this.refresh();
+      this.setActive('');
       this.onChange();
     });
     io.addButton({ title: 'store as A' }).on('click', () => { this.slotA = snapshot(); });
@@ -113,33 +164,48 @@ export class Panel {
       }
     });
 
-    // Survive page reloads with the last tune intact — Vite HMR reloads a lot.
-    // The key carries a version: bumping it in tuning.ts discards stale saves so
-    // new defaults actually take effect instead of being silently overridden.
-    const saved = localStorage.getItem(STORE_KEY);
-    // "{}" counts as nothing saved: beforeunload writes the override set on every
-    // reload, so a reset-then-reload leaves an empty object behind, and treating
-    // that as a saved tune would make the house profile unreachable.
-    let hasSaved = false;
-    try { hasSaved = Object.keys(JSON.parse(saved ?? '{}')).length > 0; } catch { /* none */ }
-    if (hasSaved) {
-      try {
-        this.overrides = JSON.parse(saved!);
-        for (const [path, v] of Object.entries(this.overrides)) {
-          const [group, key] = path.split('/');
-          const g = (T as any)[group];
-          if (g && key in g) g[key] = v;
-        }
-        this.refresh();
-      } catch { this.overrides = {}; }
-    } else if (PROFILES[DEFAULT_PROFILE]) {
-      // First run on this browser: boot into the house tune instead of the raw
-      // code defaults. Only when nothing is saved — a returning player's own
-      // tune must never be stomped by this.
-      this.loadProfile(DEFAULT_PROFILE);
-    }
-    addEventListener('beforeunload', () => {
-      localStorage.setItem(STORE_KEY, JSON.stringify(this.overrides));
+    // Boot: the active profile first, always, then whatever localStorage still
+    // holds on top of it. Unconditional, so the game can never come up on a tune
+    // nobody picked. The active profile is titanfall unless you chose another one,
+    // and under `npm run dev` its FILE already holds your edits — localStorage is
+    // only carrying anything at all when the dev server was not there to write.
+    this.active = localStorage.getItem(ACTIVE_KEY) ?? DEFAULT_PROFILE;
+    if (this.active && !PROFILES[this.active]) this.active = DEFAULT_PROFILE;
+    BASE = baseFor(this.active);
+    applyProfile(BASE);
+    this.sel.profile = this.active;
+    this.io.saved = CAN_WRITE
+      ? (this.active ? profilePath(this.active) : 'scratch · localStorage only')
+      : 'localStorage (no dev server)';
+    try {
+      const saved = JSON.parse(localStorage.getItem(STORE_KEY) ?? '{}');
+      for (const [path, v] of Object.entries(saved as Record<string, any>)) {
+        const [group, key] = path.split('/');
+        const g = (T as any)[group];
+        if (g && key in g) g[key] = v;
+      }
+    } catch { /* unreadable save: the house tune stands */ }
+    // Re-derive the override set from where T actually landed rather than trusting
+    // the save. Anything already in the profile file is a no-op against BASE and
+    // gets dropped, leaving only edits the file does not have yet.
+    this.captureOverrides();
+    this.refresh();
+
+    // Persist eagerly. beforeunload alone was the bug behind "my changes don't
+    // stick": browsers skip it whenever the tab is discarded, crashed or closed
+    // from the background, and a session that ends that way loses everything since
+    // the last real navigation. pagehide fires in those cases; the debounced write
+    // on each edit covers even a hard kill.
+    const flush = () => {
+      if (this.saveT) { clearTimeout(this.saveT); this.saveT = 0; }
+      this.write();
+      // fetch() is abandoned when the page goes away; the beacon is not.
+      if (CAN_WRITE && this.active) beaconJson(profilePath(this.active), profileDiff());
+    };
+    addEventListener('pagehide', flush);
+    addEventListener('beforeunload', flush);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') flush();
     });
   }
 
@@ -159,32 +225,52 @@ export class Panel {
 
   refresh() { this.pane.refresh(); }
 
-  /** Apply a built-in profile over code defaults and persist it like slider moves. */
+  /** Switch to a built-in profile: it becomes the tune AND the file edits go to. */
   loadProfile(name: string) {
-    const data = PROFILES[name];
-    if (!data) return;
-    applyProfile(DEFAULTS);
-    applyProfile(data);
-    this.captureOverrides();
-    this.sel.profile = name;
-    this.refresh();
+    if (!PROFILES[name]) return;
+    this.setActive(name);
     this.onChange();
   }
 
   /**
-   * Rebuild the override set from "how does T differ from DEFAULTS right now".
+   * Make `name` the active profile — the tune, the boot state, and the file every
+   * later edit is written into. Empty name = scratch: code defaults, and edits go
+   * to localStorage only so no profile file is touched.
+   */
+  private setActive(name: string) {
+    this.active = PROFILES[name] ? name : '';
+    BASE = baseFor(this.active);
+    applyProfile(BASE);
+    this.overrides = {};
+    this.sel.profile = this.active;
+    localStorage.setItem(ACTIVE_KEY, this.active);
+    this.write();
+    this.io.saved = this.active
+      ? (CAN_WRITE ? profilePath(this.active) : `${this.active} · localStorage`)
+      : 'scratch · localStorage only';
+    this.refresh();
+  }
+
+  /**
+   * Rebuild the override set from "how does T differ from BASE right now".
    * Needed after wholesale loads (built-in profile, uploaded file), where the
    * per-slider change tracking never fired — without it the loaded tune is
    * silently lost (or half-merged with stale overrides) on the next reload.
+   *
+   * Against BASE, not DEFAULTS: the diff has to be replayable on top of the tune
+   * the game boots into. It still reproduces any profile exactly — where a profile
+   * is silent, T holds the code default, and if BASE disagrees there that shows up
+   * in the diff like any other edit.
    */
   private captureOverrides() {
     this.overrides = {};
     for (const group of Object.keys(T)) {
-      const obj = (T as any)[group], def = (DEFAULTS as any)[group];
+      const obj = (T as any)[group], base = (BASE as any)[group];
       for (const key of Object.keys(obj)) {
-        if (obj[key] !== def[key]) this.overrides[`${group}/${key}`] = obj[key];
+        if (obj[key] !== base[key]) this.overrides[`${group}/${key}`] = obj[key];
       }
     }
+    this.save();
   }
 
   /**
@@ -192,8 +278,90 @@ export class Panel {
    * slider move and the widget shows the new value instead of going stale.
    */
   noteOverride(path: string, value: number | boolean | string) {
-    this.overrides[path] = value;
+    this.note(path, value);
     this.refresh();
+  }
+
+  /** Record one changed param and schedule a save. */
+  private note(path: string, value: number | boolean | string) {
+    this.overrides[path] = value;
+    this.save();
+  }
+
+  /**
+   * Debounced so dragging a slider does not hit localStorage once per pixel;
+   * short enough that a click-and-release is on disk before you can reload.
+   */
+  private saveT = 0;
+  private writing = false;
+  private queued = false;
+  private save() {
+    if (this.saveT) return;
+    this.saveT = setTimeout(() => { this.saveT = 0; this.write(); }, 250) as unknown as number;
+  }
+
+  /**
+   * localStorage always — it is the only store a built game has, and the fallback
+   * whenever the dev server is not answering. Then, under `npm run dev`, the real
+   * one: the active profile file in the repo.
+   */
+  private write() {
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(this.overrides)); } catch { /* full/blocked */ }
+    if (!CAN_WRITE || !this.active) return;
+    const name = this.active;
+    const diff = profileDiff();
+    // Nothing to say. Without this every page load would rewrite the profile it
+    // just read and leave the repo dirty for no reason.
+    if (JSON.stringify(diff) === JSON.stringify(PROFILES[name])) return;
+    // One write at a time, with at most one queued behind it. Dragging a slider
+    // can outrun the round trip, and two responses landing out of order would
+    // leave BASE describing a file that is no longer what is on disk.
+    if (this.writing) { this.queued = true; return; }
+    this.writing = true;
+    void saveJson(profilePath(name), diff).then((r) => {
+      this.writing = false;
+      if (this.queued) { this.queued = false; this.write(); }
+      if (this.active !== name) return;   // switched profiles mid-flight
+      if (r.ok) {
+        // The file now holds these values, so they stop being overrides: fold them
+        // into the in-memory profile and into BASE. Without this the same edits
+        // would live in two stores and the next diff would double-count them.
+        PROFILES[name] = diff;
+        BASE = baseFor(name);
+        this.overrides = {};
+        try { localStorage.setItem(STORE_KEY, '{}'); } catch { /* ignore */ }
+        this.io.saved = `${profilePath(name)} · ${stamp()}`;
+      } else {
+        // Never silent. A failed write means localStorage is all you have.
+        this.io.saved = `NOT SAVED: ${r.error}`;
+      }
+      this.savedBlade?.refresh();
+    });
+  }
+
+  /**
+   * Write the current tune to a NEW profile file and switch to it. This is the
+   * "snapshot before I start wrecking things" button: the old file stops changing
+   * the moment the new one becomes active.
+   */
+  private async saveAs() {
+    const raw = prompt('New profile name', `${this.active || 'tune'}-copy`);
+    if (!raw) return;
+    const name = raw.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
+    if (!name) return;
+    const note = (msg: string) => { this.io.saved = msg; this.savedBlade?.refresh(); };
+    if (!CAN_WRITE) return note('NOT SAVED: no dev server');
+    const diff = profileDiff();
+    const r = await saveJson(profilePath(name), diff);
+    if (!r.ok) return note(`NOT SAVED: ${r.error}`);
+    PROFILES[name] = diff;
+    this.active = name;
+    BASE = baseFor(name);
+    this.overrides = {};
+    localStorage.setItem(ACTIVE_KEY, name);
+    // The dropdown is built once from the glob, so a brand new file only joins the
+    // list on reload. It is already active and already on disk either way.
+    note(`${profilePath(name)} · ${stamp()} · reload to list`);
   }
 
   toggle() {

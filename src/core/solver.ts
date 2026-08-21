@@ -4,7 +4,7 @@
 import { T } from './tuning';
 import * as V from './vec';
 import type { V3 } from './vec';
-import type { CollisionWorld, Intent, Player, StateName } from './types';
+import type { Cable, CollisionWorld, Intent, Player, StateName } from './types';
 
 export function makePlayer(spawn: V3): Player {
   return {
@@ -44,6 +44,22 @@ export function makePlayer(spawn: V3): Player {
     fuel: T.thruster.fuelMax,
     fuelIdle: 0,
     fuelDry: false,
+    cables: [
+      { on: false, anchor: V.v3(), len: 0 },
+      { on: false, anchor: V.v3(), len: 0 },
+    ],
+    slamming: false,
+    slamBoost: 0,
+    dashBoost: 1,
+    vaultT: 0,
+    vaultCooldown: 0,
+    vaultDir: V.v3(),
+    grappling: false,
+    grappleReel: 0,
+    grappleAuto: false,
+    grappleTime: 0,
+    grappleKeep: 0,
+    grappleCooldown: 0,
     chain: 0,
     chainTimer: 0,
     alive: true,
@@ -130,6 +146,10 @@ function bleedOverspeed(p: Player, dt: number) {
   // The thruster runs its own drag toward hoverCap; letting the soft cap bleed on
   // top would double up and make the hover feel sticky.
   if (p.thrusting) return;
+  // A swing lives entirely above the ground cap — bleeding it back to 11 u/s
+  // would delete the mechanic. The grace after release is what makes the speed
+  // you earned on the rope worth anything once you are off it.
+  if (p.grappling || p.grappleKeep > 0) return;
   const cap = currentCap(p);
   const h = V.lenH(p.vel);
   if (h <= cap) return;
@@ -214,6 +234,9 @@ function doDash(p: Player, i: Intent) {
   const aim = T.camera.firstPerson ? T.dash.verticalAimFP : T.dash.verticalAim;
   dir.y = Math.sin(i.pitch) * aim;
   p.dashDir = V.norm(dir);
+  // Stamped at the start, not read live: a dash that got weaker halfway through
+  // because a timer expired mid-flight is a dash you cannot plan around.
+  p.dashBoost = p.slamBoost > 0 ? T.slam.dashBoost : 1;
   p.dashTime = T.dash.duration;
   p.dashEntrySpeed = V.lenH(p.vel);
   p.dashCharges--;
@@ -248,6 +271,117 @@ function endSlide(p: Player) {
   enter(p, p.grounded ? 'grounded' : 'airborne');
 }
 
+// ---------------------------------------------------------------- ground slam
+
+/**
+ * C, in the air only. Cancels everything — the dash you were in, the wallrun you
+ * were on, the rope you were hanging from — and drives you straight at the floor.
+ *
+ * It is not a damage move and it costs nothing. What it buys is the window after
+ * it: `slam.boostTime` seconds where the dash comes out at `slam.dashBoost`, so
+ * arriving at the ground hard is a way back INTO the fight instead of the end of
+ * a line. The window is short on purpose. A permanent stronger dash is just a
+ * faster dash, and then the number in `dash.speed` is a lie.
+ */
+function trySlam(p: Player, i: Intent, col: CollisionWorld): boolean {
+  if (!T.slam.enabled || !i.slam.pressed || p.slamming) return false;
+  if (p.grounded || p.state === 'grounded' || p.state === 'sliding') return false;
+  // Needs real air under you. Measured, not timed: a state clock gets reset by
+  // every dash and wallrun, and the thing that actually makes a slam meaningless
+  // is having nowhere to fall. It also closes the exploit of tapping C a hand's
+  // width off a ledge to farm the dash window.
+  const clear = col.ray(p.pos, V.v3(0, -1, 0), T.character.height / 2 + T.slam.minHeight);
+  if (clear !== null) return false;
+
+  p.slamming = true;
+  p.vel = V.v3(p.vel.x * T.slam.keepH, -T.slam.speed, p.vel.z * T.slam.keepH);
+  if (p.state === 'wallrunning') detachWall(p);
+  if (p.grappling) releaseGrapple(p, false);
+  p.vaultT = 0;                 // no hopping a ledge on the way down
+  enter(p, 'airborne');
+  registerTech(p);
+  return true;
+}
+
+/** Holds the slam's line until it lands. Gravity would only add to it. */
+function updateSlam(p: Player) {
+  p.vel.x *= T.slam.keepH;
+  p.vel.z *= T.slam.keepH;
+  p.vel.y = Math.min(p.vel.y, -T.slam.speed);
+}
+
+// ---------------------------------------------------------------- vault
+
+/**
+ * Ledge probe. Finds a lip you are about to run into that is too tall for the
+ * controller's autostep but low enough to hop, and returns how far its top sits
+ * above your feet. Null means "not a vault": no face, a slope, a gap, or a wall.
+ */
+function ledgeAhead(p: Player, dir: V3, col: CollisionWorld): number | null {
+  const t = T.vault;
+  const feetY = p.pos.y - T.character.height / 2;
+
+  // Just above the autostep. Lower and the probe keeps finding the ramps the
+  // controller already walks up; higher and it misses the short ledges that are
+  // most of the point.
+  const from = V.v3(p.pos.x, feetY + T.character.stepHeight + 0.1, p.pos.z);
+  const hit = col.rayHit(from, dir, T.character.radius + t.reach);
+  if (!hit) return null;
+  // Only a face steep enough to actually stop you. Anything shallower is a slope,
+  // which is the controller's job and not a thing to be launched up.
+  if (Math.abs(hit.normal.y) > Math.sin(T.wall.maxAngle)) return null;
+
+  // Drop a probe just past that face, starting above the tallest ledge allowed.
+  // On a real wall this origin is buried inside the geometry, which reports a
+  // surface at the very top of the range and fails the height test below —
+  // exactly the answer we want, with no special case for it.
+  const inset = hit.dist + T.character.radius * 0.6;
+  const top = V.v3(p.pos.x + dir.x * inset, feetY + t.maxHeight + 0.5, p.pos.z + dir.z * inset);
+  const drop = col.ray(top, V.v3(0, -1, 0), t.maxHeight + 0.5);
+  if (drop === null) return null;              // nothing over there: a gap, not a ledge
+
+  const rise = top.y - drop - feetY;
+  // Under stepHeight the controller already walks it. Over maxHeight it is a wall,
+  // and turning walls into launches would delete wallrunning from the game.
+  if (rise <= T.character.stepHeight || rise > t.maxHeight) return null;
+  return rise;
+}
+
+/**
+ * Hitting the edge of something should cost you a step, not the run. This fires
+ * automatically when you are moving into a vaultable lip, and it is deliberately
+ * NOT a jump: it spends no jump, sets no cooldown you can feel, and never slows
+ * you down — it only ever adds.
+ */
+function tryVault(p: Player, col: CollisionWorld): boolean {
+  const t = T.vault;
+  if (!t.enabled || p.vaultT > 0 || p.vaultCooldown > 0) return false;
+  if (p.state === 'wallrunning') return false;
+
+  const h = V.lenH(p.vel);
+  if (h < t.minSpeed) return false;
+  const dir = V.v3(p.vel.x / h, 0, p.vel.z / h);
+  const rise = ledgeAhead(p, dir, col);
+  if (rise === null) return false;
+
+  // Exactly the launch the lip needs, derived rather than picked: v = sqrt(2gh)
+  // is the same relation the jump height is read with. A fixed impulse is either
+  // too weak for the tall ledges or a pop on the short ones.
+  const up = Math.sqrt(2 * T.world.gravityRise * (rise + t.clearance));
+  p.vel.y = Math.max(p.vel.y, up);
+  p.vaultDir = dir;
+  p.vaultT = t.hold;
+  p.vaultCooldown = t.hold + t.cooldown;
+
+  // Both ground states clamp vertical velocity to zero every tick, so a hop that
+  // leaves the state alone is a hop that gets deleted on the next one.
+  if (p.state === 'sliding') endSlide(p);
+  enter(p, 'airborne');
+  p.grounded = false;
+  registerTech(p);
+  return true;
+}
+
 // ---------------------------------------------------------------- wallrun
 
 /**
@@ -256,6 +390,9 @@ function endSlide(p: Player) {
  * than straight into it — hitting a wall head-on should bonk, not stick.
  */
 function attachWall(p: Player, rawNormal: V3): boolean {
+  // Mid-hop. A chest-high ledge is a legal wall by angle, so without this the
+  // thing you just vaulted grabs you into a wallrun on the way over it.
+  if (p.vaultT > 0) return false;
   if (!T.wall.enabled) return false;
   if (Math.abs(rawNormal.y) > Math.sin(T.wall.maxAngle)) return false;
 
@@ -355,6 +492,223 @@ function updateWallrunning(p: Player, i: Intent, wish: V3, col: CollisionWorld, 
   if (V.lenH(p.vel) < T.wall.minSpeed) detachWall(p);
 }
 
+// ---------------------------------------------------------------- grapple
+
+/** Where the camera is pointing, as a unit vector. The hooks' aim. */
+function aimDir(i: Intent): V3 {
+  const cp = Math.cos(i.pitch);
+  return V.v3(-Math.sin(i.yaw) * cp, Math.sin(i.pitch), -Math.cos(i.yaw) * cp);
+}
+
+/** The point the cables leave the body from — also where they are fired from. */
+function ropeOrigin(p: Player): V3 {
+  return V.v3(p.pos.x, p.pos.y + T.grapple.eyeOffset, p.pos.z);
+}
+
+/** At least one cable live. Every consumer asks this, never the array. */
+function syncGrappling(p: Player) {
+  p.grappling = p.cables.some((c) => c.on);
+}
+
+/**
+ * Fire. Both hooks bite on the tick you press, or not at all: a projectile hook
+ * is a hook that arrives late, and this is meant to be the fastest verb in the kit.
+ *
+ * Two rays, splayed `spread` radians either side of the aim, so on a flat wall
+ * the anchors land a couple of metres apart and you hang between them. Either
+ * side may miss, and that is fine — one cable biting and one flying off into
+ * open sky is a perfectly good, and very ODM, way to be attached.
+ */
+function fireGrapple(p: Player, i: Intent, col: CollisionWorld): boolean {
+  if (!T.grapple.enabled || p.grappleCooldown > 0) return false;
+  const from = ropeOrigin(p);
+  const aim = aimDir(i);
+  // Sideways axis of the view, for splaying the two shots apart.
+  const right = V.norm(V.v3(-Math.cos(i.yaw), 0, Math.sin(i.yaw)));
+
+  let any = false;
+  for (let k = 0; k < p.cables.length; k++) {
+    const side = k === 0 ? -1 : 1;
+    const dir = V.norm(V.add(aim, V.scale(right, side * T.grapple.spread)));
+    const dist = col.ray(from, dir, T.grapple.range);
+    const c = p.cables[k];
+    if (dist === null) { c.on = false; continue; }
+    c.on = true;
+    c.anchor = V.v3(from.x + dir.x * dist, from.y + dir.y * dist, from.z + dir.z * dist);
+    // Each cable starts exactly as long as its own shot, so attaching never
+    // yanks you. Everything after this is the pendulum or something you asked for.
+    c.len = dist;
+    any = true;
+  }
+  if (!any) return false;
+
+  p.grappleTime = 0;
+  p.grappleReel = 0;
+  p.grappleAuto = false;
+  syncGrappling(p);
+  // Grappling is tech: it feeds the same chain bonus as a wallrun or a slide, so
+  // cable work raises the speed cap for whatever you do next.
+  registerTech(p);
+  return true;
+}
+
+/**
+ * Attach both cables to one arbitrary point. The engine's door for hooking
+ * something the solver is not allowed to know about — a dummy — and the reason
+ * the meathook needs no second implementation: it IS the cables, with an anchor
+ * the engine moves and `auto` holding the reel down for you.
+ */
+export function attachGrappleTo(p: Player, at: V3, auto: boolean) {
+  const from = ropeOrigin(p);
+  const len = V.len(V.sub(at, from));
+  for (const c of p.cables) {
+    c.on = true;
+    c.anchor = V.copy(at);
+    c.len = len;
+  }
+  p.grappleTime = 0;
+  p.grappleReel = 0;
+  p.grappleAuto = auto;
+  syncGrappling(p);
+  registerTech(p);
+}
+
+/** Move every live anchor — the hooked body they are buried in has shifted. */
+export function moveGrappleAnchor(p: Player, at: V3) {
+  for (const c of p.cables) if (c.on) c.anchor = V.copy(at);
+}
+
+/**
+ * Let go of everything. A swing that just stops paying out is a swing nobody
+ * uses twice, so release converts the arc into a launch: keep the speed, add a
+ * little, and hold off the overspeed bleed for `keepTime` so it survives into
+ * the next move.
+ */
+export function releaseGrapple(p: Player, boosted = true) {
+  if (!p.grappling) return;
+  for (const c of p.cables) c.on = false;
+  p.grappling = false;
+  p.grappleReel = 0;
+  p.grappleAuto = false;
+  p.grappleCooldown = T.grapple.cooldown;
+  p.grappleKeep = T.grapple.keepTime;
+  if (!boosted) return;
+  const h = V.lenH(p.vel);
+  if (h > 1e-3) p.vel = V.setLenH(p.vel, Math.min(T.momentum.hardCap, h * T.grapple.releaseBoost));
+  if (T.grapple.releaseUp > 0) p.vel.y = Math.max(p.vel.y, p.vel.y + T.grapple.releaseUp);
+  registerTech(p);
+}
+
+/** One cable's distance constraint. Returns false when that cable should let go. */
+function holdCable(p: Player, c: Cable, from: V3, dt: number): boolean {
+  const g = T.grapple;
+  const to = V.sub(c.anchor, from);
+  const dist = V.len(to);
+  if (dist < g.minLen || dist > g.maxLen) return false;
+  const dir = V.scale(to, 1 / dist);
+
+  // Past the cable's length, kill the velocity heading away from the anchor and
+  // pull the stretch back in. Removing that radial component is the single line
+  // that turns a fall into a swing.
+  const stretch = dist - c.len;
+  if (stretch <= g.slack) return true;
+
+  const away = -V.dot(p.vel, dir);          // >0 means moving away from the anchor
+  if (away > 0) p.vel = V.add(p.vel, V.scale(dir, away));
+  p.vel = V.add(p.vel, V.scale(dir, (stretch - g.slack) * g.stiffness * dt));
+  // Drag along the arc only — deliberately tiny. A swing that scrubs speed is a
+  // swing you stop using.
+  if (g.swingDrag > 0) {
+    const keep = Math.max(0, 1 - g.swingDrag * dt);
+    const radial = V.scale(dir, V.dot(p.vel, dir));
+    p.vel = V.add(radial, V.scale(V.sub(p.vel, radial), keep));
+  }
+  return true;
+}
+
+/**
+ * The cables, applied after the state has had its say and before the move. They
+ * are a MODIFIER, not a state, which is what lets you dash, wallrun, slide and
+ * shoot with them attached — the gear never takes the character away from you.
+ *
+ * Order matters: the state update (ordinary air control, and the gas) has already
+ * run, so the constraints below eat the radial half of everything it added and
+ * leave the tangential half. That is why A and D steer a swing without a single
+ * line of bespoke swing-steering code.
+ */
+function updateGrapple(p: Player, i: Intent, col: CollisionWorld, dt: number) {
+  if (!p.grappling) return;
+  p.grappleTime += dt;
+  const g = T.grapple;
+  const from = ropeOrigin(p);
+
+  if (!g.enabled) return releaseGrapple(p, false);
+
+  // --- WASD. Forward reels in, back pays out; left and right are left alone,
+  // because ordinary air control already steers the arc. `grappleAuto` is the
+  // meathook holding the reel down for you: hooking a body is a commitment.
+  p.grappleReel = (p.grappleAuto || i.moveY > 0.1) ? 1 : i.moveY < -0.1 ? -1 : 0;
+  if (p.grappleReel !== 0) {
+    const speed = p.grappleAuto ? g.hookSpeed : g.reelSpeed;
+    for (const c of p.cables) {
+      if (!c.on) continue;
+      c.len = p.grappleReel > 0
+        ? Math.max(g.minLen, c.len - speed * dt)
+        : Math.min(g.maxLen, c.len + g.payOutSpeed * dt);
+    }
+  }
+
+  if (p.grappleReel > 0) {
+    // Pull along the AVERAGE of the live cables, once — applying the reel per
+    // cable would double the yank whenever both are attached.
+    let mean = V.v3();
+    let n = 0;
+    for (const c of p.cables) {
+      if (!c.on) continue;
+      mean = V.add(mean, V.norm(V.sub(c.anchor, from)));
+      n++;
+    }
+    if (n > 0) {
+      const dir = V.norm(mean);
+      const accel = p.grappleAuto ? g.hookAccel : g.reelAccel;
+      const cap = p.grappleAuto ? g.hookSpeed : g.reelCap;
+      const along = V.dot(p.vel, dir);
+      p.vel = V.add(p.vel, V.scale(dir, Math.min(accel * dt, Math.max(0, cap - along))));
+      // Flat pull alone drags you into the wall below the anchor; the lift is
+      // what turns a grapple at a ledge into an arc over it. Shaped by how flat
+      // the cable is — unshaped it keeps pushing while you are already climbing
+      // and fires you tens of metres past the anchor, which is a rocket, not a
+      // cable. Manual only: the meathook is a straight line onto a body.
+      if (!p.grappleAuto) p.vel.y += g.reelLift * (1 - Math.abs(dir.y)) * dt;
+    }
+  }
+
+  // --- the constraints, one per live cable. Two taut cables genuinely pull
+  // against each other, and that IS the two-point hang: it damps the swing and
+  // holds you in the pocket between the anchors instead of arcing past them.
+  for (const c of p.cables) {
+    if (!c.on) continue;
+    if (g.breakOnBlocked) {
+      // Stop short of the anchor's own surface, or every cable reports blocked.
+      const to = V.sub(c.anchor, from);
+      const d = V.len(to);
+      if (col.ray(from, V.scale(to, 1 / d), d - 0.35) !== null) { c.on = false; continue; }
+    }
+    if (!holdCable(p, c, from, dt)) c.on = false;
+  }
+
+  // Both cables gone means arrival (or over-stretch). Go out through the proper
+  // door so the cooldown, the keep window and the release boost all still happen.
+  if (!p.cables.some((c) => c.on)) return releaseGrapple(p, true);
+
+  const speed = V.len(p.vel);
+  if (speed > T.momentum.hardCap) p.vel = V.scale(p.vel, T.momentum.hardCap / speed);
+
+  // A cable pulling up beats standing: let the reel lift you off the floor
+  // rather than scraping you along it.
+  if (p.grounded && p.vel.y > 0.1 && p.state === 'grounded') enter(p, 'airborne');
+}
+
 // ---------------------------------------------------------------- thrusters
 
 /**
@@ -388,6 +742,25 @@ function updateThruster(p: Player, i: Intent, wish: V3, dt: number): number {
   if (p.fuel <= 0) p.fuelDry = true;
 
   if (p.boosting) return boostThruster(p, i, wish, dt);
+
+  // ODM: on a cable the jets are GAS, not a hover — and this returns BEFORE the
+  // climb and the hover steering, because every part of the hover model fights a
+  // swing. `hoverDrag` scrubs the arc you just earned; `hoverRedirect` rotates
+  // the velocity the cable is trying to own; the climb to `maxRise` cancels the
+  // fall the pendulum runs on; and `gravityScale` cuts the gravity that IS the
+  // pendulum's engine. Measured, all four together made holding the jets on a
+  // cable SLOWER than not holding them, which is the wrong answer to every
+  // question. So: full gravity, no drag, no steering — just a push.
+  //
+  // `accelerate` caps the push against gasCap along that direction ONLY, so gas
+  // can never take away speed the pendulum earned. Swinging well still beats
+  // holding the button, and the cable is what holds you up.
+  if (p.grappling) {
+    let dir = wish;
+    if (V.lenH(dir) < 1e-6) dir = V.norm(V.v3(-Math.sin(i.yaw), 0, -Math.cos(i.yaw)));
+    p.vel = accelerate(p.vel, dir, t.gasAccel, t.gasCap, dt);
+    return 1;
+  }
 
   // Climb, capped. Thrust only pushes until maxRise, so the jets can arrest a
   // fall instantly but can never turn into an escalator.
@@ -453,7 +826,8 @@ function updateGrounded(p: Player, i: Intent, wish: V3, dt: number) {
   if (V.lenH(wish) > 1e-6) {
     p.vel = redirect(p.vel, wish, T.ground.redirect, dt);
     p.vel = accelerate(p.vel, wish, T.ground.accel, currentCap(p), dt);
-  } else if (p.bufJump <= 0) {
+  } else if (p.bufJump <= 0 && !p.grappling) {
+    // Ground friction against a taut rope is a tug of war the rope should win.
     p.vel = applyFriction(p.vel, T.ground.friction, dt);
   }
   p.vel.y = Math.min(p.vel.y, 0);
@@ -510,9 +884,10 @@ function updateDashing(p: Player, i: Intent, col: CollisionWorld, dt: number) {
   // dashing while already faster — out of an afterburn at 34 u/s, say — dropped
   // you to 32 for the duration and handed it back on exit. Net zero, and it read
   // as the dash doing nothing at all. At speed the dash is now a free redirect.
+  const base = T.dash.speed * p.dashBoost;
   const speed = T.dash.preserveEntrySpeed
-    ? Math.min(T.momentum.hardCap, Math.max(T.dash.speed, p.dashEntrySpeed))
-    : T.dash.speed;
+    ? Math.min(T.momentum.hardCap * p.dashBoost, Math.max(base, p.dashEntrySpeed))
+    : base;
   p.vel = V.scale(p.dashDir, speed);
   if (T.dash.gravityScale > 0) gravity(p, dt, T.dash.gravityScale);
 
@@ -525,9 +900,9 @@ function updateDashing(p: Player, i: Intent, col: CollisionWorld, dt: number) {
   if (!p.grounded && tryWallAttach(p, col)) return;
 
   if (p.dashTime <= 0) {
-    const base = T.dash.speed * T.dash.exitSpeedKeep;
-    const keep = T.dash.preserveEntrySpeed ? Math.max(base, p.dashEntrySpeed) : base;
-    p.vel = V.scale(p.dashDir, Math.min(keep, T.momentum.hardCap));
+    const out = T.dash.speed * p.dashBoost * T.dash.exitSpeedKeep;
+    const keep = T.dash.preserveEntrySpeed ? Math.max(out, p.dashEntrySpeed) : out;
+    p.vel = V.scale(p.dashDir, Math.min(keep, T.momentum.hardCap * p.dashBoost));
     if (p.vel.y > 0) p.vel.y = Math.min(p.vel.y, T.jump.speed);
     enter(p, p.grounded ? 'grounded' : 'airborne');
   }
@@ -588,6 +963,11 @@ function tickTimers(p: Player, dt: number) {
   p.dashCooldown = d(p.dashCooldown);
   p.wallCoyote = d(p.wallCoyote);
   p.wallCooldown = d(p.wallCooldown);
+  p.vaultT = d(p.vaultT);
+  p.vaultCooldown = d(p.vaultCooldown);
+  p.slamBoost = d(p.slamBoost);
+  p.grappleKeep = d(p.grappleKeep);
+  p.grappleCooldown = d(p.grappleCooldown);
   p.chainTimer = d(p.chainTimer);
   if (p.chainTimer <= 0) p.chain = 0;
   p.stamina = Math.min(T.stamina.max, p.stamina + T.stamina.regen * dt);
@@ -622,8 +1002,21 @@ export function step(p: Player, i: Intent, col: CollisionWorld, dt: number) {
   if (i.dash.pressed) p.bufDash = T.dash.bufferTime;
   if (i.slide.pressed) p.bufSlide = T.slide.bufferTime;
 
+  // Grapple, before anything else moves: pressing it should change this tick.
+  // Hold-to-hang by default; `toggle` turns the press into an on/off switch.
+  if (i.grapple.pressed) {
+    if (p.grappling) releaseGrapple(p);
+    else fireGrapple(p, i, col);
+  } else if (!T.grapple.toggle && p.grappling && !i.grapple.held) {
+    releaseGrapple(p);
+  }
+
   const wish = wishDir(i);
   const wasGrounded = p.grounded;
+
+  // Before the state machine: a slam cancels whatever you were doing, so the
+  // state it cancels should not get a tick of its own first.
+  trySlam(p, i, col);
 
   // Sprint is a held modifier, not a state — the cap change happens in currentCap().
   p.sprinting = T.sprint.enabled && i.dash.held && i.moveY > T.sprint.minForward;
@@ -643,6 +1036,16 @@ export function step(p: Player, i: Intent, col: CollisionWorld, dt: number) {
     }
     guard++;
   } while (p.state !== before && guard < 3);
+
+  // The slam owns velocity outright while it is running, so it goes after the
+  // state (which would otherwise re-apply air control into it) and before the
+  // rope. Vaulting is suppressed for the same reason: the whole move is "down".
+  if (p.slamming) updateSlam(p);
+  else tryVault(p, col);
+
+  // After the state, before the move: the rope gets the last word on velocity,
+  // so it can cancel whatever the state just added that the rope would not allow.
+  updateGrapple(p, i, col, dt);
 
   if (p.state !== 'dashing') bleedOverspeed(p, dt);
 
@@ -665,8 +1068,27 @@ export function step(p: Player, i: Intent, col: CollisionWorld, dt: number) {
   if (res.hitWall && p.state !== 'wallrunning') p.vel = V.projectOnPlane(p.vel, res.wallNormal);
   if (res.grounded && p.vel.y < 0) p.vel.y = 0;
 
+  // Hold the vault's push through the rise. The projection just above deletes
+  // precisely the velocity that carries you over the lip — you are still inside
+  // the face while climbing it — so without re-asserting it every tick you scrape
+  // up the wall and arrive on top with nothing left, which is the stall this
+  // whole thing exists to remove.
+  if (p.vaultT > 0) {
+    const along = p.vel.x * p.vaultDir.x + p.vel.z * p.vaultDir.z;
+    if (along < T.vault.push) {
+      const add = T.vault.push - along;
+      p.vel.x += p.vaultDir.x * add;
+      p.vel.z += p.vaultDir.z * add;
+    }
+  }
+
   // Ground state bookkeeping
   if (res.grounded && !wasGrounded) {
+    if (p.slamming) {
+      p.slamming = false;
+      p.slamBoost = T.slam.boostTime;
+      p.vel.y = 0;
+    }
     p.jumpsLeft = T.jump.maxJumps;
     if (T.dash.refillOnGround) p.dashCharges = T.dash.maxCharges;
     p.wallCoyote = 0;

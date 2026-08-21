@@ -24,6 +24,12 @@ import type { Projectiles } from './projectiles';
 
 interface GunStats {
   cycle: number;      // seconds between shots
+  /** Shots before the long reload. 1 = every shot costs `cycle`. */
+  barrels: number;
+  /** Seconds after the last barrel. Only read when `barrels` > 1. */
+  reload: number;
+  /** Held trigger keeps firing instead of one shot per click. */
+  auto: boolean;
   pellets: number;
   spread: number;     // cone half-angle, radians
   damage: number;     // per shot/pellet, x the shared head/body damage
@@ -46,6 +52,9 @@ const GUNS: Gun[] = [
     name: 'rifle',
     stats: () => ({
       cycle: T.rifle.boltTime,
+      barrels: 1,
+      reload: 0,
+      auto: T.rifle.auto,
       pellets: 1,
       spread: T.rifle.spread,
       damage: T.rifle.damage,
@@ -60,7 +69,12 @@ const GUNS: Gun[] = [
   {
     name: 'shotgun',
     stats: () => ({
+      // Two shells when a reload time is set, one when it is not. The gun's
+      // whole character changes on that one number and nothing else moves.
       cycle: T.shotgun.pumpTime,
+      barrels: T.shotgun.secondPump > 0 ? 2 : 1,
+      reload: T.shotgun.secondPump,
+      auto: false,
       pellets: Math.max(1, Math.round(T.shotgun.pellets)),
       spread: T.shotgun.spread,
       damage: T.shotgun.damage,
@@ -76,6 +90,9 @@ const GUNS: Gun[] = [
     name: 'railgun',
     stats: () => ({
       cycle: T.railgun.chargeTime,
+      barrels: 1,
+      reload: 0,
+      auto: false,
       pellets: 1,
       spread: T.railgun.spread,
       damage: T.railgun.damage,
@@ -97,6 +114,8 @@ export class Weapon {
   /** The gun Q goes back to. */
   private lastSlot = 1;
   private cycle = 0;      // seconds left in the fire cycle
+  /** Barrels already fired since the last reload. Only the shotgun uses it. */
+  private fired = 0;
   private raise = 0;      // seconds left of the swap animation
   private root!: HTMLDivElement;
   private dot!: HTMLDivElement;
@@ -136,10 +155,14 @@ export class Weapon {
       this.select(this.lastSlot);
     }
 
-    if (this.input.shootPressed) {
-      this.input.shootPressed = false;
-      if (this.ready) this.fire();
-    }
+    // An auto gun fires on the HELD button, not the edge: it should keep going
+    // for as long as you hold it and never care where the cycle boundary fell.
+    // Everything else still needs a click per shot.
+    const wantsFire = this.gun.stats().auto
+      ? (this.input.shootHeld || this.input.shootPressed)
+      : this.input.shootPressed;
+    this.input.shootPressed = false;
+    if (wantsFire && this.ready) this.fire();
 
     // Reticle: fades + the dot shrinks while the gun cycles or comes up, snaps
     // back when ready. Colour stays whatever the player picked, so the readiness
@@ -163,12 +186,28 @@ export class Weapon {
     // A gun you swapped away from mid-cycle comes back ready — the switch time is
     // the cost, and stacking a half-finished bolt on top of it just feels dead.
     this.cycle = 0;
+    // Both barrels back. You reload while the other gun is up — that is what the
+    // switch time is paying for.
+    this.fired = 0;
     this.styleKey = '';   // the new gun's spread changes the reticle bloom
   }
 
   private fire() {
     const g = this.gun.stats();
-    this.cycle = g.cycle;
+    // Double barrel: the short pump between the two, the long break-open after
+    // the last one. Fire one and walk away and the second stays loaded.
+    // The counter wraps on EVERY gun, single-barrel included. Letting it run
+    // free on a one-shot gun looks harmless until you turn a second barrel on
+    // mid-session: `fired` is then some large number, `barrels - fired` goes
+    // negative, and String.repeat throws on a negative count — every frame,
+    // from inside the HUD, which reads on screen as the game freezing.
+    this.fired++;
+    if (this.fired >= g.barrels) {
+      this.cycle = g.barrels > 1 ? g.reload : g.cycle;
+      this.fired = 0;
+    } else {
+      this.cycle = g.cycle;
+    }
 
     const cam = this.gfx.camera;
     cam.updateMatrixWorld();
@@ -224,9 +263,16 @@ export class Weapon {
   }
 
   hudLine() {
-    const state = this.raise > 0 ? 'raise' : this.cycle > 0 ? 'cycle' : 'READY';
+    const g = this.gun.stats();
+    const state = this.raise > 0 ? 'raise'
+      : this.cycle > 0 ? (g.barrels > 1 && this.fired === 0 ? 'reload' : 'cycle')
+        : 'READY';
+    // Clamped as well as fixed at the source: a HUD string is never worth a
+    // thrown exception in the render loop.
+    const left = Math.max(0, Math.min(g.barrels, g.barrels - this.fired));
+    const barrels = g.barrels > 1 ? '  ' + '|'.repeat(left).padEnd(g.barrels, '.') : '';
     const rack = GUNS.map((g, i) => `${i + 1}:${g.name}${i === this.slot ? '*' : ''}`).join(' ');
-    return `${this.gun.name.padEnd(8)}${state}   ${rack}  [Q last]`
+    return `${this.gun.name.padEnd(8)}${state}${barrels}   ${rack}  [Q last]`
       + `   targets ${this.enemies.kills}/${this.enemies.total}`;
   }
 

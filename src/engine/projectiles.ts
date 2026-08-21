@@ -39,7 +39,11 @@ export class Projectiles {
   private list: Proj[] = [];
   private ray = new THREE.Raycaster();
   private flashes: { mesh: THREE.Mesh; t: number }[] = [];
-  private beams: { line: THREE.Line; t: number; life: number }[] = [];
+  private beams: {
+    group: THREE.Group;
+    mats: { mat: THREE.MeshBasicMaterial; opacity: number }[];
+    t: number; life: number;
+  }[] = [];
 
   constructor(
     private gfx: Renderer,
@@ -214,25 +218,32 @@ export class Projectiles {
     for (let i = this.beams.length - 1; i >= 0; i--) {
       const b = this.beams[i];
       b.t -= dt;
-      const mat = b.line.material as THREE.LineBasicMaterial;
-      mat.opacity = Math.max(0, b.t / b.life);
+      const f = Math.max(0, b.t / b.life);
+      // Squared, so the flare is bright for most of its life and then goes
+      // quickly. A linear fade on an additive beam reads as a slow smear.
+      for (const { mat, opacity } of b.mats) mat.opacity = opacity * f * f;
+      // And it thins as it dies, which is what sells it as discharging rather
+      // than as a cylinder someone turned the alpha down on.
+      b.group.scale.x = b.group.scale.y = 0.35 + 0.65 * f;
       if (b.t <= 0) {
-        this.gfx.scene.remove(b.line);
-        b.line.geometry.dispose();
-        mat.dispose();
-        this.beams.splice(i, 1);
+        this.disposeBeam(i);
       }
     }
   }
 
   clear() {
     while (this.list.length) this.despawn(this.list.length - 1);
-    while (this.beams.length) {
-      const b = this.beams.pop()!;
-      this.gfx.scene.remove(b.line);
-      b.line.geometry.dispose();
-      (b.line.material as THREE.Material).dispose();
+    while (this.beams.length) this.disposeBeam(this.beams.length - 1);
+  }
+
+  private disposeBeam(i: number) {
+    const b = this.beams[i];
+    this.gfx.scene.remove(b.group);
+    for (const child of b.group.children) {
+      (child as THREE.Mesh).geometry.dispose();
     }
+    for (const { mat } of b.mats) mat.dispose();
+    this.beams.splice(i, 1);
   }
 
   private despawn(i: number) {
@@ -243,16 +254,47 @@ export class Projectiles {
     this.list.splice(i, 1);
   }
 
-  /** The visible line a hitscan shot leaves behind, faded out by update(). */
+  /**
+   * The visible line a hitscan shot leaves behind, faded out by update().
+   *
+   * Real geometry, not a THREE.Line: `linewidth` on a LineBasicMaterial is
+   * ignored by every WebGL renderer, so a line is one pixel wide forever and the
+   * railgun — the weapon whose whole identity is that it already hit — left the
+   * faintest mark on the screen of anything in the game.
+   *
+   * Three nested cylinders, all additive: a white-hot core, the blue beam
+   * proper, and a wide soft halo. Additive is what makes it read as light rather
+   * than as a painted tube, and stacking three means the middle blows out to
+   * white on its own instead of being coloured that way.
+   */
   private tracer(from: THREE.Vector3, to: THREE.Vector3, life: number) {
-    const line = new THREE.Line(
-      new THREE.BufferGeometry().setFromPoints([from.clone(), to.clone()]),
-      new THREE.LineBasicMaterial({
-        color: 0x7dd3fc, transparent: true, opacity: 1, depthTest: false,
-      }),
-    );
-    this.gfx.scene.add(line);
-    this.beams.push({ line, t: life, life: Math.max(life, 1e-3) });
+    const dir = to.clone().sub(from);
+    const len = dir.length();
+    if (len < 1e-4) return;
+
+    const group = new THREE.Group();
+    const mats: { mat: THREE.MeshBasicMaterial; opacity: number }[] = [];
+    const r = T.railgun.beamWidth;
+    for (const [color, opacity, scale] of [
+      [0x38bdf8, 0.16, T.railgun.beamGlow],   // halo
+      [0x7dd3fc, 0.55, 1.0],                  // the beam
+      [0xffffff, 0.95, 0.34],                 // core
+    ] as const) {
+      const mat = new THREE.MeshBasicMaterial({
+        color, transparent: true, opacity, depthWrite: false, depthTest: false,
+        blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+      });
+      // Along +Y, then the whole group is rotated onto the shot below.
+      const geo = new THREE.CylinderGeometry(r * scale, r * scale, len, 10, 1, true);
+      geo.translate(0, len / 2, 0);
+      group.add(new THREE.Mesh(geo, mat));
+      mats.push({ mat, opacity });
+    }
+    group.position.copy(from);
+    group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
+    group.renderOrder = 5;
+    this.gfx.scene.add(group);
+    this.beams.push({ group, mats, t: life, life: Math.max(life, 1e-3) });
   }
 
   private impactFlash(at: THREE.Vector3) {

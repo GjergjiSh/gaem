@@ -6,6 +6,7 @@
 import type { Brush, Trigger, Level } from './types';
 import * as arena from './arena';
 import * as course01 from './course01';
+import * as figure8 from './figure8';
 
 export interface LevelData extends Level {
   name: string;
@@ -16,12 +17,25 @@ const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x));
 // Built-in JSON tracks, bundled at build time (same pattern as tuning profiles).
 const TRACK_MODULES = import.meta.glob('./tracks/*.json', { eager: true }) as Record<string, any>;
 
+/** `tracks/figure8.level.json` is the level called `figure8`, not `figure8.level`. */
+const trackName = (file: string) => file.replace(/\.json$/, '').replace(/\.level$/, '');
+
+/** Filename each track was actually loaded from, keyed by level name. */
+const TRACK_FILES: Record<string, string> = {};
+
+/**
+ * Where the editor writes a level. It writes back to the file the level was
+ * LOADED from whenever there is one — otherwise saving `loop-course`, which
+ * lives in `loop-course.json`, creates a second `loop-course.level.json` that
+ * resolves to the same name and shadows the original. You then edit the first
+ * file, see nothing change, and have no way to tell why.
+ */
+export const trackPath = (name: string) =>
+  TRACK_FILES[name]
+  ?? `src/levels/tracks/${name.toLowerCase().replace(/[^a-z0-9_.-]+/g, '-')}.level.json`;
+
 /** Pristine copies of every built-in level, keyed by name. */
 const BUILTINS: Record<string, () => LevelData> = {};
-for (const [path, mod] of Object.entries(TRACK_MODULES)) {
-  const name = path.split('/').pop()!.replace(/\.json$/, '');
-  BUILTINS[name] = () => ({ name, ...clone((mod as any).default ?? mod) });
-}
 BUILTINS['arena'] = () => ({
   name: 'arena',
   brushes: clone(arena.brushes),
@@ -29,6 +43,15 @@ BUILTINS['arena'] = () => ({
   spawn: { ...arena.spawn },
   killY: arena.killY,
   enemies: clone(arena.enemies),
+});
+BUILTINS['figure8'] = () => ({
+  name: 'figure8',
+  brushes: clone(figure8.brushes),
+  triggers: clone(figure8.triggers),
+  spawn: { ...figure8.spawn },
+  spawnYaw: figure8.spawnYaw,
+  killY: figure8.killY,
+  enemies: clone(figure8.enemies),
 });
 BUILTINS['course01'] = () => ({
   name: 'course01',
@@ -39,21 +62,51 @@ BUILTINS['course01'] = () => ({
   enemies: [],
 });
 
+// Files LAST, so a saved track wins over a generator of the same name. That is
+// the rule that makes editing a generated level stick: the TypeScript is the
+// seed, `tracks/<name>.level.json` is the level. Delete the file to get the
+// generator back. `name` goes after the spread so the FILENAME decides what a
+// level is called — the name baked into the JSON is whatever it was exported as,
+// and a copy saved under a new filename must not answer to the old one.
+for (const [path, mod] of Object.entries(TRACK_MODULES)) {
+  const file = path.split('/').pop()!;
+  const name = trackName(file);
+  TRACK_FILES[name] = `src/levels/tracks/${file}`;
+  BUILTINS[name] = () => ({ ...clone((mod as any).default ?? mod), name });
+}
+
 export const LEVEL_NAMES = Object.keys(BUILTINS).sort();
 
-const DEFAULT_LEVEL = BUILTINS['loop-course'] ? 'loop-course' : 'arena';
+/**
+ * Fold a just-written track back into the in-memory copies, so re-picking it
+ * from the dropdown gives what is on disk rather than what was bundled at boot.
+ */
+export function noteTrackSaved(name: string, data: LevelData) {
+  const saved = clone(data);
+  BUILTINS[name] = () => ({ ...clone(saved), name });
+}
+
+const DEFAULT_LEVEL = BUILTINS['figure8'] ? 'figure8' : 'arena';
 export const EDIT_STORE_KEY = 'editor.level.v1';
+/** Which level was open last. A name, not a copy of the level. */
+const EDIT_ACTIVE_KEY = 'editor.activeLevel';
 
 function boot(): LevelData {
-  // An in-progress edit survives reloads; picking a built-in from the editor's
-  // dropdown always restores the pristine copy.
-  try {
-    const saved = localStorage.getItem(EDIT_STORE_KEY);
-    if (saved) {
-      const d = JSON.parse(saved);
-      if (Array.isArray(d.brushes) && d.spawn) return d;
-    }
-  } catch { /* fall through to the built-in */ }
+  const last = localStorage.getItem(EDIT_ACTIVE_KEY);
+  if (last && BUILTINS[last]) return BUILTINS[last]();
+  // No dev server to write files, so the whole level lives in localStorage and
+  // an in-progress edit only survives a reload if we restore it from there.
+  // Under `npm run dev` the file above IS the in-progress edit, and restoring a
+  // stale blob over it would undo work you can see in git.
+  if (!import.meta.env.DEV) {
+    try {
+      const saved = localStorage.getItem(EDIT_STORE_KEY);
+      if (saved) {
+        const d = JSON.parse(saved);
+        if (Array.isArray(d.brushes) && d.spawn) return d;
+      }
+    } catch { /* fall through to the built-in */ }
+  }
   return BUILTINS[DEFAULT_LEVEL]();
 }
 
@@ -63,6 +116,9 @@ export const level: LevelData = boot();
 /** Replace the active level's contents (same object, new data). */
 export function setLevelData(data: LevelData) {
   level.name = data.name ?? 'untitled';
+  // Remembered by NAME, so a reload comes back to this level's file rather than
+  // to a snapshot of it taken at some point in the past.
+  try { localStorage.setItem(EDIT_ACTIVE_KEY, level.name); } catch { /* ignore */ }
   level.brushes = data.brushes ?? [];
   level.triggers = data.triggers ?? [];
   level.spawn = data.spawn ?? { x: 0, y: 3, z: 0 };

@@ -95,6 +95,11 @@ export class Hud {
       `coyote   ${bar(p.coyoteJump, T.jump.coyoteTime)}  buf ${bar(p.bufJump, T.jump.bufferTime)}`,
       `slidecoy ${bar(p.slideCoyote, T.slide.coyoteTime)}${p.slideCoyote > 0 ? '  LEDGE TECH ARMED' : ''}`,
       `dash cd  ${bar(T.dash.cooldown - p.dashCooldown, T.dash.cooldown)}`,
+      `cables   ${p.grappling
+        ? `${p.cables.map((c) => (c.on ? c.len.toFixed(1).padStart(5) : '    -')).join(' ')}`
+          + `  ${p.grappleReel > 0 ? 'REEL' : p.grappleReel < 0 ? 'PAY' : 'hang'}`
+          + `${p.thrusting ? '  GAS' : ''}`
+        : `--   ${p.grappleKeep > 0 ? `keep ${bar(p.grappleKeep, T.grapple.keepTime)}` : ''}`}`,
       `fuel     ${bar(p.fuel, T.thruster.fuelMax)}${p.boosting ? '  BURN x'
         + T.thruster.boostBurn : p.thrusting ? '  THRUST' : p.fuelDry ? '  DRY' : ''}`,
       ``,
@@ -110,10 +115,16 @@ export class Hud {
     if (this.showHelp) {
       this.help.textContent = [
         `WASD move · Space jump · Shift dash · Ctrl slide`,
+        `C in the air = ground slam · landing it makes your next dashes hit harder`,
+        `run into a low ledge = vault (automatic, keeps your speed)`,
         `hold Space with no jumps left = thrusters (hover + shoot)`,
         `  + Shift while thrusting = afterburner (drinks fuel, goes fast)`,
         `air into a wall = wallrun (auto-runs) · Space = eject`,
-        `1 rifle · 2 shotgun · 3 railgun · Q last gun · M4 sword`,
+        `1 rifle · 2 shotgun · 3 railgun · Q last gun · M4 sword · M5 getsuga`,
+        `M3 (middle mouse) ODM gear: BOTH cables fire, hold to hang,`,
+        `  W reel in, S pay out, + hold Space = gas (the two together IS the gear)`,
+        `  A/D swing the arc · let go to launch out of it`,
+        `  aimed at a target it's a meathook — you fly to THEM, at sword range`,
         `view     ${viewMode}   [V to switch]`,
         `camera: ${lookMode}`,
         `it drifts back behind you when you let go`,

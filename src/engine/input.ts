@@ -9,7 +9,11 @@ const KEYS = {
   right: ['KeyD', 'ArrowRight'],
   jump: ['Space'],
   dash: ['ShiftLeft', 'ShiftRight'],
-  slide: ['ControlLeft', 'KeyC'],
+  slide: ['ControlLeft'],
+  // C used to be a second slide key. It is the ground slam now — in the air it
+  // is a verb of its own, and on the ground it does nothing, which is the point:
+  // one key, one meaning, and no crouch to fight the slide for it.
+  slam: ['KeyC'],
   // Same key as jump on purpose: jump, double jump, keep holding and the jets
   // light. The solver gates it on having no jumps left (thruster.requireEmptyJumps),
   // so a held hop can't quietly burn the tank.
@@ -46,7 +50,9 @@ export class Input {
     jump: { pressed: false, held: false },
     dash: { pressed: false, held: false },
     slide: { pressed: false, held: false },
+    slam: { pressed: false, held: false },
     thrust: { pressed: false, held: false },
+    grapple: { pressed: false, held: false },
   };
 
   /** Seconds since the mouse last moved — drives the camera drift-behind. */
@@ -55,10 +61,14 @@ export class Input {
   /** Fire edge, consumed by the weapon. Only set while pointer-locked, so the
    *  click that CAPTURES the pointer never also fires a shot. */
   shootPressed = false;
+  /** Left mouse still down. Full-auto guns read this instead of the edge. */
+  shootHeld = false;
   /** Right mouse held — ADS. The "scope" is an FOV pull, handled by the weapon. */
   adsHeld = false;
-  /** Mouse 4 (side button) edge — sword swing, consumed by the sword. */
+  /** Mouse 4 (first side button) edge — sword swing, consumed by the sword. */
   swingPressed = false;
+  /** Mouse 5 (second side button) edge — the sword's ranged wave. */
+  getsugaPressed = false;
   /** Gun slot requested this frame (0-based), or null. Consumed by the weapon. */
   weaponSlot: number | null = null;
   /** Q edge — swap to the previously held gun, CS/Doom style. */
@@ -90,6 +100,7 @@ export class Input {
       if (KEYS.jump.includes(e.code)) this.intent.jump.pressed = true;
       if (KEYS.dash.includes(e.code)) this.intent.dash.pressed = true;
       if (KEYS.slide.includes(e.code)) this.intent.slide.pressed = true;
+      if (KEYS.slam.includes(e.code)) this.intent.slam.pressed = true;
     });
     addEventListener('keyup', (e) => this.down.delete(e.code));
 
@@ -140,26 +151,39 @@ export class Input {
 
     canvas.addEventListener('mousedown', (e) => {
       if (e.button === 2) { this.adsHeld = true; return; }
-      // Side buttons swing the sword — and must not trigger browser history nav.
+      // Middle mouse is the grapple. preventDefault matters here beyond the usual
+      // reason: without it the browser opens its autoscroll widget, which eats
+      // every subsequent mousemove and leaves the camera dead.
+      if (e.button === 1) {
+        e.preventDefault();
+        this.intent.grapple.pressed = true;
+        this.intent.grapple.held = true;
+        return;
+      }
+      // Side buttons drive the sword: 4 swings it, 5 throws the wave. Both must
+      // be prevented or the browser takes them as back/forward navigation.
       if (e.button === 3 || e.button === 4) {
         e.preventDefault();
-        this.swingPressed = true;
+        if (e.button === 3) this.swingPressed = true;
+        else this.getsugaPressed = true;
         return;
       }
       if (e.button !== 0) return;
-      if (this.locked) { this.shootPressed = true; return; }
+      if (this.locked) { this.shootPressed = true; this.shootHeld = true; return; }
       this.dragging = true;
       this.lastX = e.clientX;
       this.lastY = e.clientY;
     });
     addEventListener('mouseup', (e) => {
+      if (e.button === 0) this.shootHeld = false;
       if (e.button === 2) this.adsHeld = false;
+      if (e.button === 1) { e.preventDefault(); this.intent.grapple.held = false; }
       if (e.button === 3 || e.button === 4) e.preventDefault();
       this.dragging = false;
     });
     // Chromium fires history navigation from side buttons on mouseup/auxclick.
     canvas.addEventListener('auxclick', (e) => {
-      if (e.button === 3 || e.button === 4) e.preventDefault();
+      if (e.button === 1 || e.button === 3 || e.button === 4) e.preventDefault();
     });
     addEventListener('mouseleave', () => { this.dragging = false; });
 
@@ -199,6 +223,7 @@ export class Input {
     this.intent.jump.held = on(KEYS.jump);
     this.intent.dash.held = on(KEYS.dash);
     this.intent.slide.held = on(KEYS.slide);
+    this.intent.slam.held = on(KEYS.slam);
     this.intent.thrust.held = on(KEYS.thrust);
   }
 
@@ -211,13 +236,16 @@ export class Input {
     this.down.clear();
     this.dragging = false;
     this.shootPressed = false;
+    this.shootHeld = false;
     this.adsHeld = false;
     this.swingPressed = false;
+    this.getsugaPressed = false;
     this.weaponSlot = null;
     this.weaponSwap = false;
     this.intent.moveX = 0;
     this.intent.moveY = 0;
-    for (const b of [this.intent.jump, this.intent.dash, this.intent.slide, this.intent.thrust]) {
+    for (const b of [this.intent.jump, this.intent.dash, this.intent.slide,
+      this.intent.slam, this.intent.thrust, this.intent.grapple]) {
       b.pressed = false;
       b.held = false;
     }
@@ -228,6 +256,8 @@ export class Input {
     this.intent.jump.pressed = false;
     this.intent.dash.pressed = false;
     this.intent.slide.pressed = false;
+    this.intent.slam.pressed = false;
     this.intent.thrust.pressed = false;
+    this.intent.grapple.pressed = false;
   }
 }

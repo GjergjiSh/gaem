@@ -54,6 +54,12 @@ export class Renderer {
     sun.position.set(30, 60, 20);
     this.scene.add(sun);
 
+    // The camera goes IN the scene so anything parented to it — the sword
+    // viewmodel, its slash — is part of the traversal and actually gets drawn.
+    // A camera outside the graph still renders the world, it just silently drops
+    // every child hanging off it.
+    this.scene.add(this.camera);
+
     this.scene.add(this.levelGroup);
     this.buildLevel();
 
@@ -165,6 +171,7 @@ export class Renderer {
 
     if (fp) this.firstPerson(p, yaw, pitch, dt, sliding);
     else this.thirdPerson(p, yaw, pitch, dt, col, over);
+
 
     // Third person shows speed by extending the arm; first person has no arm, so
     // FOV and head bob carry that job alone.

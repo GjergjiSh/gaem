@@ -243,7 +243,9 @@ Click the canvas to capture the mouse. **WASD** move · **Space** jump (hold for
 cut) · **Shift** or LMB dash · **Ctrl** / **C** / RMB slide · **R** restart · **F1** hide panel ·
 **T** toggle A/B profiles.
 
-`npm run check` typechecks. The tuning panel persists to localStorage, so a reload keeps your tune.
+`npm run check` typechecks. Under `npm run dev` the tuning panel and the level editor save into the
+repo as you work — `src/profiles/<active>.json` and `src/levels/tracks/<level>.level.json` — so your
+tune and your level are files you can diff, revert and commit. See §23.
 
 ### Verified behaviour (measured, not assumed)
 
@@ -825,7 +827,8 @@ reach and parry can be tuned without a cooldown getting in the way — the same 
 ### Key changes
 
 **The tuning panel's profile hotkeys moved to Alt+1–9.** Plain digits are gun slots
-now. Full keyboard: **1**/**2** guns · **Q** last gun · **M4** sword · hold **Space**
+now. Full keyboard: **1**/**2** guns · **Q** last gun · **M4** sword · **M5** Getsuga ·
+hold **Space**
 with no jumps left for thrusters.
 
 ### Still open
@@ -834,6 +837,7 @@ with no jumps left for thrusters.
 - The shotgun has no falloff beyond the cone spreading out — no per-metre damage
   curve, which is probably the next thing the fight needs.
 - No gun models or muzzle flashes: the arsenal is entirely reticle and HUD so far.
+  (The sword got a viewmodel in §18; the three guns still have none.)
 - Input recorder / replay-under-a-different-tune, still not built.
 
 ---
@@ -905,6 +909,9 @@ instead of raw code defaults. Only when nothing is saved — a returning player'
 tune is never stomped — and **"reset to code defaults" still goes to the raw
 `tuning.ts` values**, not back to the profile, so there is still a way to see what
 the file actually says.
+
+*(Superseded by §22 — "only when nothing is saved" turned out to be the loophole
+that let the game boot on a tune nobody picked.)*
 
 ### The HUD hides now
 
@@ -992,3 +999,1047 @@ the jets are lit; the dash is back the instant you let go of the jump key.
 
 The fuel arc turns red while boosting, because a resource draining at 2.4× needs
 to say so without you reading the number.
+
+---
+
+## 18. The sword you can actually see, and the wave that comes off it
+
+### The blade was never being drawn
+
+The swing had an animation the whole time — a ring sector parented to the camera,
+swept and faded per swing. Nothing ever appeared on screen, and the reason was one
+line that was never written: **the camera was not in the scene**.
+
+`WebGLRenderer.render(scene, camera)` builds its draw list by traversing `scene`.
+A camera outside that graph still renders the world perfectly — it is passed in
+separately — but every object parented to it is invisible, silently, with no
+warning and nothing in the console. `scene.add(camera)` is the fix, and it is the
+prerequisite for any viewmodel at all.
+
+### The blade is a real object now, in both view modes
+
+A rig with the hand at the origin and the sword built up +Y from it, so rotating
+the pivot swings the blade the way a wrist does:
+
+- **First person** — parented to the camera at `(0.30, -0.42, -0.75)`, scaled by
+  `sword.scale` (0.85). Materials go `depthTest: false` with a high `renderOrder`,
+  the standard viewmodel trick: a blade held at arm's length otherwise punches
+  through every wall you stand next to.
+- **Third person** — *not* parented to the character mesh. That mesh damps its
+  `scale.y` to 0.55 on a slide, and an inherited squash on a rotating child both
+  shears the sword and reads as a bug. The rig sits in the scene and takes its
+  world transform from `player.pos` + `facing` each frame instead.
+
+The rig's local −Z points where the character faces in both modes (third person
+adds a π yaw), so **the swing maths never learns which mode it is in** — exactly
+one line knows about the flip.
+
+### It is drawn for the swing, not carried forever
+
+First pass left the blade parked in the corner of the screen permanently, which
+is clutter: between swings it is something in the way, not something you read.
+Now `show` damps to 1 while swinging, holds for `sword.linger` (0.35 s), then
+damps back to 0, and the rig is skipped entirely below 0.01. Sheathed, the hand
+sits low and rolled out of frame, so drawing swings it up into view rather than
+popping it in — and at `drawSpeed` 24 the draw finishes inside the windup, so the
+blade is fully out by the time the cut starts.
+
+Waves already in flight are stepped *before* that early return. They live in the
+world, not on the rig, and must keep going long after the blade is put away.
+
+### Every swing goes a different way
+
+A press picks `swingAngle` uniformly from the full circle: a screen-space
+direction, 0 slashing right, π/2 slashing up, everything between a diagonal.
+The blade sweeps about the axis perpendicular to that line and lying in the
+screen plane, which is what carries the tip *along* the line — that is what
+"swing this direction" means geometrically.
+
+Three beats, all fractions of `sword.swingTime`:
+
+| beat | share | motion |
+|---|---|---|
+| windup | `sword.windup` (0.3) | rest → +0.45 × sweep, ease-out |
+| cut | 45% of the rest | +0.45 → −0.55 × sweep, ease-out **cubic** |
+| recover | the remainder | back to rest, smoothstep |
+
+At `swingTime` 0.42 and `swingSweep` 3.0 rad that is a long, wide cut — the first
+pass (0.26 / 2.1) read as a flick.
+
+The cut is the short beat and it eases *out*: the blade leaves fast and arrives
+slow. That asymmetry is the entire reason a swing reads as a strike rather than a
+wave of the hand. Total travel is exactly `swingSweep` at any windup — with the
+windup dialled to 0 the cut simply starts from rest and takes the whole sweep,
+rather than popping to the cocked pose on frame one.
+
+**The rest pose is solved, not authored.** A swing rotates up to 0.55 × sweep off
+rest, and a blade resting too upright passes *behind the camera* at the end of a
+big one — which, with the viewmodel's depth test off, smears across the entire
+screen. So `restPose()` works out the largest angle off the aim the tip can reach
+while staying in front of the near plane, subtracts the sweep, and rests at
+whatever is left: 0.37 rad when there is room, tilting the whole arc forward when
+there is not. That is what keeps `swingSweep` and `scale` free to be dragged
+anywhere in the panel without the viewmodel breaking.
+
+`sword.lunge` punches the hand forward through the cut on top of the rotation,
+because a strike has reach. Between swings the rig breathes, so the blade is never
+a dead prop.
+
+### One crescent function, two uses
+
+`crescentGeometry(radius, span, thick)` is a tapered arc: half-thickness follows
+`sin(πt)`, so it is thickest mid-arc and comes to a *point* at both tips — the
+tips coincide exactly rather than being cut off square, which is what separates a
+crescent from a slice of ring.
+
+It draws the swing's trail (bowed along the slash line, additive, burning off
+behind the blade) and the Getsuga itself. Same shape, different scale.
+
+### Getsuga Tenshō — M5
+
+The sword's ranged verb. It plays a swing and throws the wave that comes off that
+cut, rolled onto the same random slash line, so the animation and the projectile
+always agree.
+
+The wave is deliberately **not** a `Projectiles` entry. Everything in that system
+is a bullet: a segment raycast that reports one nearest hit and counts down a
+pierce budget. A wave is an *area* — it flies flat, it has no drop, it has no
+pierce limit, and it cuts every target it sweeps over exactly once (a per-wave
+`Set` of indices). Modelling that as a bullet with `pierce: 99` would still miss
+everything a metre off the centre line.
+
+Shape matters as much as behaviour here: at `thickness` 0.12 × `radius` 2.8 over
+a `span` of 2.6 rad it is a five-metre blade of light, roughly 15:1 long to thick.
+The first pass (0.34 × 1.6 over 2.2) came out stubby and fat — a croissant.
+
+- **Hits**: sphere overlap against living dummies at `radius + 0.5`, where the
+  radius grows with distance flown (`getsuga.growth`) — the wave widens as it
+  crosses the arena.
+- **Walls**: a raycast on the centre line only. A wave clipping a corner with its
+  wingtip and carrying on is the right read.
+- **Death**: at `getsuga.range` or on a wall, it blows out over 0.18 s — expanding
+  while it thins, rather than blinking off.
+- **Cost**: its own cooldown, not the combo. The blade and the wave are two
+  separate decisions in a fight. `sword.infinite` frees this one too.
+
+The right side of the meter cluster gained a second arc for its charge, matching
+stamina's rule: a ready wave dims out of notice, a spent one draws the eye.
+
+---
+
+## 19. ODM gear — middle mouse
+
+A movement verb, so it lives in the **solver**, stepped at the fixed 120 Hz tick
+alongside everything else. Not a state: a *modifier* applied after the state has
+had its say and before the move. That is what lets you dash, wallrun, slide and
+shoot with the rope attached — the grapple never takes the character away from
+you, which is the difference between a mechanic and a cutscene.
+
+### Two cables, from the hips
+
+One press fires **both** hooks, splayed `spread` radians either side of the aim,
+so on a flat wall the anchors land a couple of metres apart (2.8 m at 20 m) and
+you hang between them. Either side may miss and that is fine — one cable biting
+while the other flies off into open sky is a perfectly good, and very ODM, way to
+be attached. `Player.cables` is a two-element array; `p.grappling` is the derived
+"at least one is live", and every consumer asks that rather than the array.
+
+Two taut cables genuinely pull against each other, and that *is* the two-point
+hang: it damps the swing and holds you in the pocket between the anchors instead
+of arcing past them. Sequential constraint solving is stable here — measured over
+a five-second two-point hang, worst stretch was **0.092 m** on an 18 m cable with
+no jitter and no blow-up.
+
+Visually they leave from left and right hip launchers (`hipPosition`), which is
+the whole silhouette of the thing: two lines splaying out from the body to two
+separate bites.
+
+### The hook bites instantly
+
+No projectile. The attach is a raycast on the tick you press, because a hook that
+flies out is a hook that arrives late, and this is meant to be the fastest verb in
+the kit. The rope's whip-out is a 0.07 s visual on a hook that already bit.
+
+Attaching sets `grappleLen` to exactly the distance it found, so the grab never
+yanks you. Everything after that is either the pendulum or something you asked for.
+
+### Three rules, and A/D come for free
+
+1. **A cable cannot stretch.** Past its length, velocity pointing away from the
+   anchor is removed every tick, per cable. That single line is what turns a fall
+   into an arc — everything people mean by "grapple feel" falls out of it.
+2. **Forward reels, back pays out.** The only acceleration the rope adds.
+3. **Ordinary air control keeps running underneath**, because the constraint runs
+   *after* the state update. It eats the radial half of whatever air control just
+   added and leaves the tangential half — so A and D steer the swing without a
+   single line of bespoke swing-steering code, and the swing inherits the air tune
+   that is already dialled in rather than needing a second one.
+
+Measured, anchor overhead, entering at 12 u/s with hands off the keys:
+
+| | |
+|---|---|
+| rope length held | 14.08–14.11 m against a 14.0 m rope (0.11 m max stretch) |
+| the arc | +5.1 m out at 0.5 s, back through the bottom at 1.5 s, −7.2 m at 2.5 s |
+| speed at the bottom | 12.4 → 15.4 u/s over three passes |
+| holding A instead | +5.6 m becomes −1.2 m after one second |
+
+That speed *gain* across passes is real and is worth knowing about: gravity is
+asymmetric in this game (`gravityFall` 62 vs `gravityRise` 36), so a pendulum
+pumps itself slightly. On a movement toy that is a feature — swinging rewards
+staying on the rope — and `swingDrag` is the knob that takes it away.
+
+### The gas, and four ways a hover fights a swing
+
+Cables plus jets is the gear, so holding Space on a cable had to be worth doing.
+It was not: measured, holding the jets through a reeling swing came out **slower**
+than not holding them (23.8 vs 35.9 u/s after 1.5 s). Every part of the hover
+model works against a swing, and it was all four at once:
+
+| hover behaviour | what it does to a swing |
+|---|---|
+| `hoverDrag` | scrubs the arc you just earned |
+| `hoverRedirect` | rotates the velocity the cable is trying to own |
+| climb to `maxRise` | cancels the fall the pendulum runs on |
+| `gravityScale` 0.2 | cuts the gravity that IS the pendulum's engine |
+
+So on a cable the jets stop hovering and simply **push**: full gravity, no drag,
+no steering, one `accelerate()` along the stick (or the aim, if you are not asking
+for a direction) capped at `gasCap`. Because `accelerate` caps against the
+projection in that direction only, gas can never take away speed the pendulum
+earned — enter a swing at 40 u/s holding gas and you keep it, even though `gasCap`
+is 38. Swinging well still beats holding the button.
+
+Same swing, after the change: **35.9 → 43.6 u/s** with gas held. The afterburner
+(dash key, jets lit) is untouched and still available on a cable, which is the
+big ODM burst.
+
+### Reeling, and why the lift is shaped
+
+`reelLift` exists because a flat pull drags you into the wall *below* the ledge
+you were aiming at. First version added it unconditionally and fired the player
+**24 m past the anchor**: while you are already climbing, more lift is a rocket,
+not a rope. It is now scaled by `1 - |rope.y|` — full lift on a horizontal rope,
+none on a vertical one — which is exactly the case it was written for.
+
+| | |
+|---|---|
+| 25 m flat rope (a ledge) | arrives in 1.69 s, rising 4.7 m on the way — clears the lip |
+| 30 m rope at 45° up | arrives in 2.08 s at 43 u/s, then coasts on past |
+
+The coast past a steep anchor is *kept*. Arriving at speed and slinging past is
+the good outcome for a movement toy; a grapple that parks you at the anchor is a
+lift, not a mechanic.
+
+### Letting go is the payoff
+
+A swing that just stops paying out is a swing nobody uses twice. Release keeps
+the speed, adds `releaseBoost` (1.06) and `releaseUp`, and — the important part —
+sets `grappleKeep`, a 1.4 s window where **overspeed does not bleed**. Without it
+you release at 20 u/s and the soft cap deletes it before you can spend it.
+
+| | |
+|---|---|
+| release at the peak of a swing | 19.3 → 20.4 u/s |
+| 1.4 s later, keep window just ended | 20.1 u/s, still airborne |
+| 2 s after that, bleeding again | 16.1 u/s (ground cap is 11) |
+
+Attaching and releasing both call `registerTech`, so rope work feeds the same
+chain bonus as a wallrun or a slide and raises the cap for whatever comes next.
+
+Two supporting changes in the solver: `bleedOverspeed` returns early while
+attached or inside the keep window (a swing lives entirely above the ground cap,
+and bleeding it to 11 u/s would delete the mechanic), and ground friction is
+skipped while attached, because friction against a taut rope is a tug of war the
+rope should win.
+
+### Hooking a dummy is a meathook
+
+Aimed at the arena the rope pulls you to the wall. Aimed at a **body** it does
+the Doom thing: the hook bites, and *you* are hauled to *it*, arriving at 3 m —
+just inside the sword's 3.5 m reach, so the swing is already available when you
+land. Same button; the only difference is what the ray hit.
+
+It needs no second movement implementation, because it **is** the cables: the
+engine buries both of them in the body via `attachGrappleTo()` and holds the reel
+down (`grappleAuto`). So a meathook swings, collides, brakes and chains exactly
+like cables tied to the arena, and every cable slider still applies to it.
+
+| | |
+|---|---|
+| 30 m to a dummy | sword range in **0.66 s**, at 46 u/s |
+| arrival | braked to 16 u/s by `hookBrake` — you stop *at* the target, not past it |
+| letting go early | 46 → 47.3 u/s with vy 11 and the full keep window — a launch |
+
+That last row is the tech: an arrival brakes, but **cancelling** a meathook early
+is a different move that keeps everything it earned. Same as letting go of a rope,
+because it is letting go of a rope.
+
+Two supporting details. The lift is skipped while auto-reeling — the meathook is
+a straight line onto a body, and arcing it just makes you miss what you aimed at.
+And whichever surface the ray reaches first wins the hook, so a dummy standing in
+front of a wall is grabbable and one behind it is not.
+
+### `pullTarget`, and the body that went to orbit
+
+`pullTarget: true` flips it: the body is hauled to you instead. That was the first
+version and it launched dummies into the sky and left them there — visible from
+across the arena, hanging in the dark.
+
+Two bugs, one screenshot:
+
+1. **An offset applied as an increment.** The arc lift was added to the body's
+   *stored* position each frame, so every frame re-lifted an already-lifted body.
+   The arc profile (`sin(π·t·2)`) only runs for half a second, but that is sixty
+   frames of up to 1.1 m each — tens of metres straight up. The body's path now
+   lives in `Haul.base` and the arc is added to a *copy* of it, so it can never
+   accumulate.
+2. **Arrival is measured flat.** With the body directly overhead the horizontal
+   gap is ~0, so the haul instantly declared success and stopped — leaving it up
+   there. Dummies have no gravity of their own, so nothing ever brought it back.
+   `endHaul` now sets a dragged body down at the player's foot level on *every*
+   exit path: arrival, button release, timeout, or the target dying.
+
+The general lesson is the first one. Anything that adds a decaying offset to a
+position has to keep the path and the offset in separate variables, or the offset
+integrates.
+
+### Middle mouse needs preventDefault more than the other buttons
+
+Not for the usual reason. Without it the browser opens its autoscroll widget,
+which swallows every subsequent `mousemove` and leaves the camera completely dead.
+
+---
+
+## 20. figure8 — a track built out of the tune
+
+`levels/figure8.ts`, now the default level. The loop course was a flat ring of
+twelve tilted slabs; this is a **slanted lemniscate**, 739 m of banked road across
+a 268 x 168 m footprint, and it crosses over itself twice — once 20 m up, once
+20 m down. One height term does that:
+
+```
+x = A cos t        A = 110
+y = H sin t        H = 20     <- the whole "slanted"
+z = B/2 sin 2t     B = 130
+```
+
+Both crossings are at the origin (that is what a figure-8 *is*), so `y = H sin t`
+puts one pass at +20 and the other at −20: a 40 m stack, and a lap that climbs
+and dives instead of going round.
+
+### Indexed by distance, not by `t`
+
+The parametrisation runs more than twice as fast at the crossings as at the lobe
+ends, so stepping `t` uniformly gives platforms of wildly different lengths. A
+4000-sample arc-length table fixes that, and it is also what makes "a 30 m gap"
+mean thirty metres rather than thirty of something.
+
+### Islands, not a ribbon
+
+The first pass laid a continuous banked road. That was wrong, and the loop course
+had already shown why: **a continuous road has no edges, and the edges are where
+the movement is**. There is nothing to dash-slide-jump off, nothing to clear, and
+no reason to carry speed.
+
+Sixteen separated platforms now, and the gap between them is chosen against the
+tune *and* against the local slope — which are not the same constraint:
+
+| | |
+|---|---|
+| **climbing** | the far side is HIGHER by `gap x sin(slope)`, and a jump only clears 2.53 m of rise. The gap is capped at whatever keeps the step under 2 m, so steep climbs get long platforms and short hops — which is what a run-up wants anyway |
+| **descending** | the far side is LOWER, which lengthens every jump. The descents carry the big gaps, and the four steepest carry the feature gaps |
+
+The slot span is fixed either way, so the platform simply grows into whatever the
+gap gives back and the chain still closes the loop exactly. Platforms are pitched
+along the slope rather than stepped, so the height change happens *along* a
+platform instead of at the join, and they are **flat across**: a banked landing
+slides you off the edge you just fought to reach.
+
+Measured against the tune, every gap on the track:
+
+| | |
+|---|---|
+| gaps a plain run jump clears | **0 of 16** — speed always matters |
+| gaps a slide jump or Super clears | 13 of 16 |
+| gaps no jump clears, gear only | 3 of 16 |
+| unclimbable steps | **0** — the rise cap holds everywhere |
+
+Feature gaps are 30 m and are placed on the steepest descents, but **never
+adjacent**: taken purely by steepness they come out consecutive, because the
+descents on a lemniscate are next to each other, and four 30 m gaps back to back
+with 16 m of run-up between them is a gauntlet rather than a rhythm. Alternating
+them leaves a full 31 m platform to rebuild speed on before each one.
+
+### Two things that were absurd, and why
+
+**The launch lips were walls.** They were drawn as 0.6 m boxes standing on the
+platform edge — over `character.stepHeight`, so the marker advertising a launch
+was itself the thing that killed the launch. Inlaying them to 40 mm was the wrong
+fix and they are **gone** — see §24. Nothing is built on a platform's surface.
+
+**The road walls were scenery.** 6 m of fence on a corner is not a wallrun
+surface. They are arena-sized now — 13 m tall — and there is one at every join
+rather than at four of them; §24 has the geometry.
+
+### Every feature is sized off the tune
+
+Nothing here is eyeballed. The numbers come out of `T`, which is the point of
+keeping the tune in one place.
+
+| feature | sized by | result |
+|---|---|---|
+| the chute | `slopeAccel` beats `friction` from 1.8° | 62 m at 33°, pinned at `hardCap` the whole way |
+| the Super gap | `slideExitBonus` 1.28 on the slide cap | 31 m over an 8 m drop |
+| the chute exit | arrival speed rather than the bonus | 27 m level, shelf 13 m below |
+| wall shafts | `jumpOut` 13, `jumpKeepAlong` 0.7 | 6.5 m gap crossed in 0.50 s, using 4.5 m of a 24 m wall |
+| the spiral | `fuelMax / burnRate` x `maxRise` = 14.3 m per tank | six pads, 10.5 m apart, ground at every one |
+| the road gaps | `grapple.range` 65 | four at 30 m, gantry 15 m overhead |
+
+The Super gap is the one worth stating plainly, because all three cases were
+computed rather than guessed:
+
+| approach | carries | 31 m gap |
+|---|---|---|
+| run and jump | 10.5 m | no |
+| slide and jump | 25.3 m | no |
+| slide + coyote jump (the Super) | 32.4 m | **yes** |
+
+Exactly one of the three makes it. The grapple and the jets also make it, so it
+is a skill line and not a lock — which is the rule the whole map is built on:
+every gap has a movement answer and a gear answer.
+
+### The vertical loop
+
+The features are not scattered, they chain, and the chain closes:
+
+> high deck → **Super** → tower → **chute** → low deck → **wall shafts** → high deck
+
+Four mechanics in order, ending where it started, all inside the middle of the 8
+where the two crossings stack.
+
+### Two things the arithmetic caught before the level was ever loaded
+
+Both were invisible in the source and obvious in a measurement, which is the
+argument for generating levels rather than hand-placing boxes:
+
+1. **The chute did not reach either end.** Authored as centre + length + angle,
+   it came out 23 m short at both ends and floating 12 m above the deck it was
+   supposed to land on. Ramps are now placed with `ramp(from, to, ...)`, which
+   derives length, pitch and yaw from the endpoints and therefore cannot miss.
+2. **The decks sat 0.5 m below the road surface.** Half a metre is over
+   `stepHeight`, so the one place every lap has to pass through would have
+   stopped a run dead. Deck tops are flush with the road surface by construction
+   now. (The banking that also fought this is gone entirely — see above.)
+
+`geom.ts` now holds the quaternion helpers both generated levels were carrying
+their own copies of, plus `orient(yaw, pitch, roll)` — the composition order that
+"lay this along the path, on the slope, banked into the turn" actually means.
+
+---
+
+## 21. The editor edits enemies too
+
+The editor only ever knew about brushes. `level.enemies` was data no tool could
+touch — you could shape the geometry of a level in the editor and then had to go
+edit a source file to decide where anything stood in it.
+
+**Spawns are selectable now**, and the gizmo attaches to the **real dummy**
+rather than to a proxy marker: what you drag is what you will fight. Move only —
+a spawn point is a position and nothing else, so selecting one forces translate
+mode instead of offering rotate and scale handles that cannot be saved.
+
+Two details that decide whether it actually works:
+
+- **Dummies rebuild without spawn jitter while editing** (`rebuild(exact)`).
+  `enemy.spawnJitter` is 4 m, so without this you would place a spawn by dragging
+  something that then respawns four metres from where you dropped it. Entering
+  the editor also re-raises the dead, since you cannot select a corpse's
+  hitboxes.
+- **`+ enemy` drops the spawn on the ground under the look point**, by casting
+  down from the orbit target. Spawns are stored as FEET positions, so placing one
+  at the target directly leaves it floating over the floor you meant.
+
+Picking now raycasts geometry and dummies together and takes whichever the ray
+reaches first, so a dummy standing on a platform selects instead of the platform
+behind it. Delete and duplicate branch on the selection kind.
+
+### The camera can cross the map
+
+Orbit-only navigation was fine on a 110 m ring. The figure-8 is 268 m across, and
+orbiting to the far side of it one drag at a time is not navigation. **WASD flies
+along the view, Q/E and Space drop and rise, Shift is 4x**, and the orbit *target*
+is carried along so orbiting still works from wherever you flew to.
+
+The axes come from the **camera's own matrix**, not from `forward x up`. Looking
+straight down is the most natural thing to do in an orbit editor and it makes that
+cross product zero, which silently kills strafing — the first version had exactly
+that bug. Ctrl is deliberately not a fly key either: it would swallow every
+ctrl chord, and Ctrl+W closes the tab.
+
+Flying borrows the movement keys the character also holds, so leaving the editor
+calls `input.releaseAll()` — otherwise the keys you were flying with are still
+held when the sim unfreezes and the character runs off on their own. Entering
+blurs the focused element, because every editor key is gated on `typingInAField`
+and opening the editor straight from a tuning slider would leave the whole
+keyboard dead with nothing on screen saying why.
+
+### Multi-select, and the pivot that makes it correct
+
+Shift+click adds to the selection (and shift+clicking something already held
+takes it back out). Everything selected transforms **together**, and the way that
+works is the interesting part: the gizmo never attaches to a brush directly. It
+attaches to a **pivot** placed at the selection's centroid, with the selected
+objects re-parented under it via three.js `attach()`, which re-parents while
+preserving world transforms.
+
+That single indirection buys correctness for free. One gizmo drag applies one
+rotation about one centre to twenty brushes, and a single selection behaves
+exactly as it did before, because its centroid is its own origin. Write-back
+reads each object's **world** matrix — while selected their local transform is
+relative to the pivot — and both brush meshes and dummy roots live in
+untransformed groups, so world is exactly what gets stored.
+
+Verified headlessly (three.js `Object3D` maths needs no renderer):
+
+| | |
+|---|---|
+| attaching to the pivot | 0 drift — nothing moves on selection |
+| translating the pivot | every object moves by exactly the same delta |
+| rotating 90° about Y | positions swing about the centroid to within 4e-16 |
+| uniform scale x2 | positions and each object's own scale both double |
+| releasing | 0 drift, and everything is back under its original parent |
+
+**Non-uniform scale on a multi-selection is forced uniform.** A group scale on
+*rotated* children is a shear, and shear is not representable as per-child
+position/quaternion/scale — `decompose()` would quietly hand back garbage and
+write it into the level. Clamping to the average is worse than what the user
+dragged and much better than corrupting the file.
+
+Order matters around rebuilds: `buildLevel()` and `enemies.rebuild()` destroy the
+objects the selection points at, so every path that rebuilds clears the selection
+*first*. A selected brush still parented to the pivot when its group is emptied
+would survive as a ghost that nothing owns.
+
+### Keys and clipboard
+
+**1/2/3** switch move/rotate/scale. **Ctrl+C/Ctrl+V** copy and paste, **Ctrl+D**
+duplicates, **Delete** removes, **Escape** deselects — all of them operating on
+the whole selection, with deletes applied in descending index order so each splice
+does not shift the indices still to be removed.
+
+Paste puts the clipboard's centroid **at the orbit target**: copy a platform, fly
+to where you want another one, paste. In-place-and-nudge is what Ctrl+D is for,
+and it takes its own snapshot rather than going through the clipboard, so
+duplicating does not throw away what you had copied.
+
+---
+
+## 22. The house tune is the baseline, not a preset
+
+### The loophole
+
+§16 booted `titanfall.json` *only when localStorage was empty*, out of respect for
+a returning player's own tune. That respect was misplaced, because the save is not
+only written when you deliberately tune something: picking any profile, or the
+first boot itself, wrote a full override set. So one stray `alt+1` months ago, or
+a save left behind by an older build, and every launch after it came up on a feel
+nobody chose — with `alt+4` the only way back.
+
+Inverted now. `BASE` is code defaults with the house profile already applied, and
+**every boot starts there unconditionally** — empty save, corrupt save, rich save,
+all the same starting feel. Saved overrides are then replayed on top.
+
+The other half is what the save contains. Overrides are diffed against `BASE`
+rather than against `DEFAULTS`, so the file holds only what you moved *away from
+the house tune* — picking titanfall from the dropdown now stores nothing at all,
+because it is where you already are. Old saves holding the whole titanfall diff
+are re-derived against `BASE` on load and collapse to nothing, keeping only real
+edits. `TUNING_VERSION` went to 12 so the stale ones are dropped outright.
+
+Verified headlessly against the real `tuning.ts` and the real profile JSON:
+
+| | |
+|---|---|
+| `BASE` vs code defaults | differs on 49 keys, every one of them a titanfall key |
+| empty save | boots exactly `BASE`, stores 0 overrides |
+| unknown / corrupt keys | ignored, house tune stands |
+| one edit | round-trips, and is the *only* thing stored |
+| legacy full-profile save | collapses to 0 overrides, same tune |
+| legacy save + one edit | keeps only the edit |
+| cod-mw | reproduces exactly from `BASE` + its 55-key diff |
+
+Two reset buttons now, because they are genuinely different questions: **reset to
+titanfall** drops your edits and puts you back on the shipping feel, **reset to
+code defaults** strips the house tune off too and shows the raw `tuning.ts`
+numbers.
+
+### Why the edits were not sticking
+
+`beforeunload` was the only writer. Browsers skip it whenever the tab is
+discarded, crashed, or closed from the background — and a dev session that ends
+that way loses every slider move since the last real navigation, which reads
+exactly like "the panel does not save".
+
+Three writers now: a **250 ms debounced write on each edit** (short enough that a
+click-and-release is on disk before you can reload, long enough that dragging a
+slider does not hit localStorage once per pixel), plus a flush on **`pagehide`**
+and on **`visibilitychange` → hidden**, which do fire in the cases `beforeunload`
+misses.
+
+### A checkbox that disarms the room
+
+`enemy.shoot`, on by default. The panel is generated from the shape of `T`, so a
+boolean is all it takes to get a checkbox — no panel edit. Unchecked, the dummies
+still exist, still take hits, still get hauled around by the gear; they just never
+fire, which is what you want while tuning movement on a course full of them.
+
+While disarmed each dummy's fire timer is **re-rolled** rather than frozen. Frozen
+at zero, re-arming would dump the whole room's first shot on a single frame.
+
+---
+
+## 23. Tunes and levels are source, so they live in the repo
+
+### The problem with localStorage
+
+Everything you made in the panel and the editor lived in one browser's
+localStorage. That is invisible to git, gone with a cleared cache, absent in
+another browser, and — the part that actually bit — written only when the tab
+closed cleanly. A crashed tab, a killed dev server, a background tab the browser
+discarded: an evening of tuning, gone, with nothing to revert to.
+
+A tune is not session state. It is source, the same as the code that reads it.
+
+### A 70-line dev-server endpoint
+
+`vite-devsave.ts` adds a `POST /__save` middleware that writes a JSON file in the
+repo. `apply: 'serve'` keeps it out of the production build and the client half is
+behind `import.meta.env.DEV`, so **a built game writes nothing and the endpoint
+does not exist**.
+
+Writes are constrained in two independent ways, because "the browser can write
+files in my repo" deserves more than one gate:
+
+| | |
+|---|---|
+| path allowlist | must match `src/profiles/<file>.json` or `src/levels/tracks/<file>.json` — fixed directory prefixes, and a filename charset with no `/` in it |
+| root check | the resolved absolute path must still be inside the project root |
+| method | POST only |
+| size | 8 MB |
+| atomicity | write to `.tmp`, then rename over the target, so a crash mid-write leaves the old file rather than half a file |
+
+Measured against the running server: both allowed paths write, `src/main.ts` is
+refused, `src/profiles/../../../evil.json` is refused, `GET` is refused.
+
+### The reload that would have made it unusable
+
+Writing into `src/` several times a minute means Vite's watcher would reload the
+page on every slider move — and a reload mid-drag is far worse than no hot reload.
+
+The first fix for that was `server.watch.ignored` on both directories, **and it
+was wrong in a way that cost an entire round of work.** Un-watching a file does
+not only stop the reload; it stops Vite invalidating its cache for that file at
+all. A level regenerated on disk therefore never reached the running game — the
+dev server kept serving the copy it had read at startup, through reload after
+reload, so three successive rewrites of the loop-course geometry all looked like
+they had silently failed. The evidence pointed at the generator, and the
+generator was fine.
+
+Both directories are watched again. `devSave` records every path it writes and
+suppresses the client update for those, in `handleHotUpdate`, for 2.5 s:
+
+| write came from | module cache | browser |
+|---|---|---|
+| the game (panel, editor) | invalidated | left alone — it already has these values, it sent them |
+| anything else (a script, an editor, git) | invalidated | full reload |
+
+Verified against a running server: fetching the level module before and after an
+external regeneration returns **different bytes**, where under the old config it
+returned the same stale copy.
+
+### When a write happens
+
+Panel: **250 ms after you stop moving a slider**. Editor: **350 ms after an edit**,
+where an edit is a gizmo drag, a paste, a delete, a spawn placement. Both also
+flush on `pagehide`, and send the same payload again through `navigator.sendBeacon`
+— `fetch()` is abandoned when the page goes away, a beacon is not.
+
+Writes are serialised with at most one queued behind the one in flight. A drag
+outruns the round trip easily, and two responses landing out of order would leave
+the in-memory idea of the file describing something that is no longer on disk.
+
+A write that would change nothing is skipped, and in the editor that is not
+cosmetic. Selecting a brush and letting go runs `writeBack`, so without the check
+a stray click on a *generated* level writes a track file — which then shadows the
+generator for good. You would edit `figure8.ts` afterwards and see nothing change,
+because a snapshot of the old one had quietly become the level. (This happened
+once during development, which is how it was found.)
+
+Failures are never silent: the panel has a readonly **saved** readout and the
+editor's toolbar shows the path and timestamp of the last write, or `NOT SAVED:`
+and the reason.
+
+### What localStorage still does
+
+It is the fallback, not the store. A built game has no dev server, so there it
+remains the only persistence. In dev it holds two things: the **name** of the
+active profile and of the active level — a name, not a copy — so a reload comes
+back to the right file rather than to a snapshot of it.
+
+That is also why the level editor no longer restores its localStorage blob in dev.
+The file is the in-progress edit; restoring a stale copy over it would silently
+undo work that is already committed-able.
+
+### Manual saving is now backup, and only backup
+
+Both **download json** buttons stay, and the panel gains **save as new profile…**,
+which writes a new file in `src/profiles/` and switches to it — the old file stops
+changing the moment the new one is active. That is the "snapshot before I start
+wrecking things" workflow the automatic saving would otherwise have taken away.
+
+Resets deliberately do **not** write. "Reset to code defaults" also drops you into
+scratch mode with no active profile, so a button that could blank `titanfall.json`
+in one click does not exist.
+
+### The file beats the generator
+
+Track files now load *after* the TypeScript level generators and override them by
+name, and `tracks/figure8.level.json` is the level called `figure8`, not
+`figure8.level`. So editing a generated level sticks: the generator is the seed,
+the saved file is the level, and deleting the file gets the generator back.
+
+The filename decides the level's name, not the `name` field inside the JSON. A
+copy saved under a new filename must not still answer to the old one, or it would
+save itself straight back over the original.
+
+**Renamed:** the existing `tracks/figure8.level.json` was an older export — 90
+brushes and 12 enemies against the generator's current 109 and 10, from before the
+islands-and-walls rework — so under the new rule it would have silently replaced
+`figure8`. It is `figure8-old.level.json` now, its own entry in the dropdown,
+nothing lost.
+
+---
+
+## 24. Nothing on the surface, a wall at every join
+
+### The lips are gone
+
+They were 0.6 m kerbs, then 40 mm inlaid plates, and both were wrong for the same
+reason: **a platform's running surface is not a place to put objects.** 40 mm is
+under `character.stepHeight`, which makes it legal, not invisible — it is still a
+seam to catch a slide on at 40 u/s, and it was doing nothing a platform edge does
+not already say by being an edge. All 34 of them deleted, `LIP` deleted, `mark()`
+deleted.
+
+Verified: **0 brushes** of that colour remain.
+
+### One wall per join
+
+Every gap in the road is now bridged along its edge, instead of four of sixteen
+being. Missing a jump used to be a fall; now there is always a surface running
+past the hole, so a join is a choice — jump it, wallrun across, or bail onto the
+wall halfway and carry on. 13 m tall, reaching up to 12 m back along the platform
+at each end so you are *on* the wall before the floor stops, and capped at half a
+platform so the two joins sharing a short one meet in the middle rather than
+stacking. The four 30 m feature gaps get both sides; the rest get the outside of
+the turn.
+
+### Why they are built from the platform's axes and not from the curve
+
+The first version laid each wall along the path. That is wrong in a way that is
+invisible in the source and unmissable in play: **a platform is a straight box
+tangent to the arc at its own midpoint**, so by its far end the arc has swung
+about 2 m away from it. A wall following the arc therefore ends up ~2 m *inside*
+the carriageway — an invisible kerb exactly where the wall was supposed to be
+helping.
+
+Measured, at three body heights across sixteen platforms:
+
+| version | road blocked |
+|---|---|
+| one long box per join | 352 sample points |
+| chain of 9 m segments on the arc | 184 |
+| three pieces built from the platforms' own axes | **0** |
+
+Each wall is three pieces now: along the outgoing platform's edge, across the
+gap, along the incoming platform's edge. The pieces beside a platform are
+parallel to *that* platform by construction, so the inner face sits flush with
+the road edge and can never cross it.
+
+### Three more things that were standing in the road
+
+Hunting the wall bug turned up a family of the same fault. All found by sampling
+every platform surface at ankle, knee and chest height and asking what contains
+the point:
+
+**The gantry legs were planted mid-carriageway.** 2.2 m pillars, in the middle of
+a 22 m road, at the two grapple gaps. Moved to `ROAD_W/2 + 3.2` — off the road and
+clear of the new edge wall.
+
+**The chute landed on the road.** Two branches of the track cross the low deck,
+and the old landing put the chute's last ten metres straight through one of them:
+the ramp rose out of the road surface as a slab you could not see coming. The
+landing moved to a clear quarter of the deck — 7 m from both branches — which
+costs 12 m of chute length and steepens it from 25° to 33°, still far inside
+`character.maxSlopeAngle` (50°).
+
+**The wall shafts stood in both corridors.** Two 40 m towers, parked where the
+road crosses. Their new spots were found by search rather than by eye, against
+every road, rail and pad, and both sit north of the line the chute throws you
+along. The low deck went from 54×40 to **66×52** to make room: two road branches,
+a chute landing and two shafts do not fit on the old one.
+
+### And nothing across the plazas
+
+Where the road passes over a crossing deck it is a plaza, not a ledge, so no wall
+is built there — the deck *is* the floor. The test is on the piece's midpoint
+rather than its ends, because testing the ends discards a whole 30 m gap merely
+for reaching towards a deck.
+
+Final state, all measured:
+
+| | |
+|---|---|
+| red brushes | 0 |
+| road blocked, any lane within 9 m of the centreline, any body height | **0 points** |
+| joins walled end to end | 13 of 16 |
+| joins left open because a deck is the floor there | 2 |
+| joins part-walled (30 m gap, 4.8 m open at the deck end) | 1 |
+| high deck → Super runway | clear |
+| chute landing → exit gap | clear |
+
+---
+
+## 25. Vaulting — the edge stops costing you the run
+
+### What it is
+
+Run into a lip between `character.stepHeight` and `vault.maxHeight` and you hop
+it. No button. It is deliberately **not** a jump: it spends no jump charge, has no
+input to mistime, and never subtracts speed — it only ever adds.
+
+A button would defeat the point. The thing this protects is flow, and by the time
+you have noticed the ledge and pressed something, the flow is already gone.
+
+### A modifier, not a state
+
+Same shape as the grapple: a probe and a velocity change, layered on whatever you
+were already doing. Nothing in `grounded`, `airborne`, `dashing` or `sliding`
+knows it exists, so it works out of all of them, and there is no fifth state to
+keep consistent with the other four.
+
+### The probe
+
+Two rays. Forward from **just above the autostep** — lower and it keeps finding
+ramps the controller already walks up, higher and it misses the short ledges that
+are most of the point — and then, if that face is steep enough to actually stop
+you (the same `wall.maxAngle` test the wallrun uses, so slopes stay the
+controller's problem), a second ray **straight down just past the face**, from
+above the tallest ledge allowed.
+
+The height that comes back decides everything:
+
+| rise above your feet | what happens |
+|---|---|
+| ≤ `character.stepHeight` | nothing — the controller already walks it |
+| between that and `vault.maxHeight` | vault |
+| > `vault.maxHeight` | nothing — it is a wall, and turning walls into launches would delete wallrunning |
+
+The tall-wall case needs no special handling and gets none: the down-probe's
+origin is buried inside the wall, which reports a surface at the very top of the
+range and fails the height test on its own.
+
+### The launch is derived, not picked
+
+`v = sqrt(2 · gravityRise · (rise + clearance))` — the same relation the jump
+height is read with. A fixed impulse is either too weak for the tall ledges or a
+visible pop on the short ones; this clears every ledge by exactly
+`vault.clearance` and no more.
+
+### The part that actually took the work
+
+Getting *up* was easy. Arriving with your speed intact was not, and two things
+had to be fixed for it:
+
+**Both ground states clamp vertical velocity to zero every tick.** `updateGrounded`
+and `updateSliding` each run `vel.y = min(vel.y, 0)`. A hop applied before the
+state machine is a hop that gets deleted on the next tick, and one that leaves the
+state alone gets deleted on the same one. The vault runs *after* the state update
+and moves you to `airborne` itself.
+
+**The collision response deletes exactly the velocity that carries you over the
+lip.** You are still inside the face while climbing it, so the post-move
+projection strips the forward component every tick and you scrape up the wall to
+arrive on top with nothing. So `vault.push` is re-asserted each tick for
+`vault.hold` seconds — as a floor, never a cap, so it cannot slow a fast approach.
+
+And the thing you just vaulted must not grab you: a chest-high ledge is a legal
+wallrun surface by angle, so `attachWall` refuses while a vault is live.
+
+### Measured
+
+Real solver, stub collision world, 19 checks:
+
+| | |
+|---|---|
+| 0.6 / 1.0 / 1.5 / 1.8 m ledges at 10 u/s | all vault, all end up on top, 0.88–0.95 s |
+| speed over the lip | **110%** of the 11 u/s run-in — the air accel adds a little; nothing is lost |
+| same 1.2 m ledge with `vault.enabled` off | run ends at **0.0 u/s**, still on the floor |
+| …with it on | **12.1 u/s**, over the top |
+| falling short onto a 1.5 m lip | vaults, 12.1 u/s on top — the platform-edge save |
+| 0.3 m step | no vault; the controller walks it |
+| 5 m wall | no vault, and you do not end up on top of it |
+| 2.4 m ledge (over `maxHeight`) | no vault |
+| drifting in at 1.5 u/s (under `minSpeed`) | no vault |
+| jumps spent | 0 |
+| times it fires per ledge | 1 |
+
+---
+
+## 26. The Getsuga was never where you saw it, and five other things
+
+### The wave and the crosshair were two different places
+
+Two bugs stacked into one symptom — waves that visibly missed and killed anyway.
+
+**The crescent was drawn a radius away from the thing being hit-tested.**
+`crescentGeometry` builds its arc centred on **+X at distance `radius`**, which is
+exactly right for the sword trail — that curve sweeps around your hand — and
+exactly wrong for a projectile. The hit test uses the group's position; the
+visible arc was 2.8 m to one side of it, in a direction that changed with every
+swing, because the crescent is rolled onto the random slash line. The wave's
+geometry is re-centred on the arc's middle now, so what cuts and what you see are
+in the same place.
+
+**And it flew parallel to your aim, not along it.** The wave spawns off the blade
+rather than the camera, because a two-metre crescent spawned at the eye flies out
+through your own back in third person. But a muzzle that is not the camera is a
+path that is not the crosshair: thrown flat along the camera's *direction*, the
+wave runs permanently offset by however far the blade is from the eye, which over
+the shoulder is metres. It is aimed at a point **on** the crosshair line now —
+`getsuga.converge`, 45 m out — so the two meet where the fighting is.
+
+### The shotgun can be a double barrel
+
+One number: `shotgun.secondPump`. At 0 it is the pump it always was — one shell,
+then `pumpTime`. Above 0 the gun grows a second barrel: two shells `pumpTime`
+apart, then `secondPump` to break it open and reload.
+
+| | shots at |
+|---|---|
+| single, pump 0.9 | 0 · 0.9 · 1.8 · 2.7 · 3.6 |
+| double, pump 0.25, reload 1.6 | 0 · **0.25** · 1.85 · 2.1 · 3.7 |
+
+Fire one barrel and walk away and the second stays loaded — the reload is only
+owed after the last one.
+
+**The shot counter wraps on every gun, single-barrel included.** Letting it run
+free on a one-shot weapon looks harmless: nothing reads it while `barrels` is 1.
+Then you turn a second barrel on mid-session, `barrels - fired` goes negative,
+and `String.repeat` throws on a negative count — every frame, from inside the
+HUD, which on screen is the game freezing solid. Fixed at the source and clamped
+at the use: a HUD string is never worth an exception in the render loop. Swapping weapons gives both back, because you reload
+while the other gun is up; that is what the switch time is paying for. The HUD
+shows `|.` / `||` so you know which.
+
+The mechanism is general (`barrels` + `reload` on `GunStats`), so a triple is one
+number away, but only the shotgun asks for it.
+
+### The rifle can hold its trigger
+
+`rifle.auto`. Off, one click is one shot. On, the gun reads the button as **held**
+rather than as an edge and fires whenever the bolt is home, so a hold is a stream
+at exactly `boltTime` and never drops a shot for landing between cycle
+boundaries. Needed a new input flag — the mouse only reported the press.
+
+### C is a ground slam now
+
+It used to be a second slide key next to Ctrl. It is airborne-only, and it cancels
+everything — the dash you were in, the wallrun you were on, the rope you were
+hanging from — and drives you at the floor at `slam.speed`.
+
+It costs nothing and does no damage. **What it buys is the window afterwards**:
+for `slam.boostTime` seconds after you land, a dash comes out at
+`slam.dashBoost`, so hitting the ground hard is a way back *into* the fight
+rather than the end of a line. The window is deliberately short — a permanently
+stronger dash is just a faster dash, and then the number in `dash.speed` is a lie.
+The multiplier is stamped onto the dash when it starts, not read live, so a dash
+cannot get weaker halfway through because a timer expired mid-flight.
+
+The "you must have real air below you" gate is **measured, not timed**: a
+downward ray for `slam.minHeight`. A state clock gets reset by every dash and
+wallrun, and the thing that actually makes a slam meaningless is having nowhere
+to fall. It also closes the exploit of tapping C a hand's width off a ledge to
+farm the dash window.
+
+Measured on the real solver, 12 checks:
+
+| | |
+|---|---|
+| descent | pinned at −62 m/s, horizontal carried 0.00 u/s |
+| 30 m drop | lands in **0.64 s** against 0.96 s of falling |
+| window | opens on landing, 1.11 s of the 1.1 s asked for |
+| dash inside it | **41.6 u/s** against 32.0 normally — ×1.30, as asked |
+| under 2.5 m of air / a plain fall | no slam, no window |
+
+### The railgun leaves a mark now
+
+The tracer was a `THREE.Line`, and `linewidth` is ignored by every WebGL
+renderer — so the weapon whose entire identity is *it already hit* drew the
+faintest thing on the screen. It is real geometry now: three nested additive
+cylinders, a white-hot core inside the blue beam inside a wide soft halo, fading
+on a squared curve and thinning as it goes so it reads as discharging rather than
+as a tube someone turned the alpha down on. `railgun.beamWidth` and `beamGlow`.
+
+### The meters moved out of the way
+
+Four flat bars stacked in the top-right — fuel, stamina, sword, Getsuga — at 60%
+opacity, 132×6 px each. They were big arcs flanking the crosshair, on the theory
+that peripheral vision picks them up without you looking away. It does; it also
+puts four moving objects in the one part of the screen you are always looking at,
+and they fought the reticle and the target both. A resource meter is a thing you
+*glance* at.
+
+They fill from the right, toward the corner they are anchored to, so a draining
+bar shrinks away from the middle of the view rather than toward it. The sword bar
+keeps its blocks — a combo is a count, not a level. Everything is still in
+`T.meters`; `radius`/`offset`/`sweep`/`spacing` are gone and `height`/`gap`/`top`/
+`right`/`opacity` replace them.
+
+### loop-course platforms are trapezoids
+
+Every road platform was a 22×1×16 slab floating in the dark, with nothing to do
+but land on. Each one is a **trapezoid** now: the running surface stays the full
+22×16, all four sides slope inward as they descend 8 m to a 17.2×11.2 base, and
+the base is closed. Four sloped walls per platform, every one of them a surface
+you can run along, so you can carry a wallrun right around a platform.
+
+**Two earlier passes got this wrong in two different ways**, so the reasons are
+written down. The first put walls on the wrong pair of faces: a platform is 22 m
+long by 16 m *wide* and the loop runs along the 22 — measured, not assumed, the
+vector to the next platform dots 0.97 with local X — so the faces picked were the
+ends you jump across, not the sides you run along. The second put all four on but
+flared them *outward*, which is a different shape entirely.
+
+Inward is right, and not only because it is what was asked for:
+
+- the top stays the widest part, so nothing the hull adds can stick out past the
+  platform's own edge, eat the gap to the next one, or catch a landing. Measured:
+  the gap to the next platform is **7.22 m at every depth**, exactly what it was
+  before the change
+- the perimeter *shrinks* with depth, so planks cut to the top face's length
+  **overlap at the corners** instead of leaving a notch. The corners come out
+  solid for free, which is what makes it read as one shape rather than four boards
+- the lean is an overhang, and that costs nothing: wallrunning tests `|normal.y|`
+  against `wall.maxAngle` and does not care about the sign
+
+The angle is not decorative: **16.7° off vertical**, `|n.y| = 0.287` against the
+0.343 limit, on all 48 faces. Verified too — no corner of any wall reaches above
+a walking surface, and none lies outside its platform's footprint. Amber, which
+on this map already means "a surface you can run on".
+
+Platforms are found by **shape** — a slab under 1.6 m thick with a footprint over
+10 m — rather than by an exact size match. Matching `[22,1,16]` exactly would
+quietly skip any platform that had been resized in the editor, and "some of them
+got it" is the worst available outcome.

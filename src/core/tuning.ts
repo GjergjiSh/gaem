@@ -5,7 +5,7 @@
 // structure automatically, so adding a param here is all it takes to get a slider.
 
 /** Bump when defaults change meaningfully — invalidates saved localStorage tunes. */
-export const TUNING_VERSION = 11;
+export const TUNING_VERSION = 12;
 
 export const T = {
   world: {
@@ -175,6 +175,7 @@ export const T = {
     projSize: 0.12,     // bullet radius (visual + hit)
     damage: 1,          // multiplier on the shared head/body damage
     spread: 0,          // radians of cone half-angle; 0 = dead centre
+    auto: false,        // hold the trigger and it keeps firing every boltTime
   },
 
   railgun: {
@@ -187,6 +188,9 @@ export const T = {
     spread: 0,          // radians of cone half-angle; 0 = perfectly on the dot
     pierce: 3,          // targets one shot punches through before it stops
     beamTime: 0.12,     // seconds the tracer stays on screen
+    beamWidth: 0.09,    // radius of the bright core, metres. A LINE is stuck at
+                        // one pixel in WebGL, so the tracer is real geometry
+    beamGlow: 3.2,      // halo radius, x the core — the shine around the shot
   },
 
   shotgun: {
@@ -194,6 +198,11 @@ export const T = {
     // the dais scrum, useless across the arena. damage is per PELLET, so the
     // kill takes a fraction of the cone — that fraction is the range falloff.
     pumpTime: 0.9,      // the gap between shells
+    // Leave at 0 and this is an ordinary pump: one shell, then pumpTime.
+    // Above 0 it becomes a double barrel — TWO shells pumpTime apart, and then
+    // this long to break it open and reload. Fire one and walk away and the
+    // second barrel stays loaded, which is the whole character of the weapon.
+    secondPump: 0,
     pellets: 9,
     spread: 0.075,      // radians of cone half-angle — THE choke slider
     projSpeed: 55,
@@ -203,6 +212,7 @@ export const T = {
   },
 
   enemy: {
+    shoot: true,        // uncheck to disarm every dummy — they still take hits, just never fire
     scale: 1.6,         // dummy size multiplier — bigger = easier to hit
     range: 55,          // engagement distance; further than this they hold fire
     fireInterval: 1.8,  // seconds between shots per dummy
@@ -218,12 +228,99 @@ export const T = {
     reach: 3.5,
     arc: 2.6,           // radians of total frontal cone width
     damage: 2,          // one clean swing kills a default dummy
-    swingTime: 0.26,    // visual swing + time between combo presses
+    swingTime: 0.42,    // visual swing + time between combo presses
     combo: 3,           // swings before cooldown
     cooldown: 1.5,      // restores all swings
     reflectReach: 4.5,  // projectile parry range — a bit longer than the blade
     reflectSpeed: 1.5,  // reflected shots return this much faster
     infinite: false,    // swings never run out — the combo bar stays full
+    // --- the swing itself. The blade is a real object in the world (held in
+    // first person, in the character's hand in third), and every press picks a
+    // RANDOM slash direction, so a combo never plays the same animation twice.
+    swingSweep: 3.0,    // radians the blade travels across the screen per swing
+    windup: 0.3,        // fraction of swingTime spent cocking back before the cut
+    lunge: 0.12,        // metres the hand punches forward at the strike
+    scale: 0.85,        // viewmodel size in first person (1 = the world-scale blade)
+    slashSize: 1.3,     // trail radius, x the blade length. 0 hides the trail.
+    slashDist: 1.1,     // how far in front of the hand the trail sits
+    // The blade is DRAWN for the swing and goes away again — a sword parked in
+    // the corner of the screen forever is just clutter between fights.
+    linger: 0.35,       // seconds it stays out after the swing finishes
+    drawSpeed: 24,      // how fast it comes out and goes back. High = snappy.
+  },
+
+  getsuga: {
+    // Mouse 5. The sword's ranged verb: the swing throws a crescent of energy
+    // that flies flat and cuts through everything on the way — no drop, no lead,
+    // no pierce limit, because a wave is an area, not a bullet. It is gated by
+    // its own cooldown rather than the combo, so the blade and the wave are two
+    // separate decisions in a fight (T.sword.infinite frees this one too).
+    damage: 3,          // per target the wave passes through
+    speed: 55,          // travel speed — fast, but slow enough to watch it land
+    radius: 2.8,        // hit radius AND the crescent's arc radius at spawn
+    growth: 0.03,       // radius added per metre travelled — the wave widens
+    range: 80,          // metres before it dissipates
+    cooldown: 2.2,      // seconds between waves
+    thickness: 0.12,    // crescent thickness at its thickest, x radius — a BLADE
+    span: 2.6,          // radians of arc the crescent covers — wide and long
+    converge: 45,       // metres out where the wave's path crosses the crosshair
+  },
+
+  grapple: {
+    // Middle mouse. A rope, not a rocket: the hook bites INSTANTLY (a raycast on
+    // the press — a hook that flies out is a hook that arrives late, and this is
+    // meant to be the fastest verb in the kit), and everything after that is the
+    // constraint plus what you ask for on WASD.
+    //
+    // The whole feel comes from three rules:
+    //   1. The rope cannot stretch. Velocity pointing away from the anchor is
+    //      removed every tick, which is what turns a fall into an ARC.
+    //   2. Forward reels in, back pays out. That is the only accel the rope adds.
+    //   3. Air control keeps running underneath. A/D steer the swing because the
+    //      constraint eats the radial half of whatever they add and leaves the
+    //      tangential half — so the swing reuses the air tune already dialled in
+    //      rather than inventing a second one.
+    enabled: true,
+    range: 65,          // how far the hooks can reach
+    spread: 0.07,       // radians either side of the aim the two shots splay
+    minLen: 2.2,        // arrive this close and the rope lets go
+    maxLen: 90,         // rope snaps past this — pay-out has a limit
+    eyeOffset: 0.6,     // metres above the capsule centre the hook is fired from
+    // --- rope
+    stiffness: 60,      // pull-back accel per metre of stretch. High = rigid rope
+    slack: 0.05,        // metres of stretch tolerated before it pulls — 0 is twitchy
+    swingDrag: 0.15,    // drag along the arc. Low: a swing should KEEP its speed
+    // --- reeling, on the movement keys
+    reelAccel: 95,      // accel along the rope while holding forward
+    reelSpeed: 14,      // metres/sec the rope itself shortens while reeling
+    reelCap: 42,        // speed ceiling the reel accelerates toward
+    payOutSpeed: 11,    // metres/sec the rope lengthens while holding back
+    // A reel that only pulls flat drags you into the wall below the anchor. This
+    // adds lift while reeling, so a grapple onto a ledge arcs UP and over it.
+    reelLift: 8,
+    // --- letting go
+    releaseBoost: 1.06, // speed multiplier on release — a swing should pay out
+    releaseUp: 2.5,     // upward kick on release, so you leave the arc climbing
+    keepTime: 1.4,      // seconds after release where overspeed doesn't bleed
+    cooldown: 0.12,     // between shots. Just enough to stop a flicker-spam
+    toggle: false,      // false = hold to hang, release to let go
+    // A rope through a corner looks wrong, but detaching mid-swing FEELS worse —
+    // and swinging around a pillar is the whole point. Off by default.
+    breakOnBlocked: false,
+    // --- hooking a DUMMY instead of the world. Doom's meathook: the hook bites
+    // the body, and YOU are hauled to IT, arriving at sword range with the swing
+    // already available. Aimed at the arena the same button does the opposite,
+    // because the arena doesn't move. Handled engine-side (engine/hook.ts) — the
+    // solver is not allowed to know enemies exist.
+    pullTarget: false,  // flip it: true = the body flies to you instead
+    hookSpeed: 46,      // top speed of the yank, whichever end of it moves
+    hookAccel: 240,     // ramp. Very high: a meathook commits instantly
+    hookStop: 3.0,      // the haul ends at this range — just inside sword reach
+    hookBrake: 0.35,    // speed KEPT on arrival. Low, or you sail straight past
+    hookTime: 2.5,      // safety: give up after this long
+    pullLift: 1.1,      // pullTarget only: the arc a hauled body rides in on
+    pullDamage: 0,      // on arrival. 0 = the hook sets up the kill, it isn't the kill
+    pullStagger: 1.2,   // seconds a hooked target can't shoot
   },
 
   stamina: {
@@ -250,6 +347,12 @@ export const T = {
     hoverCap: 13,       // horizontal ceiling while hovering
     hoverRedirect: 12,  // turns velocity without changing speed — THE responsiveness knob
     hoverDrag: 0.9,     // horizontal damping, so you drift instead of flying off
+    // --- ODM: the jets while a cable is live. The hover model exists to HOLD a
+    // position, and both halves of it fight a swing — the drag scrubs the arc
+    // and the redirect steers velocity the cable is trying to own. On a cable
+    // the jets stop hovering and just push, which is what gas is for.
+    gasAccel: 70,       // accel along the stick (or the aim) while on a cable
+    gasCap: 38,         // ceiling the gas alone reaches — swing for more than this
     // --- afterburner: hold the dash key WHILE the jets are lit. The hover is for
     // holding a position and shooting; this is for crossing the arena. It costs
     // multiples of the fuel, which is the only thing stopping it being the answer
@@ -286,16 +389,17 @@ export const T = {
   },
 
   meters: {
-    // The meters flanking the crosshair: movement resources (stamina, thruster
-    // fuel) on the left, the sword combo on the right. They are outward-facing
-    // half-circles parked far out toward the edges — a meter near your aim is a
-    // meter you misread, so the default offset is deliberately way outside the
-    // area you actually look at. Drop `offset` if you want them closer.
-    radius: 52,         // arc radius in px
-    offset: 330,        // px from screen centre to the INNERMOST arc on each side
-    width: 10,          // arc stroke thickness
-    sweep: 180,         // degrees each arc spans; 360 makes them full rings again
-    spacing: 128,       // px between neighbouring arcs on the same side
+    // Four flat bars stacked in the top-right corner: fuel, stamina, sword,
+    // getsuga. They used to be big arcs flanking the crosshair, which put them
+    // in the one place you are always looking. A resource meter is a thing you
+    // GLANCE at — it belongs in a corner, small and quiet, and readable by the
+    // colour that moved rather than by the number.
+    width: 132,         // px, bar length
+    height: 6,          // px, bar thickness
+    gap: 6,             // px between bars
+    top: 16,            // px from the top edge
+    right: 16,          // px from the right edge
+    opacity: 0.6,       // the whole cluster. Low on purpose: never fight the reticle
   },
 
   camera: {
@@ -339,6 +443,33 @@ export const T = {
     pitchRest: 0.10,      // pitch it settles toward
     pitchFollow: 1.1,
     speedDistance: 3.0,   // extra arm length at hard cap — wider view when fast
+  },
+
+  // Automatic mantle. Anything between a step and a chest-high ledge used to be
+  // a full stop; this turns it into a hop that keeps your speed. Nothing is bound
+  // to it — it fires off the ledge itself, because the moment you have to press a
+  // button for it you have already lost the flow it exists to protect.
+  vault: {
+    enabled: true,
+    maxHeight: 1.9,     // tallest ledge that vaults. Above this it is a wall
+    reach: 0.5,         // how far past the capsule the ledge probe looks
+    minSpeed: 2.5,      // ignore ledges you are merely leaning on
+    clearance: 0.3,     // clear the lip by this much instead of scraping it
+    push: 6,            // forward speed held through the hop, so you land ON it
+    hold: 0.35,         // seconds that push is re-asserted while you rise
+    cooldown: 0.2,      // no second vault until this expires
+  },
+
+  // C in the air: stop everything and go straight down. It is an escape and a
+  // re-entry, not a damage move — the reward is the window afterwards, where a
+  // dash comes out harder so you can leave the crater in the direction you like.
+  slam: {
+    enabled: true,
+    speed: 62,          // downward speed the slam holds, m/s
+    keepH: 0,           // fraction of horizontal speed kept. 0 = dead vertical
+    minHeight: 2.5,     // metres of clear air needed under you before C will slam
+    boostTime: 1.1,     // seconds after landing that dashes come out harder
+    dashBoost: 1.3,     // x dash speed inside that window
   },
 
   character: {
@@ -395,6 +526,13 @@ export const META: Record<string, { min?: number; max?: number; step?: number; d
   'camera/pitchMax': { min: 0, max: 1.5, step: 0.01 },
   'camera/sensitivity': { min: 0.0002, max: 0.008, step: 0.0001 },
   'character/maxSlopeAngle': { min: 0.2, max: 1.4, step: 0.01, doc: 'Radians. Above this is a wall.' },
+  'vault/maxHeight': { min: 0.5, max: 4, step: 0.05, doc: 'Tallest ledge that hops. Above it, a wall.' },
+  'vault/reach': { min: 0.1, max: 2, step: 0.05, doc: 'How far ahead of you the ledge probe looks.' },
+  'vault/minSpeed': { min: 0, max: 12, step: 0.25, doc: 'Below this you are leaning, not vaulting.' },
+  'vault/clearance': { min: 0, max: 1.5, step: 0.05, doc: 'Extra height over the lip.' },
+  'vault/push': { min: 0, max: 20, step: 0.5, doc: 'Forward speed floor over the lip. Never slows you.' },
+  'vault/hold': { min: 0.05, max: 1, step: 0.01 },
+  'vault/cooldown': { min: 0, max: 1.5, step: 0.05 },
   'sprint/multiplier': { min: 1, max: 2, step: 0.01, doc: 'Ground cap x this while sprinting.' },
   'sprint/minForward': { min: 0, max: 1, step: 0.05 },
   'sprint/fovAdd': { min: 0, max: 30, step: 0.5 },
@@ -413,6 +551,34 @@ export const META: Record<string, { min?: number; max?: number; step?: number; d
   'sword/combo': { min: 1, max: 6, step: 1 },
   'sword/reflectSpeed': { min: 0.5, max: 4, step: 0.05 },
   'stamina/dashCost': { min: 0, max: 100, step: 1, doc: '0 = dashing is free again.' },
+  'grapple/range': { min: 5, max: 200, step: 1, doc: 'How far the hooks reach.' },
+  'grapple/spread': { min: 0, max: 0.4, step: 0.005, doc: 'How far apart the two anchors land. 0 = both on one point.' },
+  'grapple/minLen': { min: 0.5, max: 12, step: 0.1, doc: 'Arrive this close and it lets go.' },
+  'grapple/maxLen': { min: 10, max: 250, step: 5, doc: 'Rope snaps past this.' },
+  'grapple/eyeOffset': { min: -1, max: 2, step: 0.05 },
+  'grapple/stiffness': { min: 5, max: 300, step: 1, doc: 'Pull-back per metre of stretch. High = rigid.' },
+  'grapple/slack': { min: 0, max: 1.5, step: 0.01, doc: 'Stretch tolerated before the rope pulls.' },
+  'grapple/swingDrag': { min: 0, max: 4, step: 0.05, doc: 'Drag along the arc. 0 = a swing never slows.' },
+  'grapple/reelAccel': { min: 0, max: 300, step: 5, doc: 'Accel along the rope on forward.' },
+  'grapple/reelSpeed': { min: 0, max: 50, step: 0.5, doc: 'How fast the rope itself shortens.' },
+  'grapple/reelCap': { min: 5, max: 60, step: 1, doc: 'Speed the reel accelerates toward.' },
+  'grapple/payOutSpeed': { min: 0, max: 50, step: 0.5, doc: 'How fast holding back lengthens it.' },
+  'grapple/reelLift': { min: 0, max: 40, step: 0.5, doc: 'Upward accel while reeling — clears ledges.' },
+  'grapple/releaseBoost': { min: 1, max: 1.6, step: 0.01, doc: 'Speed multiplier when you let go.' },
+  'grapple/releaseUp': { min: 0, max: 15, step: 0.5, doc: 'Upward kick on release.' },
+  'grapple/keepTime': { min: 0, max: 5, step: 0.1, doc: 'Grace after release before overspeed bleeds.' },
+  'grapple/cooldown': { min: 0, max: 3, step: 0.02 },
+  'grapple/toggle': { doc: 'On = click to attach, click again to let go.' },
+  'grapple/breakOnBlocked': { doc: 'On = the rope detaches when geometry comes between you and the anchor.' },
+  'grapple/pullTarget': { doc: 'On = a hooked body flies to you. Off = you fly to it, Doom-style.' },
+  'grapple/hookSpeed': { min: 5, max: 120, step: 1, doc: 'Top speed of the yank.' },
+  'grapple/hookAccel': { min: 5, max: 500, step: 5, doc: 'Yank ramp. High = it commits instantly.' },
+  'grapple/hookStop': { min: 1, max: 12, step: 0.1, doc: 'Where the haul ends. Keep it inside sword reach.' },
+  'grapple/hookBrake': { min: 0, max: 1, step: 0.05, doc: 'Speed kept on arrival. High = you sail past.' },
+  'grapple/pullLift': { min: 0, max: 6, step: 0.1, doc: 'pullTarget only: how high a hauled body rides.' },
+  'grapple/hookTime': { min: 0.2, max: 8, step: 0.1, doc: 'Safety cutoff on a haul.' },
+  'grapple/pullDamage': { min: 0, max: 10, step: 0.5, doc: 'Damage on arrival. 0 = the yank only sets up the kill.' },
+  'grapple/pullStagger': { min: 0, max: 5, step: 0.1, doc: "Seconds a hauled target can't shoot." },
   'weapon/switchTime': { min: 0, max: 1.5, step: 0.01, doc: 'Raise time after a swap. 0 = instant.' },
   'rifle/boltTime': { min: 0.1, max: 2, step: 0.05 },
   'rifle/projSpeed': { min: 10, max: 300, step: 1, doc: 'Muzzle velocity.' },
@@ -420,7 +586,8 @@ export const META: Record<string, { min?: number; max?: number; step?: number; d
   'rifle/projSize': { min: 0.03, max: 0.6, step: 0.01 },
   'rifle/damage': { min: 0, max: 4, step: 0.05, doc: 'x the shared head/body damage.' },
   'rifle/spread': { min: 0, max: 0.2, step: 0.002, doc: 'Cone half-angle, radians.' },
-  'shotgun/pumpTime': { min: 0.1, max: 3, step: 0.05 },
+  'shotgun/pumpTime': { min: 0.1, max: 3, step: 0.05, doc: 'Gap between shells. With a second barrel, between the two.' },
+  'shotgun/secondPump': { min: 0, max: 4, step: 0.05, doc: '0 = single barrel. Above 0: two shells, then this long to reload.' },
   'shotgun/pellets': { min: 1, max: 24, step: 1 },
   'shotgun/spread': { min: 0, max: 0.35, step: 0.002, doc: 'THE choke. Cone half-angle, radians.' },
   'shotgun/projSpeed': { min: 10, max: 300, step: 1 },
@@ -440,6 +607,8 @@ export const META: Record<string, { min?: number; max?: number; step?: number; d
   'thruster/boostBurn': { min: 1, max: 8, step: 0.1, doc: 'Fuel multiplier. This is the only cost.' },
   'thruster/boostDrag': { min: 0, max: 6, step: 0.02 },
   'thruster/hoverDrag': { min: 0, max: 12, step: 0.1, doc: 'Horizontal damping. 0 = you fly away.' },
+  'thruster/gasAccel': { min: 0, max: 250, step: 5, doc: 'Jet accel while on a cable. The ODM burst.' },
+  'thruster/gasCap': { min: 5, max: 60, step: 1, doc: 'Ceiling the gas alone reaches. Swing to beat it.' },
   'thruster/fuelMax': { min: 10, max: 300, step: 5 },
   'thruster/burnRate': { min: 1, max: 150, step: 1, doc: 'Fuel/sec. fuelMax / this = hover seconds.' },
   'thruster/refuelRate': { min: 1, max: 150, step: 1 },
@@ -453,22 +622,48 @@ export const META: Record<string, { min?: number; max?: number; step?: number; d
   'weapon/enemyHp': { min: 1, max: 10, step: 1 },
   'weapon/headDamage': { min: 1, max: 10, step: 1 },
   'weapon/bodyDamage': { min: 1, max: 10, step: 1 },
-  'sword/infinite': { doc: 'Swings never run out and the combo never goes on cooldown.' },
+  'sword/infinite': { doc: 'Swings never run out, no cooldown — on the blade or the wave.' },
+  'sword/swingSweep': { min: 0.5, max: 4, step: 0.05, doc: 'Radians the blade travels per swing.' },
+  'sword/windup': { min: 0, max: 0.6, step: 0.01, doc: 'Fraction of the swing spent cocking back.' },
+  'sword/lunge': { min: 0, max: 0.6, step: 0.01, doc: 'Forward punch of the hand at the strike.' },
+  'sword/scale': { min: 0.2, max: 1.5, step: 0.01, doc: 'First-person viewmodel size.' },
+  'sword/slashSize': { min: 0, max: 4, step: 0.05, doc: 'Trail radius, x blade length. 0 = no trail.' },
+  'sword/slashDist': { min: 0, max: 4, step: 0.05, doc: 'How far ahead of the hand the trail sits.' },
+  'sword/linger': { min: 0, max: 3, step: 0.05, doc: 'Seconds the blade stays out after a swing.' },
+  'sword/drawSpeed': { min: 2, max: 60, step: 1, doc: 'Draw/sheathe rate. High = snappy.' },
+  'sword/swingTime': { min: 0.08, max: 1.5, step: 0.01, doc: 'Length of the whole swing.' },
+  'getsuga/damage': { min: 0, max: 10, step: 0.5, doc: 'Per target the wave cuts through.' },
+  'getsuga/speed': { min: 5, max: 200, step: 1 },
+  'getsuga/radius': { min: 0.3, max: 8, step: 0.1, doc: 'Hit radius and crescent size at spawn.' },
+  'getsuga/growth': { min: 0, max: 0.4, step: 0.005, doc: 'Radius gained per metre flown.' },
+  'getsuga/range': { min: 5, max: 250, step: 5 },
+  'getsuga/cooldown': { min: 0, max: 10, step: 0.1, doc: 'Seconds between waves. 0 = spam it.' },
+  'getsuga/thickness': { min: 0.05, max: 1, step: 0.01, doc: 'Crescent thickness, x radius.' },
+  'getsuga/span': { min: 0.5, max: 3.14, step: 0.05, doc: 'Radians of arc the crescent covers.' },
+  'getsuga/converge': { min: 5, max: 200, step: 5, doc: 'Range at which the wave crosses the crosshair.' },
   'crosshair/dotSize': { min: 0, max: 24, step: 1, doc: '0 = no centre dot.' },
   'crosshair/length': { min: 0, max: 48, step: 1, doc: 'Tick length. 0 = bare dot.' },
   'crosshair/thickness': { min: 1, max: 10, step: 1 },
   'crosshair/gap': { min: 0, max: 60, step: 1, doc: 'Centre to the inner end of each tick.' },
   'crosshair/opacity': { min: 0.1, max: 1, step: 0.05 },
-  'meters/radius': { min: 8, max: 140, step: 1, doc: 'Arc radius.' },
-  'meters/offset': { min: 20, max: 700, step: 5, doc: 'How far the innermost meter sits from the crosshair.' },
-  'meters/width': { min: 1, max: 30, step: 0.5 },
-  'meters/sweep': { min: 30, max: 360, step: 5, doc: 'Degrees per arc. 360 = full ring.' },
-  'meters/spacing': { min: 0, max: 300, step: 2, doc: 'Centre-to-centre gap between arcs on the same side.' },
+  'meters/width': { min: 40, max: 400, step: 2, doc: 'Bar length in px.' },
+  'meters/height': { min: 2, max: 24, step: 1, doc: 'Bar thickness in px.' },
+  'meters/gap': { min: 0, max: 30, step: 1, doc: 'Px between stacked bars.' },
+  'meters/top': { min: 0, max: 300, step: 2, doc: 'Px from the top edge.' },
+  'meters/right': { min: 0, max: 400, step: 2, doc: 'Px from the right edge.' },
+  'meters/opacity': { min: 0.1, max: 1, step: 0.05, doc: 'Whole cluster. Keep it quiet.' },
   'railgun/chargeTime': { min: 0.1, max: 4, step: 0.05 },
   'railgun/damage': { min: 0, max: 8, step: 0.05, doc: 'x the shared head/body damage.' },
   'railgun/spread': { min: 0, max: 0.2, step: 0.002, doc: 'Cone half-angle. Hitscan, so this is pure accuracy.' },
   'railgun/pierce': { min: 0, max: 8, step: 1, doc: 'Targets one shot punches through. 0 = stops on the first.' },
   'railgun/beamTime': { min: 0.02, max: 1, step: 0.01, doc: 'How long the tracer lingers.' },
+  'railgun/beamWidth': { min: 0.01, max: 0.5, step: 0.005, doc: 'Core radius in metres.' },
+  'railgun/beamGlow': { min: 1, max: 8, step: 0.1, doc: 'Halo radius, x the core.' },
+  'slam/speed': { min: 10, max: 140, step: 1, doc: 'Downward speed the slam holds.' },
+  'slam/keepH': { min: 0, max: 1, step: 0.05, doc: '0 = straight down, 1 = keeps all your run.' },
+  'slam/minHeight': { min: 0, max: 20, step: 0.5, doc: 'Clear air needed under you before C will slam.' },
+  'slam/boostTime': { min: 0, max: 4, step: 0.05, doc: 'Seconds of stronger dashes after landing.' },
+  'slam/dashBoost': { min: 1, max: 3, step: 0.05, doc: 'x dash speed inside that window.' },
 };
 
 /**
