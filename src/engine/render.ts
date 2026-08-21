@@ -179,8 +179,20 @@ export class Renderer {
     }
   }
 
-  /** Draw the scene with the camera exactly as-is — the editor's render path. */
-  renderOnly() {
+  /**
+   * Draw the scene with the camera exactly as it stands. This is the ONLY place
+   * a frame is rendered, and it is deliberately separate from `update`.
+   *
+   * `update` moves the camera; anything that positions a world-space object
+   * from the camera — the grapple cables off your hips, a muzzle flash, a
+   * spawned projectile — has to run in between, or it anchors itself to last
+   * frame's view and tears away from the eye whenever you are moving fast.
+   * Camera-parented viewmodels (the sword) are immune, because a child's world
+   * transform is recomputed from the parent at render time; loose objects in
+   * `scene` are not. Splitting the two makes that ordering enforceable instead
+   * of a thing every new system has to rediscover.
+   */
+  draw() {
     this.syncLights();
     this.renderer.render(this.scene, this.camera);
   }
@@ -193,8 +205,10 @@ export class Renderer {
   }
 
   /**
-   * @param alpha interpolation factor between the last two physics ticks
-   * @param castRay world query for camera collision pull-in
+   * Place the camera for this frame. Draws nothing — call `draw` once the rest
+   * of the frame's visuals have had their turn.
+   *
+   * @param col world query for camera collision pull-in
    */
   update(p: Player, i: Intent, dt: number, col: CollisionWorld) {
     const yaw = i.yaw, pitch = i.pitch;
@@ -247,8 +261,8 @@ export class Renderer {
       this.camera.updateProjectionMatrix();
     }
 
-    this.syncLights();
-    this.renderer.render(this.scene, this.camera);
+    // No render here on purpose — see `draw`. The camera is final as of this
+    // line, and everything that reads it gets to run before the frame is drawn.
   }
 
   /** Eyes at the capsule, orientation straight from yaw/pitch. */

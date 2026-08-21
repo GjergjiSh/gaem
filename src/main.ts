@@ -179,7 +179,7 @@ function frame(now: number) {
   if (editor.active) {
     editor.update();
     sword.setHidden(true);
-    gfx.renderOnly();
+    gfx.draw();
     acc = 0;
     requestAnimationFrame(frame);
     return;
@@ -226,6 +226,7 @@ function frame(now: number) {
     // disk takes it here rather than mid-run.
     updates.applyWhenIdle(true);
     gfx.update(player, input.intent, 0, world);
+    gfx.draw();
     hud.update(player, { run: run.time, splits: run.splits, best }, panel.abLabel, input.lookMode,
       T.camera.firstPerson ? 'first person' : 'third person',
       `PAUSED   ${weapon.hudLine()}`);
@@ -269,6 +270,20 @@ function frame(now: number) {
   // bullets, animations and cooldowns running at full speed through a slowed
   // world, which is not slow motion — it is the player being slowed down.
   autoFollowCamera(dt);
+
+  // The camera is placed FIRST, before anything that reads it. The grapple
+  // builds its cable origins from the camera in first person and hangs the
+  // ropes in world space, so with the old ordering — camera last — each cable
+  // anchored to the previous frame's view and visibly tore away from your hips
+  // at speed, reading as several hooks at once. Weapon fire spawns off the
+  // camera too, with the same one-frame staleness. Placing the camera up front
+  // fixes both and every future case of it.
+  //
+  // The one thing this costs: `gfx.adsT`, which the weapon writes below, is a
+  // frame old when the FOV is computed. It is a damped 0..1 scalar, so a frame
+  // of lag on it is not a thing anyone can see.
+  gfx.update(player, input.intent, dt, world);
+
   weapon.update(dt);
   sword.update(dt, player);
   hook.update(dt, player);
@@ -284,7 +299,6 @@ function frame(now: number) {
     cooldown: sword.cooldownFrac,
     getsuga: sword.waveFrac,
   });
-  gfx.update(player, input.intent, dt, world);
 
   if (bestPath) {
     const i = Math.min(bestPath.length - 1, Math.floor(run.time / FIXED));
@@ -292,6 +306,9 @@ function frame(now: number) {
     ghost.position.set(g.x, g.y, g.z);
     ghost.visible = true;
   }
+
+  // Everything has been placed; draw it.
+  gfx.draw();
 
   hud.update(player, { run: run.time, splits: run.splits, best }, panel.abLabel, input.lookMode,
     T.camera.firstPerson ? 'first person' : 'third person',
