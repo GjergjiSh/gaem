@@ -2107,6 +2107,55 @@ Materials are cloned per instance. glTF shares one material across every copy of
 a model, so tinting a single dummy red on a hit would flash the whole map — the
 same trap as sharing a geometry, one level up.
 
+### Props keep their own shape
+
+The first dressing pass looked like a scrapyard, and the cause was one line of
+reasoning that is right for structure and wrong for props: *the model is
+stretched to fill its brush.*
+
+A deck should be stretched — it has to reach the edges of its collider or the
+collider shows. A lamppost should not. `Sign_1` is 0.062 units thick, so the
+2.4 x 3.4 box I drew for it stretched the sign **51x** along its own normal into
+a billboard the size of a building; `Cable_Long` came out 47x; `Light_Street_1`
+went 9x wide and splayed like a fan. Every prop was also mounted just outside
+the deck rather than on it, which is what made them read as debris drifting
+alongside the track instead of things bolted to it.
+
+Two changes, one in the engine and one in the data:
+
+- **Decor fits uniformly and stands on the floor of its box.** Under a uniform
+  fit the brush stops being a shape to conform to and becomes a bounding
+  volume: the model fits inside on its tightest axis at its true proportions,
+  whatever box it is given. `ground` then puts its base on the box's floor
+  instead of its centre at the box's middle, so "where the base of the box is"
+  means "where the prop stands". Distortion is no longer something to be careful
+  about — it is unreachable, including for anything placed in the editor.
+- **`kit.ts` carries every model's measured size**, straight out of the glTF
+  POSITION accessors (`tools/measure.py`). Prop brushes are sized from it —
+  natural size x `KIT_SCALE` — so the stretch is exactly 1.0 on all three axes
+  and the box hugs the model. One global scale, 1.8, is what keeps the kit in
+  proportion with itself: it puts a street light at 5.2 m and everything else
+  follows.
+
+Props then go **on** the deck, along the edges, leaving the middle clear.
+Measured across both tracks:
+
+| | loop-course | figure8 |
+|---|---|---|
+| colliders | 74 | 113 |
+| props | 206 | 228 |
+| worst prop stretch error | 3.6e-4 | 0 |
+| props not standing on a surface | 0 | 0 |
+| worst gap between a base and its surface | 0.45 mm | 0 |
+| props overhanging their platform | 0 | 0 |
+| clear running lane | 10.1 m of 16 | 15.4 m of 22 |
+
+The overhang and lane figures need the props' own rotation to mean anything — a
+railing turned along the track is 4 m deep and 0.1 m wide in the platform's
+axes, not the other way round — so both are projections of the oriented box onto
+the platform's frame, not of `s`. Checking `s` directly reported 132 phantom
+overhangs on a track that had none.
+
 ### The rest of it
 
 - `light.sky` / `light.sun` / `light.fill` in the tune. The kit's materials sit

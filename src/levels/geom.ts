@@ -24,6 +24,19 @@ export const qmul = (a: Q, b: Q): Q => [
 export const orient = (yaw: number, pitch: number, roll = 0): Q =>
   qmul(qmul(axisAngle(0, 1, 0, yaw), axisAngle(1, 0, 0, pitch)), axisAngle(0, 0, 1, roll));
 
+/** Rotate a vector by a quaternion. */
+export const qapply = (q: Q, v: [number, number, number]): [number, number, number] => {
+  const [x, y, z, w] = q;
+  const tx = 2 * (y * v[2] - z * v[1]);
+  const ty = 2 * (z * v[0] - x * v[2]);
+  const tz = 2 * (x * v[1] - y * v[0]);
+  return [
+    v[0] + w * tx + y * tz - z * ty,
+    v[1] + w * ty + z * tx - x * tz,
+    v[2] + w * tz + x * ty - y * tx,
+  ];
+};
+
 export const clamp = (x: number, lo: number, hi: number) => (x < lo ? lo : x > hi ? hi : x);
 
 /** Shortest signed difference between two angles, in (-PI, PI]. */

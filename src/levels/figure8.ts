@@ -31,7 +31,8 @@
 // constants rather than a list of hand-placed boxes.
 
 import type { Brush, Trigger } from './types';
-import { axisAngle, clamp, orient, qmul, wrapAngle, type Q } from './geom';
+import { axisAngle, clamp, orient, qapply, qmul, wrapAngle, type Q } from './geom';
+import { propBox } from './kit';
 
 // --- palette. Colour carries meaning here: amber is always a surface you can
 // run on, violet is the slide.
@@ -128,13 +129,28 @@ const modelled = (
 ) => { box(p, s, c, q); brushes[brushes.length - 1].m = m; };
 
 /**
- * Scenery. `d: true` keeps it out of the physics world entirely, which is the
- * only reason a track this dense with props is still a track you can carry
- * speed through: none of it is a thing to hit.
+ * Scenery standing on the top face of `host`, positioned in the host's own
+ * frame so it rides the road's yaw, slope and every future edit to it.
+ *
+ * Two things make this look like street furniture rather than debris. The box
+ * is `propBox(m)` — the model's true size — so the stretch is exactly 1 and the
+ * prop appears at its real shape; and its base is placed on the surface rather
+ * than its centre at a guessed height, so it stands rather than hovers.
+ *
+ * `d: true` keeps all of it out of the physics world, which is the only reason
+ * a track this dressed is still a track you can carry speed through: none of it
+ * is a thing to hit.
  */
-const deco = (
-  p: [number, number, number], s: [number, number, number], m: string, q?: Q,
-) => { box(p, s, 0xffffff, q); Object.assign(brushes[brushes.length - 1], { m, d: true }); };
+const deco = (host: Brush, lx: number, lz: number, m: string, yaw = 0) => {
+  const s = propBox(m);
+  const q = (host.q ?? [0, 0, 0, 1]) as Q;
+  const o = qapply(q, [lx, host.s[1] / 2 + s[1] / 2, lz]);
+  box([host.p[0] + o[0], host.p[1] + o[1], host.p[2] + o[2]], s, 0xffffff,
+    qmul(q, axisAngle(0, 1, 0, yaw)));
+  Object.assign(brushes[brushes.length - 1], { m, d: true });
+};
+
+const HALF_PI = Math.PI / 2;
 
 // --- the two crossings, declared up here because the road has to know about
 // them: where the track passes over a deck it is a plaza, not a ledge.
@@ -254,23 +270,38 @@ for (const slot of slots) {
   modelled([c.x, c.y, c.z], [ROAD_W, ROAD_T, len],
     slot.k % 2 ? ROAD_A : ROAD_B, 'Platform_4x4_Empty', q);
 
-  // Dressing, all of it decor. A light at each end so the platform reads as a
-  // place before you can make out its edges, a rail down the outside of the
-  // turn, and one tall silhouette per slot so no two look the same at speed.
-  const side = sideAt(mid);
-  const surf = ROAD_T / 2;
-  for (const end of [-1, 1]) {
-    const e = at(mid + end * (len / 2 - 3));
-    deco([e.x + side.x * 12.2, e.y + surf + 2.6, e.z + side.z * 12.2], [1.8, 5.2, 1.8],
-      'Light_Street_1', axisAngle(0, 1, 0, headingAt(mid)));
+  // Dressing, all of it decor, all of it in the road's own frame: local +Z runs
+  // down the track and local X is across it, so everything below is placed by
+  // "how far along" and "how far out", and tilts with the road for free.
+  const road = brushes[brushes.length - 1];
+  const halfW = ROAD_W / 2;
+
+  // Railings down both edges. The models' long axis is their own X, so running
+  // one along the track is a quarter turn; the last few metres at each end stay
+  // open, because a rail across the lip of a jump reads as a wall.
+  const rail = propBox('Rail_Long')[0];
+  const runs = Math.max(0, Math.floor((len - 8) / (rail + 0.25)));
+  for (const sgn of [1, -1]) {
+    for (let k = 0; k < runs; k++) {
+      deco(road, sgn * (halfW - 0.5), (k - (runs - 1) / 2) * (rail + 0.25),
+        'Rail_Long', HALF_PI);
+    }
   }
-  const tall = ['Antenna_1', 'Antenna_2', 'AC_Stacked', 'Computer_Large'][slot.k % 4];
-  const t = at(mid - len * 0.2);
-  deco([t.x - side.x * 12.8, t.y + surf + 2.0, t.z - side.z * 12.8], [3.0, 4.0, 3.0],
-    tall, axisAngle(0, 1, 0, headingAt(mid) + slot.k));
-  const sgn = at(mid + len * 0.25);
-  deco([sgn.x - side.x * 12.2, sgn.y + surf + 2.8, sgn.z - side.z * 12.2], [0.25, 2.4, 3.4],
-    ['Sign_1', 'Sign_2', 'Sign_3', 'Sign_4'][slot.k % 4], axisAngle(0, 1, 0, headingAt(mid)));
+
+  // A light at each end so the platform reads as a place before you can make out
+  // its edges. The lamp hangs toward the model's own +Z, so each post turns to
+  // reach over the road instead of out into the dark.
+  for (const sgn of [1, -1]) {
+    deco(road, sgn * (halfW - 1.9), sgn * (len / 2 - 4), 'Light_Street_1', -sgn * HALF_PI);
+  }
+
+  // One tall silhouette per slot so no two platforms look alike at speed, one
+  // low unit opposite it, and a sign turned back to face whoever is arriving.
+  const tall = ['Computer_Large', 'TV_3', 'AC_Stacked', 'Antenna_2'][slot.k % 4];
+  deco(road, -(halfW - 2.4), -len * 0.18, tall, HALF_PI);
+  deco(road, halfW - 2.6, len * 0.1, ['AC', 'AC_Side', 'Computer', 'Support'][slot.k % 4], -HALF_PI);
+  deco(road, -(halfW - 1.6), len * 0.34,
+    ['Sign_4', 'Sign_1', 'Sign_2', 'Sign_3'][slot.k % 4], Math.PI);
 }
 
 // --- the walls: one per join -------------------------------------------------
@@ -394,8 +425,23 @@ for (const slot of slots) {
 // than a lock.
 modelled([HIGH.x, HIGH_DECK.top - 0.8, HIGH.z], [HIGH_DECK.w, 1.6, HIGH_DECK.d],
   DECK, 'Platform_4x4_Empty');
+const highDeck = brushes[brushes.length - 1];
 modelled([LOW.x, LOW_DECK.top - 0.8, LOW.z], [LOW_DECK.w, 1.6, LOW_DECK.d],
   DECK, 'Platform_4x4_Empty');
+const lowDeck = brushes[brushes.length - 1];
+
+// The crossings are plazas the road runs over, so they get lit corners and
+// nothing else — the middle of both is a landing zone and has to stay readable.
+for (const deck of [highDeck, lowDeck]) {
+  const hx = deck.s[0] / 2 - 3;
+  const hz = deck.s[2] / 2 - 3;
+  for (const sx of [1, -1]) {
+    for (const sz of [1, -1]) {
+      deco(deck, sx * hx, sz * hz, 'Light_Street_1', sz > 0 ? Math.PI : 0);
+      deco(deck, sx * (hx - 3.4), sz * hz, 'AC_Stacked', 0);
+    }
+  }
+}
 
 // --- leg 1: the Super gap ----------------------------------------------------
 // A runway west off the high deck, then 30m of nothing with the landing 8m down. Measured against the tune: a run jump carries 10m and a plain

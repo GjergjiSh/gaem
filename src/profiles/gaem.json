@@ -76,6 +76,9 @@
     "pellets": 11,
     "projSpeed": 96
   },
+  "enemy": {
+    "scale": 1
+  },
   "sword": {
     "reach": 5.855512699000499
   },

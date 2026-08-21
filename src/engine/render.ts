@@ -142,8 +142,11 @@ export class Renderer {
       // raycast target for the sword, the Getsuga and the editor, keeps its
       // brushIndex, and — because it is unit geometry scaled to the brush —
       // stretches the model to the collider exactly, live, as you drag a handle.
+      // Decor fits uniformly and stands on the box's floor; structure fills its
+      // box. A deck must stretch to its collider or the collider shows at the
+      // edges, but a lamppost stretched to a box is not a lamppost.
       if (b.m) {
-        const inst = instance(b.m);
+        const inst = instance(b.m, { uniform: b.d, ground: b.d });
         if (inst) {
           m.add(inst.object);
           // The box itself stops drawing, but stays raycastable and selectable.

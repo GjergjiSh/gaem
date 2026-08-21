@@ -40,14 +40,23 @@ const cache = new Map<string, Loaded>();
 const pending = new Map<string, Promise<Loaded | null>>();
 
 /**
- * Scale and centre an object so its bounding box becomes the unit cube.
+ * Scale an object so its bounding box becomes the unit cube.
  *
- * Non-uniform on purpose: a brush is a box with its own proportions and the
- * model has to fill it, or a stretched platform leaves its collider showing at
- * the edges. `keep` opts a model out per axis — a robot must not be squashed to
- * fit a capsule, so it fits uniformly instead.
+ * Non-uniform by default, on purpose: a structural brush is a box with its own
+ * proportions and the model has to fill it, or a stretched deck leaves its
+ * collider showing at the edges.
+ *
+ * `uniform` opts out, and props always want it. A model stretched to a box
+ * drawn without regard for its shape is not a smaller or bigger prop, it is a
+ * broken one — `Sign_1` is 0.062 units thick, so a brush 3.2 deep turns it into
+ * a billboard the size of a building. Under a uniform fit the brush stops being
+ * a shape to conform to and becomes a bounding volume: the model fits inside on
+ * its tightest axis and keeps its true proportions whatever box it is given.
+ *
+ * `ground` then sits it on the floor of that volume rather than floating it in
+ * the middle, so "where the box's base is" means "where the prop stands".
  */
-function fitUnit(obj: THREE.Object3D, uniform = false) {
+function fitUnit(obj: THREE.Object3D, uniform = false, ground = false) {
   obj.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(obj);
   const size = box.getSize(new THREE.Vector3());
@@ -60,13 +69,15 @@ function fitUnit(obj: THREE.Object3D, uniform = false) {
   // puts on the returned object.
   const inner = new THREE.Group();
   inner.add(obj);
-  if (uniform) {
-    const k = Math.min(sx, sy, sz);
-    inner.scale.setScalar(k);
-  } else {
-    inner.scale.set(sx, sy, sz);
-  }
+  const k = Math.min(sx, sy, sz);
+  if (uniform) inner.scale.setScalar(k);
+  else inner.scale.set(sx, sy, sz);
   obj.position.sub(centre);
+  if (ground) {
+    // Base to the object's own origin, then the origin to the box's floor.
+    obj.position.y += size.y / 2;
+    inner.position.y = -0.5;
+  }
   return inner;
 }
 
@@ -118,8 +129,10 @@ export interface Instance {
  * of a model, so tinting a single dummy red on a hit would flash the whole map
  * — the same trap as sharing a geometry, one level up.
  */
-export function instance(name: string, opts: { uniform?: boolean; animate?: boolean } = {})
-  : Instance | null {
+export function instance(
+  name: string,
+  opts: { uniform?: boolean; ground?: boolean; animate?: boolean } = {},
+): Instance | null {
   const got = cache.get(name);
   if (!got) return null;
 
@@ -136,7 +149,7 @@ export function instance(name: string, opts: { uniform?: boolean; animate?: bool
     mesh.material = Array.isArray(mat) ? mat.map((m) => m.clone()) : (mat as THREE.Material).clone();
   });
 
-  const object = fitUnit(copy, opts.uniform ?? false);
+  const object = fitUnit(copy, opts.uniform ?? false, opts.ground ?? false);
   const mixer = opts.animate && got.clips.length ? new THREE.AnimationMixer(copy) : null;
   return { object, clips: got.clips, mixer };
 }
