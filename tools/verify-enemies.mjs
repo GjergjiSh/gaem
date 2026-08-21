@@ -50,11 +50,19 @@ try {
   if (!fs.existsSync(path.join(OUT, 'models.js'))) throw new Error('models.ts failed to compile');
 }
 
+// models.ts globs twice now: once for the models themselves and once for the
+// side-car buffers and textures a glTF references by name. Replace EVERY
+// occurrence -- a lone `replace` with no /g leaves the second one as literal
+// Vite syntax, which is a `.glob is not a function` at import time.
+const MODELS = JSON.stringify(Object.fromEntries(fs.readdirSync('assets/robots-pack')
+  .filter((f) => f.endsWith('.gltf'))
+  .map((f) => [`/assets/robots-pack/${f}`, `${BASE}assets/robots-pack/${f}`])));
+let seen = 0;
 const js = fs.readFileSync(path.join(OUT, 'models.js'), 'utf8').replace(
-  /import\.meta\.glob\([^)]*\)/,
-  JSON.stringify(Object.fromEntries(fs.readdirSync('assets/robots-pack')
-    .filter((f) => f.endsWith('.gltf'))
-    .map((f) => [`/assets/robots-pack/${f}`, `${BASE}assets/robots-pack/${f}`]))),
+  /import\.meta\.glob\([^)]*\)/g,
+  // The robots pack embeds its buffers and has no textures, so the side-car
+  // table is legitimately empty here.
+  () => (seen++ === 0 ? MODELS : '{}'),
 );
 const shim = path.resolve('models.live.mjs');   // in-repo, so bare 'three' resolves
 fs.writeFileSync(shim, js);

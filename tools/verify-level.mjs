@@ -89,6 +89,34 @@ function surfaceAt(x, z, from = 400) {
  * the air just above that deck where the two meet — so they get judged by
  * whether they meet it flush, not by whether they are standing in a lane.
  */
+/**
+ * World AABB of every brush. Over-approximates the rotated ones, which is the
+ * safe direction for every question asked of it here: a width it reports as
+ * tight is at worst tighter than the truth.
+ */
+const BOXES = A.brushes.map((b) => {
+  const [sx, sy, sz] = b.s;
+  let hx = sx / 2, hy = sy / 2, hz = sz / 2;
+  if (b.q) {
+    const [x, y, z, w] = b.q;
+    const m = [
+      [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+      [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+      [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
+    ];
+    hx = Math.abs(m[0][0]) * sx / 2 + Math.abs(m[0][1]) * sy / 2 + Math.abs(m[0][2]) * sz / 2;
+    hy = Math.abs(m[1][0]) * sx / 2 + Math.abs(m[1][1]) * sy / 2 + Math.abs(m[1][2]) * sz / 2;
+    hz = Math.abs(m[2][0]) * sx / 2 + Math.abs(m[2][1]) * sy / 2 + Math.abs(m[2][2]) * sz / 2;
+  }
+  return {
+    x0: b.p[0] - hx, x1: b.p[0] + hx,
+    y0: b.p[1] - hy, y1: b.p[1] + hy,
+    z0: b.p[2] - hz, z1: b.p[2] + hz,
+  };
+});
+const solidAt = (x, y, z) => BOXES.some((b) =>
+  x > b.x0 && x < b.x1 && y > b.y0 && y < b.y1 && z > b.z0 && z < b.z1);
+
 const RAMPS = A.brushes.filter((b) => b.q);
 /** Is a point inside an oriented brush? Margin in metres. */
 function insideBrush(b, px, py, pz, margin = 0.6) {
@@ -120,9 +148,43 @@ head('what got built');
   note(`${A.roofs.length} decks, ${A.triggers.length} triggers, ${A.brushes.length - decor} colliders`);
   check(decor === 0, `not one decorative brush — every object is solid (${decor} ghosts)`);
 
+  // The bar is DEGENERACY, not thinness. A vent grille is modelled 44 mm thick
+  // and that is a perfectly good static collider; clamping it up to clear an
+  // arbitrary 5 cm line is how you distort a model to satisfy a check.
   const bad = A.brushes.filter((b) =>
-    ![...b.p, ...b.s].every(Number.isFinite) || b.s.some((x) => x <= 0.05));
+    ![...b.p, ...b.s].every(Number.isFinite) || b.s.some((x) => x < 0.02));
+  const thin = A.brushes.filter((b) => b.s.some((x) => x < 0.1)).length;
+  note(`${thin} brushes are under 10 cm on some axis — grilles, panels and paint`);
   check(bad.length === 0, `every brush has finite position and real size (${bad.length} bad)`);
+
+  // What this actually costs to draw. A plain brush is two calls (the box and
+  // its edge lines); a brush wearing a model draws the model's primitives
+  // instead, because the renderer hides the box under it.
+  const prims = {};
+  for (const f of fs.readdirSync('assets/Platforms')) {
+    if (!f.endsWith('.gltf')) continue;
+    const d = JSON.parse(fs.readFileSync(path.join('assets/Platforms', f), 'utf8'));
+    prims[f.slice(0, -5)] = d.meshes.reduce((a, m) => a + m.primitives.length, 0);
+  }
+  const calls = A.brushes.reduce((a, b) => a + (b.m ? (prims[b.m] ?? 1) : 2), 0);
+  note(`~${calls} draw calls`);
+
+  // Every model the level names has to be a file on disk. A name that is in the
+  // measured table but no longer in the pack loads as nothing and leaves a hole
+  // where a prop was, which is the kind of thing you notice six weeks later.
+  const onDisk = new Set();
+  const sweep = (dir) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (e.isDirectory()) sweep(path.join(dir, e.name));
+      else if (e.name.endsWith('.gltf')) onDisk.add(e.name.slice(0, -5));
+    }
+  };
+  sweep('assets');
+  const named = [...new Set(A.brushes.filter((b) => b.m).map((b) => b.m))];
+  const missing = named.filter((n) => !onDisk.has(n));
+  note(`${named.length} distinct models named, all from one pack`);
+  check(missing.length === 0, `every model resolves to a file (${missing.join(', ') || 'none missing'})`);
+  check(calls < 2600, `inside the draw budget (${calls} of 2600)`);
 
   const spanX = A.EXTENT.x1 - A.EXTENT.x0;
   const spanZ = A.EXTENT.z1 - A.EXTENT.z0;
@@ -131,31 +193,42 @@ head('what got built');
 }
 
 // ---------------------------------------------------------------------------
+head('rule 2: every prop is at its true size');
+{
+  // The scrapyard test. A model is stretched to fill its brush, so a brush
+  // drawn without regard for the model's proportions DISTORTS it — `Sign_1` is
+  // 0.06 units thick, and poured into a brush 3 m deep it is a billboard the
+  // size of a building. Props are sized from the measured box, so every one of
+  // them must come out at a stretch of exactly 1 on all three axes.
+  const worn = A.brushes.filter((b) => b.m);
+  const props = worn.filter((b) => !A.STRETCHED.has(b.m));
+  let bent = 0;
+  let worst = 0;
+  for (const b of props) {
+    const nat = A.propBoxOf(b.m);
+    // Compare the three axes to EACH OTHER, not to 1. Scaling a model evenly is
+    // not distortion — it is just a smaller version of the same object — and
+    // the thing that ruins a kit is one axis moving without the others.
+    // Only the axes the model actually HAS. Several panels and every decal are
+    // modelled as planes with a zero axis, which the brush opens up to a few
+    // centimetres so it is not degenerate — dividing by that zero is how the
+    // worst distortion came out as Infinity.
+    const ks = [0, 1, 2].filter((i) => nat[i] > 1e-3).map((i) => b.s[i] / nat[i]);
+    if (ks.length < 2) continue;
+    const skew = Math.max(...ks) / Math.min(...ks) - 1;
+    worst = Math.max(worst, skew);
+    if (skew > 1e-6) bent++;
+  }
+  note(`${worn.length} brushes wear a model: ${props.length} props at true size, `
+    + `${worn.length - props.length} linear models stretched on purpose`);
+  note(`worst distortion across every prop: ${(worst * 100).toFixed(4)}%`);
+  check(bent === 0, `no prop is stretched out of shape (${bent} distorted)`);
+}
+
+// ---------------------------------------------------------------------------
 head('rule 1: nothing floats');
 {
-  // World AABB of an oriented box: the half-extent is the size projected onto
-  // each world axis through the rotation.
-  const aabb = (b) => {
-    const [sx, sy, sz] = b.s;
-    let hx = sx / 2, hy = sy / 2, hz = sz / 2;
-    if (b.q) {
-      const [x, y, z, w] = b.q;
-      const m = [
-        [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
-        [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
-        [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
-      ];
-      hx = Math.abs(m[0][0]) * sx / 2 + Math.abs(m[0][1]) * sy / 2 + Math.abs(m[0][2]) * sz / 2;
-      hy = Math.abs(m[1][0]) * sx / 2 + Math.abs(m[1][1]) * sy / 2 + Math.abs(m[1][2]) * sz / 2;
-      hz = Math.abs(m[2][0]) * sx / 2 + Math.abs(m[2][1]) * sy / 2 + Math.abs(m[2][2]) * sz / 2;
-    }
-    return {
-      x0: b.p[0] - hx, x1: b.p[0] + hx,
-      y0: b.p[1] - hy, y1: b.p[1] + hy,
-      z0: b.p[2] - hz, z1: b.p[2] + hz,
-    };
-  };
-  const boxes = A.brushes.map(aabb);
+  const boxes = BOXES;
   const TOL = 0.6;
   const floating = [];
   for (let i = 0; i < boxes.length; i++) {
@@ -210,7 +283,7 @@ head('rule 3: the roofs are where the plan says, and their edges are clear');
   }
   check(narrow === 0, `every setback ring is wide enough to run along (${narrow} too narrow)`);
 
-  let wrongTop = 0, obstructed = 0, holes = 0, samples = 0, joins = 0;
+  let wrongTop = 0, obstructed = 0, holes = 0, samples = 0, joins = 0, flat = 0;
   let worstLane = null;
 
   for (const r of tops) {
@@ -221,19 +294,28 @@ head('rule 3: the roofs are where the plan says, and their edges are clear');
 
     for (let x = -r.w / 2 + 1; x <= r.w / 2 - 1; x += 2.5) {
       for (let z = -r.d / 2 + 1; z <= r.d / 2 - 1; z += 2.5) {
+        // The lane scales with the deck. A 12 m service platform cannot have a
+        // 9 m clear ring round it and still be a platform, and demanding one
+        // just means the rule gets switched off for the decks it was written
+        // for. Small decks get a proportionally small lane instead.
+        const lane = Math.min(LANE, Math.max(0, (Math.min(r.w, r.d) - 10) / 2));
         const edge = Math.min(r.w / 2 - Math.abs(x), r.d / 2 - Math.abs(z));
         const corner = (r.w / 2 - Math.abs(x)) < CORNER && (r.d / 2 - Math.abs(z)) < CORNER;
-        if (edge > LANE || corner) continue;
+        if (edge > lane || corner) continue;
         samples++;
         const h = surfaceAt(r.cx + x, r.cz + z, r.top + HEAD);
         if (h === null) { holes++; continue; }
-        if (h > r.top + 0.05) {
+        // Under a step, the controller simply walks over it — so a painted
+        // marking or a floor vent cannot obstruct anything, and the rule that
+        // matters is about things you can actually be stopped by.
+        if (h > r.top + T.character.stepHeight) {
           if (onARamp(r.cx + x, h, r.cz + z)) { joins++; continue; }
           obstructed++;
           if (!worstLane || h - r.top > worstLane.d) {
             worstLane = { d: h - r.top, x: r.cx + x, z: r.cz + z, top: r.top };
           }
         } else if (h < r.top - 0.05) holes++;
+        else if (h > r.top + 0.05) flat++;
       }
     }
   }
@@ -245,6 +327,8 @@ head('rule 3: the roofs are where the plan says, and their edges are clear');
   check(wrongTop === 0, `every deck is solid at its own centre (${wrongTop} missing)`);
   note(`${joins} probes landed on a ramp meeting a deck — those are joins, and`
     + ' they get measured for a lip further down instead');
+  note(`${flat} landed on something under a step height — paint and floor vents,`
+    + ' which the controller walks over');
   check(obstructed === 0, `nothing stands in a launch lane (${obstructed} obstructions)`);
   check(holes === 0, `no holes in a deck edge (${holes} found)`);
 }
@@ -255,9 +339,11 @@ head('every ramp either meets the floor flush or does not meet it at all');
   useTune('shipped');
   const STEP_OK = T.character.stepHeight;
   let lipped = 0, joined = 0, launches = 0;
-  // Floors only. The Chute's side rails are tilted too, and both of their ends
-  // hang in the air on purpose — a rail is not a thing you walk off the end of.
-  const FLOORS = RAMPS.filter((b) => b.s[1] <= b.s[0] && b.s[1] <= b.s[2]);
+  // The level says which brushes are ramps. Inferring it from the geometry does
+  // not work in either direction: most rotated brushes here are level pipes and
+  // rails turned to lie along a street, and the tilted ones include every vent
+  // tipped ninety degrees to face out of a wall.
+  const FLOORS = A.RAMP_BRUSHES.map((i) => A.brushes[i]);
   for (const b of FLOORS) {
     // Local +Z is the ramp's length; walk a metre past each end and see what is
     // there. A surface within a few metres is a join and has to be flush; open
@@ -348,7 +434,7 @@ head('the street grid: every crossing measured, then priced against the tune');
   };
   const TUNES = [budgets('shipped'), budgets('gaem')];
 
-  let measured = 0, unreachable = 0, missed = 0;
+  let measured = 0, unreachable = 0, missed = 0, bridged = 0;
   const worst = [];
   for (let ri = 0; ri < A.ROWS.length; ri++) {
     for (let ci = 0; ci < A.COLS.length - 1; ci++) {
@@ -374,14 +460,27 @@ head('the street grid: every crossing measured, then priced against the tune');
       }));
       const bad = priced.filter((p) => !p.ok);
       if (bad.length) {
-        missed++;
-        worst.push(`r${ri} c${ci}->c${ci + 1}: ${best.toFixed(1)} m at ${rise >= 0 ? '+' : ''}`
-          + `${rise} m — budget ${bad.map((p) => `${p.t} ${p.budget.toFixed(1)}`).join(', ')}`);
+        // Past a jump — so there had better be something to land on in the
+        // middle. The Overpass runs down one of these avenues, and a crossing
+        // that is BRIDGED is not a crossing that is broken.
+        const midX = (A.COLS[ci].hi + A.COLS[ci + 1].lo) / 2;
+        const span = surfaceAt(midX, A.ROWS[ri].c, Math.max(topA, topB) + 30);
+        const landable = span !== null
+          && span > Math.min(topA, topB) - 12 && span < Math.max(topA, topB) + 14;
+        if (landable) {
+          bridged++;
+          note(`r${ri} c${ci}->c${ci + 1}: ${best.toFixed(1)} m is past a jump, but a deck `
+            + `at ${span.toFixed(1)} m crosses the middle of it`);
+        } else {
+          missed++;
+          worst.push(`r${ri} c${ci}->c${ci + 1}: ${best.toFixed(1)} m at ${rise >= 0 ? '+' : ''}`
+            + `${rise} m — budget ${bad.map((p) => `${p.t} ${p.budget.toFixed(1)}`).join(', ')}`);
+        }
       }
       if (priced.some((p) => p.budget === 0)) unreachable++;
     }
   }
-  note(`${measured} east–west crossings walked with a ray`);
+  note(`${measured} east–west crossings walked with a ray, ${bridged} of them bridged`);
   for (const w of worst.slice(0, 6)) note(w);
   check(missed === 0,
     `every one is inside a slide jump plus the double, on BOTH tunes (${missed} are not)`);
@@ -445,6 +544,82 @@ head('the roofscape is connected: can you get anywhere from anywhere?');
   const onlyCrown = stranded.every((s) => s.top >= 70);
   check(onlyCrown,
     `nothing is stranded except the Spire crown, which is the climb (${stranded.length} stranded)`);
+}
+
+// ---------------------------------------------------------------------------
+head('the dressing did not narrow anything that matters');
+{
+  useTune('shipped');
+  // Bands and cornices stand 0.25-0.35 m proud of every mass, on all four
+  // faces — including the two that face each other across a twin's shaft. Six
+  // of those are climbs, so the width that matters is the width AFTER the
+  // decoration, measured at the height where the cornices are worst.
+  const apexUp = (T.wall.jumpUp * T.wall.jumpUp) / (2 * T.world.gravityRise);
+  const air = T.wall.jumpUp / T.world.gravityRise + Math.sqrt((2 * apexUp) / T.world.gravityFall);
+  const cross = 0.7 * T.wall.jumpOut * air;
+  const need = (w) => w - T.character.radius - (T.character.radius + T.wall.detectDist);
+
+  let shafts = 0;
+  let tightest = 99;
+  for (let ri = 0; ri < A.ROWS.length; ri++) {
+    for (let ci = 0; ci < A.COLS.length; ci++) {
+      if (A.KIND[ri][ci] !== 'twin') continue;
+      const ns = (ri + ci) % 2 === 0;
+      const cx = A.COLS[ci].c;
+      const cz = A.ROWS[ri].c;
+      const top = A.HEIGHT[ri][ci];
+      // Just under the deck, where the cornice is.
+      for (const y of [top - 3, top * 0.5, 6]) {
+        const a = world.ray(v(cx, y, cz), ns ? v(1, 0, 0) : v(0, 0, 1), 14);
+        const b = world.ray(v(cx, y, cz), ns ? v(-1, 0, 0) : v(0, 0, -1), 14);
+        if (a === null || b === null) continue;
+        tightest = Math.min(tightest, a + b);
+      }
+      shafts++;
+    }
+  }
+  note(`${shafts} twin shafts; the narrowest is ${tightest.toFixed(2)} m across `
+    + `(SLOT is ${A.SLOT}, so the bands cost ${(A.SLOT - tightest).toFixed(2)} m)`);
+  note(`a bounce covers ~${cross.toFixed(1)} m and that shaft asks for `
+    + `${need(tightest).toFixed(1)} m`);
+  check(need(tightest) < cross, 'every twin shaft is still crossable after the dressing');
+}
+
+// ---------------------------------------------------------------------------
+head('the avenues are still the long straights');
+{
+  useTune('shipped');
+  // Lamps, signs and doors hang off every frontage on the two main avenues, and
+  // a street lamp reaches most of a metre into the road. The avenues are the
+  // only run-up on the map long enough to reach the hard cap, so what matters
+  // is how much clear road is LEFT.
+  // The widest CONTIGUOUS clear run across the street, at chest height, sampled
+  // every metre. Measuring out from the centreline instead reports zero the
+  // moment the centreline itself is occupied — and a Chute pylon or a line of
+  // containers standing in the middle of a road does not close the road, it
+  // just means the lane is beside it rather than through it.
+  const lane = (along, aFrom, aTo, cFrom, cTo) => {
+    let worst = 1e9;
+    let at = 0;
+    for (let t = aFrom; t <= aTo; t += 3) {
+      let run = 0;
+      let best = 0;
+      for (let u = cFrom; u <= cTo; u += 1) {
+        const blocked = along === 'x' ? solidAt(t, 1.2, u) : solidAt(u, 1.2, t);
+        run = blocked ? 0 : run + 1;
+        if (run > best) best = run;
+      }
+      if (best < worst) { worst = best; at = t; }
+    }
+    return { worst, at };
+  };
+  const ew = lane('x', A.COLS[0].lo, A.COLS[5].hi, A.ROWS[1].hi, A.ROWS[2].lo);
+  const ns = lane('z', A.ROWS[0].lo, A.ROWS[4].hi, A.COLS[1].hi, A.COLS[2].lo);
+  note(`east–west avenue: narrowest clear lane ${ew.worst.toFixed(0)} m, at x=${ew.at.toFixed(0)}`);
+  note(`north–south avenue: narrowest clear lane ${ns.worst.toFixed(0)} m, at z=${ns.at.toFixed(0)}`);
+  const room = T.character.radius * 2 + 6;
+  check(Math.min(ew.worst, ns.worst) > room,
+    `both keep a lane wider than ${room.toFixed(1)} m, dressing and all`);
 }
 
 // ---------------------------------------------------------------------------
@@ -655,9 +830,9 @@ head('the lap, leg by leg');
   const maxSlope = T.character.maxSlopeAngle;
   const stall = Math.asin(Math.min(1, T.slide.friction / T.slide.slopeAccel));
   let steep = 0, stalls = 0;
-  for (const b of RAMPS.filter((r) => r.s[1] <= r.s[0] && r.s[1] <= r.s[2])) {
+  for (const b of A.RAMP_BRUSHES.map((i) => A.brushes[i])) {
     // Pitch straight off the quaternion: the angle its local up leans from world up.
-    const [qx, qy, qz, qw] = b.q;
+    const [qx, , qz] = b.q;
     const upY = 1 - 2 * (qx * qx + qz * qz);
     const pitch = Math.acos(Math.max(-1, Math.min(1, upY)));
     if (pitch > maxSlope) { steep++; note(`a ramp pitches ${(pitch * 180 / Math.PI).toFixed(0)} deg`); }

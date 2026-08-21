@@ -2707,3 +2707,184 @@ roof from 400 m up reports the Chute passing overhead as a block underfoot, and
 a single ray down a ramp's spine measures the ramp's own pylons and calls them a
 collision. A measurement that can miss what it is measuring is worse than no
 measurement, because it passes.
+
+
+## 34. Making Ashgate look like somewhere
+
+The level was structurally right and visually nothing: grey boxes with no
+relationship to each other. The fix was not "add detail" — it was to change what
+most of the visible surface is made of.
+
+### One pack, used for everything you get close to
+
+The models in `assets/Platforms` share a material palette and a level of detail.
+So the more of what you see is kit geometry rather than flat-shaded brush, the
+more the district holds together — and the converse is why the first pass looked
+like a pile of boxes, not because it was under-decorated but because *nothing
+shared a language*. 311 of Ashgate's 645 brushes now wear a model.
+
+Flat brush is left for the masses, which are read at distance and in silhouette.
+Even those get articulated: a base course, service bands every 8.5 m, and a
+cornice under the deck. One brush does all four faces of a band at once — the
+part buried inside the mass is redundant and harmless, where four separate
+strips per band would have tripled the district's collider count for exactly the
+same silhouette.
+
+**The theme follows the kit instead of fighting it.** The pack is catwalks,
+coolers, cable runs, service doors and signage, so Ashgate is the back of house:
+a utility district where every roof is plant, every alley has a pipe across it,
+and the landmarks are infrastructure.
+
+### Scale is the actual problem a prop solves
+
+A 30 m mass has no size at all until there is a 2 m door on it. Doors, lamps,
+rails and AC units are objects whose size you already know, and once a few are
+on a wall your eye reads the whole street correctly. That is why the frontage
+pass concentrates on the two avenues at the height a person stands, rather than
+spreading the same budget evenly over 26 buildings.
+
+And it is free. A prop hung on a wall sits flush against a collider that is
+already there, so the only thing it can change is what the wall looks like —
+which is what lets a level with "everything is solid" as a rule still be dressed
+heavily.
+
+### The one rule that makes a kit look like a kit
+
+Every prop is a solid brush sized by `propBox`, the model's measured bounding
+box, so the renderer's stretch-to-fill comes out at **exactly 1** on all three
+axes. `verify:level` checks all 181 of them and reports the worst distortion:
+0.0000%.
+
+The check compares the three axes *to each other*, not to 1 — scaling a model
+evenly is not distortion, it is a smaller version of the same object, and what
+ruins a kit is one axis moving without the others. Four models are exempt by
+name (`Platform_4x4_Empty`, `Support_Long`, `Rail_Long`, `Pipe_2`) because they
+are linear or planar: a longer pipe is just a longer pipe.
+
+### A level that dresses itself has to be told where the game is
+
+Two things went wrong immediately, and both were the dressing not knowing about
+the movement.
+
+**A plant house landed in the Chute's run-out.** You come off 145 m of slide at
+46 u/s, touch down on an ordinary roof, and cross it to the far edge — and that
+roof was being furnished like any other. The solver run stopped dead on it. So
+the level now declares `LANES`: segments the route runs down that nothing may be
+built inside. The Chute's touchdown and run-out, the Overpass slip road, and
+both checkpoint rings.
+
+**Clearances that only worked on the widest decks.** Reserving a 9 m launch lane
+round the edge *and* a 7 m landing disc in the middle leaves a 24 m twin-half
+with nowhere to put a 9.6 m housing, so two thirds of the roofscape stayed bare.
+Roofs now take the largest housing that fits, and give up the clear middle
+before giving up the plant.
+
+### Six defects the verifier caught in the art pass alone
+
+| symptom | cause |
+|---|---|
+| pipes hanging in the void outside the district | `hash(n) >> 5` — a hash is unsigned and half of them are past 2³¹, where JS's **signed** shift makes the value negative, so `% 25` was `-24..24` |
+| the descent ran off the west edge of the world | there was no edge. 18 m of pavement is under half a second at 46 u/s; the district now sits on a plate with a rim |
+| a plant room on top of a checkpoint ring | rings are lanes now |
+| a street lamp coming up through a platform floor | a 4.8 m lamp planted inside a 4.5 m deck |
+| a sign floating at the mouth of the Ladder | hung on the 1.4 m end-face of a wall, which is not a wall to hang things on |
+| every handrail reported as a broken ramp | the ramp-lip check keyed off "rotated", and most rotated brushes here are level pipes and rails turned to lie along a street. It keys off **tilt** now |
+
+Two checks also had to be rewritten because they were measuring the wrong thing:
+a single ray down the middle of an avenue reports zero clearance the moment a
+pylon stands on the centreline, when what matters is the widest *contiguous
+clear lane* beside it; and the launch-lane rule needed to scale with the deck,
+because a 12 m service platform cannot carry a 9 m clear ring and still be a
+platform.
+
+### What it costs
+
+~1694 draw calls, against a budget of 2600 that `verify:level` now enforces. A
+plain brush costs two (the box and its edge lines); a brush wearing a model
+draws the model's primitives instead, because the renderer hides the box under
+it. The narrowest twin shaft lost 0.70 m to its cornices and is still crossable
+by a bounce with 2.2 m to spare, and both avenues keep a 9 m clear lane at their
+tightest — measured, not assumed.
+
+
+## 35. Moving Ashgate onto the sci-fi pack
+
+`assets/scifi` turned up in the tree mid-pass: a proper modular environment kit
+with **walls, columns, doors, rails and floor decals**, which is exactly what
+the flat masses needed and what the older `assets/Platforms` kit never had.
+
+The decisive difference is that it is **textured**. The old kit ships no images
+at all — 52 glTFs, zero PNGs — so its models render as flat-shaded geometry, the
+same as a brush. The new one is PBR with base colour, normal and ORM maps. Put
+the two in one scene and you do not get two styles, you get one mistake, so
+Ashgate now uses the new pack for everything and the old one for nothing.
+
+It is also authored **in metres at scale 1.0** — a crate is 1.0, a barrel 1.1, a
+handrail 0.86, a wall panel 4 wide by 3 high — where the old kit needed a 1.8x
+fudge factor. `src/levels/scifi.ts` is the measured table; `tools/measure-scifi.py`
+regenerates it.
+
+### Three things had to be fixed before a single panel could go up
+
+**The textures did not resolve.** The pack keeps them in a sibling `Textures/`
+folder but references them by bare filename, so a relative resolve looks beside
+the .gltf and finds nothing — all 16 maps would have 404'd and the whole pack
+would have loaded grey. Rather than editing vendor assets, `models.ts` now globs
+every side-car (`*.{bin,png,jpg,…}`) through Vite and gives the loader a
+`LoadingManager.setURLModifier` that resolves them **by basename**. That fixes
+the missing textures and, as a bonus, fixes production builds too — where Vite
+hashes the emitted filenames and a correct relative path breaks anyway.
+
+**Every model was loading its own copy of the shared maps.** GLTFLoader builds a
+fresh `THREE.Texture` per load, so forty-odd models pointing at the same four
+2048² maps is forty-odd uploads of identical pixels: several **gigabytes** of
+video memory for about 90 MB of actual texture. `shareTextures` walks each
+loaded glTF, recovers the source image URI through `parser.associations` — the
+only thing that identifies which file a loaded texture came out of — and swaps
+in one cached instance per URI. Maps are also capped at 1024 on the long edge,
+which a 4 m wall panel does not notice.
+
+**A minimum-thickness helper was quietly distorting props.** Several panels and
+every decal are modelled as planes with a zero axis, which a brush cannot be —
+so `sciBrush` opens them up. Clamping *every* axis to that minimum looked
+harmless and was not: a vent modelled 44 mm thick came out at 80 mm with its
+other two axes untouched, an **83% stretch on one axis**, introduced by the
+function written to prevent exactly that. It only opens genuinely zero axes now,
+and the verifier's degeneracy bar moved from 5 cm to 2 cm to match — because the
+question is whether a collider is degenerate, not whether it is thin.
+
+### Two orientation bugs worth naming
+
+Modular kits carry their axes by convention, and the conventions differ per
+model. A `_Straight` wall panel is thin on **X** with its 4 m length on Z. A
+door is thin on **Z**. A vent or a strip light is thin on **Y**, because it is
+modelled lying on a floor.
+
+So `wallProp` cannot use one turn for everything. It keys off the model's own
+thin axis now: Z-thin props get a yaw, Y-thin props get a yaw *and* a quarter
+turn about X to tip them face-out. Hanging the Y-thin ones with a yaw alone left
+thirty-nine vents attached to their walls by a line, which the "nothing floats"
+check caught. Getting the X quarter-turn's *sign* wrong instead points every
+vent into the wall it is mounted on — invisible from outside, and nothing
+measures it.
+
+The catwalk had the mirror-image bug: its deck was both size-swapped for the
+axis it spans **and** rotated ninety degrees, applying the change twice and
+laying the walkway across the alley it was meant to bridge.
+
+### The verifier stopped guessing which brushes are ramps
+
+It had been inferring "ramp" from "rotated and tilted", which was wrong in both
+directions once the dressing landed: most rotated brushes here are level pipes
+and rails turned to lie along a street, and the tilted ones now include every
+vent tipped ninety degrees to face out of a wall. `ramp()` records its own brush
+index in `RAMP_BRUSHES` and the checks read that. A thing that knows what it is
+should say so rather than be deduced.
+
+### Where it ended up
+
+916 brushes, **546 of them wearing a model**, 44 distinct models all from one
+pack — and ~1286 draw calls, *fewer* than the 1694 the previous dressing cost,
+because the sci-fi models carry fewer primitives and the stretched deck plates
+are gone. 70 checks, all passing, including new ones for prop distortion (worst:
+0.0000%), every named model resolving to a file on disk, and the draw budget.

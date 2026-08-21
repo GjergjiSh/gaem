@@ -7,3 +7,12 @@ dist/
 
 # scratch output from the verify tools
 .verify-tmp/
+
+# the verify tools each get their own scratch dir
+.verify-level/
+.verify-diag*/
+.stats-tmp/
+.fl-tmp/
+
+# tools/measure.py is imported by tools/measure-scifi.py
+__pycache__/
