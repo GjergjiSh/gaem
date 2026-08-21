@@ -84,6 +84,7 @@ export class Hud {
     };
 
     this.text.textContent = [
+      `build    ${__BUILD__}`,
       `state    ${p.state.padEnd(9)}${p.grounded ? 'grounded' : 'air'}`,
       `speed    ${h.toFixed(2).padStart(6)}  cap ${cap.toFixed(1)}${h > cap + 0.05 ? '  OVER' : ''}`,
       `vert     ${p.vel.y.toFixed(2).padStart(6)}`,

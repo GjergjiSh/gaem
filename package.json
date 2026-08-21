@@ -5,7 +5,11 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "play": "vite --port 5174 --strictPort",
+    "publish": "node tools/publish.mjs",
+    "update": "node tools/update-play.mjs",
+    "verify:enemies": "node tools/verify-enemies.mjs"
   },
   "keywords": [],
   "author": "",
