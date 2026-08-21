@@ -12,7 +12,8 @@
     "verify:enemies": "node tools/verify-enemies.mjs",
     "verify:slam": "node tools/verify-slam.mjs",
     "verify:collision": "node tools/verify-collision.mjs",
-    "verify": "npm run verify:slam && npm run verify:collision && npm run verify:enemies"
+    "verify": "npm run verify:slam && npm run verify:collision && npm run verify:enemies && npm run verify:boxselect",
+    "verify:boxselect": "node tools/verify-boxselect.mjs"
   },
   "keywords": [],
   "author": "",

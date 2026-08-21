@@ -2528,3 +2528,43 @@ steps, so a ray into a freshly built world reports nothing — *including throug
 solid level geometry*. This never shows up in the game because `move()` steps as
 part of its job, but it made the first run of the test look like the collision
 groups were excluding everything, when the groups were right all along.
+
+---
+
+## 32. Box select
+
+Ctrl-drag in the editor draws a rectangle and takes everything in it. Three
+decisions worth writing down.
+
+**Centres, not outlines.** Testing a projected bounding box for overlap sounds
+more generous, and it is useless here: the decks are 22 metres across, so their
+screen box covers most of the viewport and almost any drag anywhere would sweep
+up every platform in sight. "Put the box around the middles of the things you
+want" is a rule you can aim with. Enemies come from `aliveTargets()`, one entry
+per dummy at chest height — going through the hit meshes would offer the same
+robot a dozen times, once per bone box, and put its marker on a shin.
+
+**Behind the camera is not selected.** `project()` flips the sign of points
+behind the lens and lands them back inside the rectangle, so a drag in front of
+you would also grab everything at your back. A view-space check (`z >= 0` is
+behind, since the camera looks down -Z) rejects them before projecting.
+Measured in `verify-boxselect`: without the guard, **2 of 3** test points behind
+the camera are selected by a full-screen drag.
+
+**No occlusion test.** Something behind a platform still selects. This is an
+editor, and the thing you cannot see is usually exactly the thing you were
+trying to get at.
+
+Two pieces of plumbing. `OrbitControls` has already seen the same `pointerdown`
+by the time the editor's handler runs — its listener is registered first and no
+ordering trick beats that — but its *move* handler re-checks `enabled` on every
+event, so switching it off during the drag stops the rectangle from also
+spinning the camera. And the drag is finished on `window` rather than the
+canvas, because letting go outside the viewport still has to end it; only the
+finish moved, since putting the click-pick there too would let a click on a
+toolbar button select whatever happens to be behind it.
+
+`addToSelection` grew a `defer` flag. It re-parents the whole selection under
+the gizmo pivot on every call, so adding n items one at a time is quadratic and
+a drag over a few hundred brushes visibly hitches. The box path defers and
+rebuilds the pivot once.
