@@ -2568,3 +2568,142 @@ toolbar button select whatever happens to be behind it.
 the gizmo pivot on every call, so adding n items one at a time is quadratic and
 a drag over a few hundred brushes visibly hitches. The box path defers and
 rebuilds the pivot once.
+
+
+## 33. Ashgate — a district instead of a course
+
+The figure-8 is a road: one line, taken one way, with scenery beside it. Ashgate
+is the other thing a movement game needs — a **place**. 394 x 328 m of city you
+can cross in any direction, with one designed lap running through it rather than
+one floor that is all there is.
+
+`src/levels/ashgate.ts`, verified by `npm run verify:level`.
+
+### Three rules, and the first two are about trust
+
+**Nothing floats.** Every building is a solid mass standing on the street. Roofs
+are the tops of buildings, ledges are the rings left by setbacks, shafts are the
+gaps between two masses. That is what stops a level reading as platforms
+scattered in the air: there is no surface anywhere on the map that is not part
+of something that reaches the ground. The verifier proves it by taking the world
+AABB of all 271 brushes and checking each one either reaches y=0 or overlaps
+something beneath it.
+
+**Everything is solid.** Not one brush is `d: true`. A map where half the
+objects are ghosts teaches you to distrust what you see, so the roof furniture,
+the street crates, the masts and the gantries are all things you can stand on,
+wallrun along, vault or slam onto. This is the opposite of the figure-8's
+dressing pass and it is deliberate.
+
+**Every distance comes from the tune.** Street widths, shaft widths, landing
+spacing and the Overpass gaps are all computed from `DEFAULTS` — the shipped
+tune, not the live `T`, because moving a slider must not resize the city under
+you.
+
+### The grid is the vocabulary
+
+| | width | comes from | what it is |
+|---|---|---|---|
+| alley | 8 m | `GAP.hop x 0.66` | a hop across, roof to roof |
+| avenue | 22 m | `GAP.span` | past a bare slide jump, so it costs the double too |
+| shaft | 5.5 m | see below | the only way up that is not a jump |
+
+The avenue is the load-bearing number. A bare slide jump is 22.3 m flat but only
+14.5 m onto a roof 4 m higher — and under `gaem`, whose apex is lower, it does
+not make a +4 m crossing *at all*. Every eastbound roof steps up 2-4 m, so an
+avenue always costs the double jump as well. That is what makes the two kinds of
+street two different verbs instead of two sizes of the same one.
+
+Roof heights step 2-4 m between neighbours everywhere except the Spire, and the
+verifier walks a ray across all 18 east-west crossings to measure what was
+actually built rather than what the table says. A reachability pass over all 51
+decks then confirms the roofscape is fully connected from where the Ladder puts
+you.
+
+### A wall jump does not carry as far as the numbers say
+
+The first draft sized its shafts at 7.5 m, from `wall.jumpOut` times the
+airtime: 13 x 0.59 = 7.6 m. Driving the real solver up that shaft, the character
+crossed **1.1 m** and landed on the floor.
+
+Two things were wrong, and both are worth writing down.
+
+**A wall jump keeps `wall.jumpKeepAlong` of the velocity you had along the
+wall — and `wall.stickAssist` has spent the whole run pulling that velocity
+*into* the wall.** So a good part of the outward kick is spent cancelling the
+inward pull. Measured against the solver, the honest figure is about **70%** of
+the ideal. `BOUNCE` is defined that way, and `SLOT` falls out of it:
+
+```
+SLOT = floor((BOUNCE x 0.8 + radius + detectDist + radius) x 2) / 2   ->  5.5 m
+```
+
+**And you have to steer at the far wall.** `air.redirect` rotates velocity
+toward the stick without changing its length, so holding forward after a wall
+jump quietly deletes the sideways kick and drops you down the middle of the
+shaft. That is not a quirk of this level — it is how bouncing a shaft is played —
+but a verifier autopilot that holds forward will report a working shaft as
+broken, which is exactly what happened for two rounds.
+
+### Shafts switch back, because a straight one only ever gives you one flight
+
+One chain of `wall.maxChain` bounces climbs about **5 m** — and spends about
+**25 m of forward travel** doing it, because you cannot bounce off a wall
+without also moving along it. So a straight shaft delivers exactly one stage
+however tall you build it: you run out of length long before you run out of
+height. The 26 m Ladder was reaching 6.7 m of a 16 m climb and then sailing out
+of the end.
+
+Landings at **alternating ends** fix it. Climb a flight, land (which resets
+`maxChain`), turn round, climb the next one back the other way. The shaft's
+*length* now sets the stage height and its *height* only sets how many flights
+there are. `STAGE` is `maxChain x bounce rise x 0.8` = 5 m.
+
+Same primitive twice: the Ladder is three flights of 5.3 m up to a 16 m roof,
+and the Spire's shaft — the full-depth gap between the tower and its service
+core — is six flights from the terrace to 58.
+
+### The Spire has three ways up and none of them goes all the way
+
+Balconies on three faces, one thruster tank apart (`fuelMax / burnRate x
+maxRise` = 14.3 m of climb, steps set at 65% of it so you arrive with fuel to
+spare). The shaft up the fourth. Masts on top for the grapple. The core stops at
+58 and the balconies at 68 on purpose: each route hands off to another rather
+than being a single solution.
+
+A 65 m rope does not reach the top of a 98 m tower from the street, and is not
+meant to. What the verifier checks is that from every place you can *stand* on
+the way up, the next anchor is inside `grapple.range` — so the hook is a way to
+climb the Spire, not a way to skip it.
+
+### The Chute closes the lap by arriving
+
+145 m at 24.5 degrees from the crown, on pylons, straight across the city,
+landing on the roof the Ladder tops out on. `slide.slopeAccel` beats
+`slide.friction` from 1.8 degrees, so it pins you at `momentum.hardCap` the
+whole way: the solver run reaches **46.0 of 46** on the shipped tune and **38.0
+of 38** on `gaem`, crosses the last roof and throws you off its west edge into
+the Yard.
+
+The finish ring is placed where that flight actually *puts* you — measured, at
+(-162, 18) — not where the Yard looked tidy. A finish line you have to walk back
+to is not a finish line.
+
+### What the verifier taught me that reading could not
+
+Every one of these was a real defect found by measurement, not by review:
+
+| symptom | cause |
+|---|---|
+| 5 brushes resting on nothing | a gantry beam hanging between legs it never touched; ledges that only *touched* the walls they spanned |
+| a 0.9 m bump at the top of every ramp | `over` extended ramps at **both** ends, pushing the high end proud of the deck it started from. It extends the low end only now |
+| the shaft uncrossable | the 70% bounce figure above |
+| the Ladder climbing 6.7 m of 16 | straight shafts give one flight |
+| a balcony sitting across the shaft | balconies cycled all four faces; they use three now, and the west is the shaft's |
+| the finish 22 m from where you land | never measured until it was |
+
+And two checks that were themselves wrong, which is its own lesson: probing a
+roof from 400 m up reports the Chute passing overhead as a block underfoot, and
+a single ray down a ramp's spine measures the ramp's own pylons and calls them a
+collision. A measurement that can miss what it is measuring is worse than no
+measurement, because it passes.

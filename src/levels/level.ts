@@ -5,6 +5,7 @@
 
 import type { Brush, Trigger, Level } from './types';
 import * as arena from './arena';
+import * as ashgate from './ashgate';
 import * as course01 from './course01';
 import * as figure8 from './figure8';
 
@@ -43,6 +44,15 @@ BUILTINS['arena'] = () => ({
   spawn: { ...arena.spawn },
   killY: arena.killY,
   enemies: clone(arena.enemies),
+});
+BUILTINS['ashgate'] = () => ({
+  name: 'ashgate',
+  brushes: clone(ashgate.brushes),
+  triggers: clone(ashgate.triggers),
+  spawn: { ...ashgate.spawn },
+  spawnYaw: ashgate.spawnYaw,
+  killY: ashgate.killY,
+  enemies: clone(ashgate.enemies),
 });
 BUILTINS['figure8'] = () => ({
   name: 'figure8',
@@ -99,7 +109,10 @@ export function noteTrackSaved(name: string, data: LevelData) {
   BUILTINS[name] = () => ({ ...clone(saved), name });
 }
 
-const DEFAULT_LEVEL = BUILTINS['figure8'] ? 'figure8' : 'arena';
+// Ashgate is the first level rather than a course, so it is what a fresh
+// browser opens on. Anyone who has picked a track before keeps it: boot()
+// reads the remembered name first and only falls through to this.
+const DEFAULT_LEVEL = BUILTINS['ashgate'] ? 'ashgate' : 'figure8';
 export const EDIT_STORE_KEY = 'editor.level.v1';
 /** Which level was open last. A name, not a copy of the level. */
 const EDIT_ACTIVE_KEY = 'editor.activeLevel';
