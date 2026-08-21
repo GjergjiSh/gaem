@@ -6,10 +6,22 @@
 
 import * as THREE from 'three';
 import { T } from '../core/tuning';
-import { instance, materialsOf, disposeInstance, type Instance } from './models';
+import { instance, materialsOf, disposeInstance, hitboxesOf, type Instance } from './models';
 import { level } from '../levels';
 import type { V3 } from '../core/vec';
 import type { Projectiles } from './projectiles';
+
+/**
+ * Hit volumes repeat exactly across every dummy of the same robot, so the
+ * geometry is shared. It is never disposed with a dummy for that reason —
+ * rebuilding a level would pull it out from under the others.
+ */
+const BOX_GEO = new Map<string, THREE.BoxGeometry>();
+const boxGeometry = (key: string, sx: number, sy: number, sz: number) => {
+  let g = BOX_GEO.get(key);
+  if (!g) { g = new THREE.BoxGeometry(sx, sy, sz); BOX_GEO.set(key, g); }
+  return g;
+};
 
 const BODY_COLOR = 0xb45309;
 const HEAD_COLOR = 0xfbbf24;
@@ -19,6 +31,10 @@ const FLASH = 0xff3333;
 interface Dummy {
   root: THREE.Group;
   parts: THREE.Mesh[];
+  /** The head box, for the muzzle and the reflect target. Never assume parts[0]. */
+  head: THREE.Mesh;
+  /** Chest box — where an area weapon should measure the distance to. */
+  chest: THREE.Mesh;
   /** The visible robot. Null only while its glTF is still in flight. */
   body: Instance | null;
   /** Cloned per dummy, so a hit flash tints ONE robot and not the whole map. */
@@ -48,6 +64,8 @@ export class Enemies {
   private dummies: Dummy[] = [];
   private group = new THREE.Group();
   private ray = new THREE.Raycaster();
+  /** Invalidated whenever a dummy dies or the level is rebuilt. */
+  private meshCache: THREE.Mesh[] | null = null;
 
   constructor(scene: THREE.Scene) {
     scene.add(this.group);
@@ -64,10 +82,12 @@ export class Enemies {
   rebuild(exact = false) {
     for (const d of this.dummies) {
       this.group.remove(d.root);
+      // Materials are per dummy; the geometry is shared and stays in BOX_GEO.
       for (const p of d.parts) (p.material as THREE.Material).dispose();
       if (d.body) disposeInstance(d.body.object);
     }
     this.dummies = [];
+    this.meshCache = null;
     const j = exact ? 0 : T.enemy.spawnJitter;
     for (const [x, y, z] of level.enemies ?? []) {
       this.spawn(x + (Math.random() * 2 - 1) * j, y, z + (Math.random() * 2 - 1) * j);
@@ -99,45 +119,71 @@ export class Enemies {
     const parts: THREE.Mesh[] = [];
     const idx = this.dummies.length;
     const k = T.enemy.scale;
+    const height = 1.8 * k;
 
-    const box = (part: 'head' | 'body' | 'limb', color: number,
-      sx: number, sy: number, sz: number, px: number, py: number) => {
-      const m = new THREE.Mesh(
-        new THREE.BoxGeometry(sx * k, sy * k, sz * k),
-        new THREE.MeshLambertMaterial({ color }),
-      );
-      m.position.set(px * k, py * k, 0);
+    const add = (part: 'head' | 'body' | 'limb', color: number, geo: THREE.BoxGeometry,
+      parent: THREE.Object3D, px: number, py: number, pz: number) => {
+      const m = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color }));
+      m.position.set(px, py, pz);
       m.userData.part = part;
       m.userData.enemy = idx;
-      root.add(m);
+      parent.add(m);
       parts.push(m);
+      return m;
     };
 
-    box('head', HEAD_COLOR, 0.36, 0.36, 0.36, 0, 1.62);
-    box('body', BODY_COLOR, 0.55, 0.75, 0.28, 0, 1.05);
-    box('limb', BODY_COLOR, 0.16, 0.65, 0.16, -0.4, 1.02);  // arms
-    box('limb', BODY_COLOR, 0.16, 0.65, 0.16, 0.4, 1.02);
-    box('limb', BODY_COLOR, 0.2, 0.85, 0.2, -0.15, 0.42);   // legs
-    box('limb', BODY_COLOR, 0.2, 0.85, 0.2, 0.15, 0.42);
+    // `stand` fits the robot BY HEIGHT and puts the soles of its feet on the
+    // group origin. Nothing here touches its scale or position afterwards —
+    // that is what buried them: instance() returns a group whose scale IS the
+    // fit, and setScalar replaced it, rendering each robot at 2.88x its raw
+    // glTF size (15-19 m tall) with only 1.44 m of lift under it.
+    const name = ROBOTS[idx % ROBOTS.length];
+    const robot = instance(name, { stand: height, animate: true });
+    // Grabbed BEFORE the hitboxes go on: they are children of the bones, so
+    // collecting materials afterwards would sweep up the invisible boxes and
+    // the hit flash would be tinting things nobody can see.
+    const mats = robot ? materialsOf(robot.object) : [];
+    if (robot) root.add(robot.object);
 
-    // The boxes stay: they are the hitboxes, the head/body damage split, and
-    // the raycast targets, and none of that should depend on a mesh an artist
-    // drew. They just stop being drawn. material.visible rather than
-    // object.visible, because only the former leaves raycasting alone.
-    const robot = instance(ROBOTS[idx % ROBOTS.length], { uniform: true, animate: true });
+    // Hit volumes come from the model's own skinning and hang off its bones, so
+    // they are that robot's shape and they follow it through every animation.
+    // They are still invisible boxes with `part` on them, so the damage split,
+    // the grapple scan and the editor all carry on unchanged.
     if (robot) {
-      for (const m of parts) (m.material as THREE.Material).visible = false;
-      // Fitted to a unit cube, so this scale IS the robot's height in metres,
-      // and it stands on the group origin, which is the spawn's feet position.
-      const h = 1.8 * k;
-      robot.object.scale.setScalar(h);
-      robot.object.position.y = h / 2;
-      root.add(robot.object);
+      for (const hb of hitboxesOf(name)) {
+        const bone = robot.object.getObjectByName(hb.bone);
+        if (!bone) continue;
+        const geo = boxGeometry(`${name}/${hb.bone}`, hb.size[0], hb.size[1], hb.size[2]);
+        const m = add(hb.part, hb.part === 'head' ? HEAD_COLOR : BODY_COLOR, geo, bone,
+          hb.centre[0], hb.centre[1], hb.centre[2]);
+        // Invisible, but still raycastable: material.visible, not object.visible.
+        (m.material as THREE.Material).visible = false;
+      }
     }
+
+    // No model yet — its glTF is still in flight, or the pack is missing. Fall
+    // back to the old box-person so a dummy is always shootable.
+    if (!parts.length) {
+      const box = (part: 'head' | 'body' | 'limb', color: number,
+        sx: number, sy: number, sz: number, px: number, py: number) =>
+        add(part, color, boxGeometry(`fallback/${sx}x${sy}x${sz}`, sx * k, sy * k, sz * k),
+          root, px * k, py * k, 0);
+      box('head', HEAD_COLOR, 0.36, 0.36, 0.36, 0, 1.62);
+      box('body', BODY_COLOR, 0.55, 0.75, 0.28, 0, 1.05);
+      box('limb', BODY_COLOR, 0.16, 0.65, 0.16, -0.4, 1.02);  // arms
+      box('limb', BODY_COLOR, 0.16, 0.65, 0.16, 0.4, 1.02);
+      box('limb', BODY_COLOR, 0.2, 0.85, 0.2, -0.15, 0.42);   // legs
+      box('limb', BODY_COLOR, 0.2, 0.85, 0.2, 0.15, 0.42);
+    }
+
+    // Named references, because the part order now depends on the rig. parts[0]
+    // used to be the head by construction and silently stopped being one.
+    const head = parts.find((m) => m.userData.part === 'head') ?? parts[0];
+    const chest = parts.find((m) => m.userData.part === 'body') ?? head;
 
     this.group.add(root);
     this.dummies.push({
-      root, parts, body: robot, mats: robot ? materialsOf(robot.object) : [],
+      root, parts, head, chest, body: robot, mats,
       action: '',
       hp: T.weapon.enemyHp, alive: true, fallT: 0, flashT: 0,
       // Random initial delay so a fresh lap doesn't greet you with one volley.
@@ -165,11 +211,19 @@ export class Enemies {
     d.action = name;
   }
 
-  /** Every hittable mesh of every living dummy — raycast targets. */
+  /**
+   * Every hittable mesh of every living dummy — raycast targets.
+   *
+   * Cached, because a bone-derived rig carries 11-17 boxes instead of 6 and
+   * this is read once per projectile per frame, plus once per pierce pass.
+   * Rebuilding the array each time was affordable at 6; it is not free at 17.
+   */
   get aliveMeshes(): THREE.Mesh[] {
-    const out: THREE.Mesh[] = [];
-    for (const d of this.dummies) if (d.alive) out.push(...d.parts);
-    return out;
+    if (!this.meshCache) {
+      this.meshCache = [];
+      for (const d of this.dummies) if (d.alive) this.meshCache.push(...d.parts);
+    }
+    return this.meshCache;
   }
 
   get total() { return this.dummies.length; }
@@ -179,7 +233,7 @@ export class Enemies {
   headPosition(idx: number): THREE.Vector3 | null {
     const d = this.dummies[idx];
     if (!d || !d.alive) return null;
-    return d.parts[0].getWorldPosition(new THREE.Vector3());
+    return d.head.getWorldPosition(new THREE.Vector3());
   }
 
   /** Is this dummy still up? */
@@ -230,10 +284,10 @@ export class Enemies {
     const out: { idx: number; pos: THREE.Vector3 }[] = [];
     this.dummies.forEach((d, idx) => {
       if (!d.alive) return;
-      d.root.updateMatrixWorld();
-      // Chest height. `root` sits at the feet, and a dummy is 1.8 m before the
-      // scale slider, so half of that is the middle of the body.
-      out.push({ idx, pos: d.root.position.clone().setY(d.root.position.y + 0.9 * T.enemy.scale) });
+      // The chest box itself, so a blast measures to where the robot actually
+      // is rather than to an assumed height above its feet.
+      d.root.updateMatrixWorld(true);
+      out.push({ idx, pos: d.chest.getWorldPosition(new THREE.Vector3()) });
     });
     return out;
   }
@@ -266,6 +320,7 @@ export class Enemies {
     const killed = d.hp <= 0;
     if (killed) {
       d.alive = false;
+      this.meshCache = null;
       for (const p of d.parts) {
         (p.material as THREE.MeshLambertMaterial).color.setHex(DEAD_COLOR);
       }
@@ -309,7 +364,7 @@ export class Enemies {
 
       d.fireT -= dt;
       if (d.fireT > 0) continue;
-      const muzzle = d.parts[0].getWorldPosition(new THREE.Vector3());
+      const muzzle = d.head.getWorldPosition(new THREE.Vector3());
       const dist = muzzle.distanceTo(target);
       if (dist > T.enemy.range) continue;
 

@@ -33,7 +33,31 @@ interface Loaded {
   scene: THREE.Object3D;          // already fitted to unit space
   clips: THREE.AnimationClip[];
   skinned: boolean;
+  /** Derived on first use — see hitboxesOf. */
+  boxes?: HitBox[];
 }
+
+/**
+ * One hit volume, in the local space of the bone that carries it. Parented to
+ * that bone it follows the animation for free, at no per-frame cost.
+ */
+export interface HitBox {
+  bone: string;
+  part: 'head' | 'body' | 'limb';
+  centre: [number, number, number];
+  size: [number, number, number];
+}
+
+/**
+ * Joints worth putting a hit volume on. Everything else — fingers, toes, IK
+ * poles — folds into its nearest anchor ancestor, so the boxes still cover
+ * every vertex without one box per knuckle.
+ */
+const ANCHOR =
+  /^(Head|Chest|Torso|Body|UpperArm[LR]|LowerArm[LR]|UpperLeg[LR]|MidLeg[LR]|LowerLeg[LR]|Foot[A-Za-z]*[LR])$/;
+
+const partForBone = (n: string): HitBox['part'] =>
+  (/^Head$/.test(n) ? 'head' : /^(Chest|Torso|Body)$/.test(n) ? 'body' : 'limb');
 
 const loader = new GLTFLoader();
 const cache = new Map<string, Loaded>();
@@ -79,6 +103,107 @@ function fitUnit(obj: THREE.Object3D, uniform = false, ground = false) {
     inner.position.y = -0.5;
   }
   return inner;
+}
+
+/**
+ * Scale a model so it stands `height` metres tall ON the group's origin.
+ *
+ * The unit-cube fit is wrong for a character twice over. It normalises the
+ * LARGEST axis, and three of the four robots are wider than they are tall with
+ * their arms out, so "1.8 metres" would have produced four different heights.
+ * And it centres the model, which leaves the caller to work out where the feet
+ * went — the caller did, got it wrong, and buried them.
+ *
+ * Here the returned group's origin IS the soles of the feet, so placing a
+ * character is `position.set(...)` and nothing else.
+ */
+function fitStanding(obj: THREE.Object3D, height: number) {
+  obj.updateMatrixWorld(true);
+  // `precise` walks the skinned vertex positions. The cheap path takes the
+  // mesh's cached local AABB and transforms it, which for a posed skeleton is
+  // a conservative box and left the four robots 2% different in height. One
+  // vertex loop per dummy at spawn is a fair price for the number being right.
+  const box = new THREE.Box3().setFromObject(obj, true);
+  const size = box.getSize(new THREE.Vector3());
+  const centre = box.getCenter(new THREE.Vector3());
+
+  const inner = new THREE.Group();
+  inner.add(obj);
+  inner.scale.setScalar(size.y > 1e-6 ? height / size.y : 1);
+  // Centred across, standing on the floor.
+  obj.position.x -= centre.x;
+  obj.position.z -= centre.z;
+  obj.position.y -= box.min.y;
+  return inner;
+}
+
+/**
+ * Hit volumes for a rigged model, derived from the mesh itself.
+ *
+ * Every skinned vertex is assigned to the bone that moves it most, that bone is
+ * walked up to its nearest anchor, and the anchor's vertices are measured in
+ * that bone's own space. The result wraps the actual geometry, so it is right
+ * for a robot with no arms and for one with fingers, without a table of
+ * proportions that is a guess for all four.
+ *
+ * Measured, this covers 100% of the vertices of all four robots and reproduces
+ * each model's bounding box exactly.
+ */
+export function hitboxesOf(name: string): HitBox[] {
+  const got = cache.get(name);
+  if (!got) return [];
+  if (got.boxes) return got.boxes;
+
+  const bounds = new Map<string, THREE.Box3>();
+  const v = new THREE.Vector3();
+  got.scene.traverse((o) => {
+    const mesh = o as THREE.SkinnedMesh;
+    if (!mesh.isSkinnedMesh) return;
+    const pos = mesh.geometry.attributes.position;
+    const si = mesh.geometry.attributes.skinIndex;
+    const sw = mesh.geometry.attributes.skinWeight;
+    if (!si || !sw) return;
+    const sk = mesh.skeleton;
+
+    for (let i = 0; i < pos.count; i++) {
+      let bi = si.getX(i);
+      let bw = sw.getX(i);
+      if (sw.getY(i) > bw) { bw = sw.getY(i); bi = si.getY(i); }
+      if (sw.getZ(i) > bw) { bw = sw.getZ(i); bi = si.getZ(i); }
+      if (sw.getW(i) > bw) { bw = sw.getW(i); bi = si.getW(i); }
+
+      let anchor: THREE.Object3D | null = sk.bones[bi];
+      while (anchor && !ANCHOR.test(anchor.name)) {
+        anchor = anchor.parent && (anchor.parent as THREE.Bone).isBone ? anchor.parent : null;
+      }
+      if (!anchor) continue;
+      const ai = sk.bones.indexOf(anchor as THREE.Bone);
+      if (ai < 0) continue;
+
+      // Into that bone's frame: the inverse bind matrix is exactly the transform
+      // skinning would apply, so the box lands where the geometry actually is.
+      v.fromBufferAttribute(pos, i)
+        .applyMatrix4(mesh.bindMatrix)
+        .applyMatrix4(sk.boneInverses[ai]);
+      let b = bounds.get(anchor.name);
+      if (!b) { b = new THREE.Box3(); bounds.set(anchor.name, b); }
+      b.expandByPoint(v);
+    }
+  });
+
+  const centre = new THREE.Vector3();
+  const size = new THREE.Vector3();
+  got.boxes = [...bounds].map(([bone, b]) => {
+    b.getCenter(centre);
+    b.getSize(size);
+    return {
+      bone,
+      part: partForBone(bone),
+      centre: [centre.x, centre.y, centre.z] as [number, number, number],
+      size: [size.x, size.y, size.z] as [number, number, number],
+    };
+  });
+  return got.boxes;
 }
 
 async function load(name: string): Promise<Loaded | null> {
@@ -131,7 +256,13 @@ export interface Instance {
  */
 export function instance(
   name: string,
-  opts: { uniform?: boolean; ground?: boolean; animate?: boolean } = {},
+  opts: {
+    uniform?: boolean;
+    ground?: boolean;
+    animate?: boolean;
+    /** Metres tall, standing on the returned group's origin. Wins over `uniform`. */
+    stand?: number;
+  } = {},
 ): Instance | null {
   const got = cache.get(name);
   if (!got) return null;
@@ -149,7 +280,9 @@ export function instance(
     mesh.material = Array.isArray(mat) ? mat.map((m) => m.clone()) : (mat as THREE.Material).clone();
   });
 
-  const object = fitUnit(copy, opts.uniform ?? false, opts.ground ?? false);
+  const object = opts.stand !== undefined
+    ? fitStanding(copy, opts.stand)
+    : fitUnit(copy, opts.uniform ?? false, opts.ground ?? false);
   const mixer = opts.animate && got.clips.length ? new THREE.AnimationMixer(copy) : null;
   return { object, clips: got.clips, mixer };
 }

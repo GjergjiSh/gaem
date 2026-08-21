@@ -2293,3 +2293,101 @@ per dummy. The obvious `aliveMeshes` is per body PART — an explosion would hav
 found the same dummy five times and hit it five times over, and the head among
 those parts would have quietly applied the headshot multiplier to splash damage.
 Area weapons deal body damage, flat: fire has no head to find.
+
+---
+
+## 29. Robots that stand on the floor, and boxes that are on them
+
+Two bugs, one cause each, and neither was where it looked.
+
+### Buried: a fit that was thrown away
+
+`instance()` returns a group **whose scale is the fit**. The spawn code then did:
+
+```ts
+robot.object.scale.setScalar(h);     // replaces the fit
+robot.object.position.y = h / 2;
+```
+
+`setScalar` does not compose, it overwrites. So each robot rendered at 2.88x
+its *raw glTF size* — 15 to 19 metres tall — centred on its own middle and
+lifted only 1.44 m. Six to eight metres of robot ended up under the deck.
+
+The spawn point was never wrong: measured, all eight loop-course spawns sit
+exactly on their platform surface, gap 0.000.
+
+The fix is not a corrected multiply. Unit-cube fitting is the wrong tool for a
+character twice over:
+
+- It normalises the **largest** axis, and three of the four robots are wider
+  than they are tall with their arms out (George 7.26 x 6.53, Mike 8.54 x 5.34,
+  Stan 8.55 x 6.46 in bind pose). "1.8 metres" would have produced four
+  different heights.
+- It **centres** the model, which leaves the caller to work out where the feet
+  went. The caller did, and got it wrong.
+
+So `fitStanding(obj, height)` normalises on height and returns a group whose
+origin *is* the soles of the feet. Placing a character is `position.set(...)`
+and nothing else — there is no second step left to get wrong. It measures with
+`Box3.setFromObject(obj, precise)`, which walks the posed vertices; the cheap
+path transforms a cached local AABB and left the four robots 2% apart.
+
+### Misaligned: hitboxes that were a guess
+
+The boxes were a hardcoded 1.8 m humanoid — head at y=1.62, arms at +/-0.4 —
+scaled by `enemy.scale`. That is a fair description of no robot in the pack.
+Leela has digitigrade legs and no arms at all; George has fingers. And the boxes
+were bolted to `root`, so they sat still while the robot moved.
+
+Hit volumes are now **derived from the mesh and parented to the bones**. Every
+skinned vertex is assigned to the bone that moves it most, that bone is walked
+up to its nearest anchor joint, and the anchor's vertices are measured in that
+bone's own space with the inverse bind matrix. Attached to the bone, a box
+follows the animation at zero per-frame cost — no update loop, no syncing.
+
+That gives 11 boxes for Mike and Stan, 13 for Leela, 17 for George: each robot's
+own shape, from its own geometry, with no table of proportions anywhere.
+
+### Verified, all four, in motion
+
+`node tools/verify-enemies.mjs` compiles the real `models.ts`, serves the real
+glTFs, mirrors the ten lines of `Enemies.spawn`, and asserts:
+
+| | George | Leela | Mike | Stan |
+|---|---|---|---|---|
+| feet above deck, rest | 0.0000 m | 0.0000 m | 0.0000 m | 0.0000 m |
+| height (want 2.88) | 2.8800 | 2.8800 | 2.8800 | 2.8800 |
+| feet, worst over Idle/Shoot/Hit | 0.049 | 0.063 | 0.004 | 0.001 |
+| mesh inside a hitbox, worst pose | 97.5% | 99.9% | 97.5% | 97.7% |
+| **head mesh inside the head box** | **100%** | **100%** | **100%** | **100%** |
+
+The residual 2.5% is fingers, which fold into the forearm box and swing out of
+it at the wrist. Anchoring the palms would recover it and would nearly double
+the raycast targets to make fingertips shootable; that is a bad trade, and the
+number that mattered — the head — is exact.
+
+Two traps the harness fell into first, both worth remembering. The hitboxes are
+children of the bones, so measuring "the model" by traversing the robot counts
+the hitboxes as part of it and the comparison silently goes circular; they have
+to be detached for the measurement. And comparing union AABBs is dominated by
+fingertips and says almost nothing about hitting a torso — the honest metric is
+what share of the visible vertices lie inside some volume.
+
+### What did not change
+
+Enemy hit volumes have never been physics. `physics.ts` builds the world from
+`level.brushes` and only from those; it does not mention enemies. Level
+collision and player movement are untouched by all of this.
+
+Everything downstream still addresses the boxes the same way: `userData.part`
+carries the head/body/limb split (exactly one head, two body, the rest limbs),
+`userData.enemy` carries the index the grapple's `hookScan` and the editor's
+picking both read, and `rootOf` still hands the editor the same `root` for its
+gizmo. Two things got less fragile on the way past: `parts[0]` was the head by
+construction and would have quietly stopped being one, so the muzzle and the
+reflect target now use a named `head`; and area weapons measure to the chest box
+itself rather than to an assumed height above the feet.
+
+`aliveMeshes` is now cached and invalidated on death or rebuild — it is read
+once per projectile per frame plus once per pierce pass, and rebuilding it was
+affordable at 6 boxes but is not free at 17.

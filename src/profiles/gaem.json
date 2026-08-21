@@ -76,16 +76,21 @@
     "pellets": 11,
     "projSpeed": 96
   },
+  "flamer": {
+    "cone": 0.53,
+    "puffSize": 0.25,
+    "puffGrow": 2
+  },
   "sam": {
     "cycle": 1.9000000000000001,
     "burst": 12,
     "paint": 2,
     "speed": 97,
-    "wander": 440,
+    "wander": 300,
     "shoulder": 1.5
   },
   "enemy": {
-    "scale": 1
+    "scale": 2.1
   },
   "sword": {
     "reach": 5.855512699000499
