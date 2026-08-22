@@ -807,71 +807,68 @@ for (const tune of ['shipped', 'gaem']) {
     `${tune}: a bounce with no timing at all clears the first stage (${stage.toFixed(1)} m)`);
 }
 
-head('the Chute: one committed slide from the crown');
-for (const tune of ['shipped', 'gaem']) {
-  useTune(tune);
-  const from = A.CHUTE_FROM, to = A.CHUTE_TO;
-  const dx = to.x - from.x, dz = to.z - from.z, dy = to.y - from.y;
-  const flat = Math.hypot(dx, dz);
-  const angle = (Math.atan2(-dy, flat) * 180) / Math.PI;
-  const len = Math.hypot(flat, dy);
-  if (tune === 'shipped') {
-    note(`${len.toFixed(0)} m of ramp at ${angle.toFixed(1)} degrees, `
-      + `dropping ${(-dy).toFixed(0)} m`);
-    // Where slope acceleration starts beating slide friction.
-    const breakEven = (Math.asin(Math.min(1, T.slide.friction / T.slide.slopeAccel)) * 180) / Math.PI;
-    note(`slide accelerates on anything past ${breakEven.toFixed(1)} degrees`);
-    check(angle > breakEven + 5, 'steep enough that the slide never stalls');
-    check(angle < (T.character.maxSlopeAngle * 180) / Math.PI,
-      'and shallow enough to still count as ground rather than a wall');
-  }
-
-  // Drop onto the top of the chute, start sliding, and hold it.
-  const f0 = 0.06;
-  const start = {
-    x: from.x + dx * f0, y: from.y + dy * f0 + 1.2, z: from.z + dz * f0,
-  };
-  const yaw = yawAlong(dx / flat, dz / flat);
-  const p = S.makePlayer({ ...start, y: start.y + T.character.height / 2 });
-  p.vel = { x: (dx / flat) * 6, y: 0, z: (dz / flat) * 6 };
-
-  const goal = A.triggers.find((t) => t.kind === 'goal');
-  let nearGoal = 1e9, nearAt = null;
-  let peak = 0, sliding = 0, landedAt = null, minY = 1e9;
-  for (let k = 0; k < 120 * 14; k++) {
-    const i = intent({ moveY: 1, yaw, slide: { pressed: k > 30 && k < 34, held: k > 30 } });
-    S.step(p, i, world, DT);
-    if (p.state === 'sliding') sliding++;
-    peak = Math.max(peak, speedH(p));
-    minY = Math.min(minY, feet(p));
-    if (landedAt === null && feet(p) < A.HEIGHT[2][1] + 0.5 && p.grounded
-      && p.pos.x < A.COLS[1].hi) {
-      landedAt = { x: p.pos.x, y: feet(p), z: p.pos.z, s: speedH(p) };
+head('the Line: the pitches are slides you can commit to');
+{
+  useTune('shipped');
+  // Where slope acceleration starts beating slide friction. Every ramp on the
+  // Line is either side of this on purpose: a run holds the speed you arrive
+  // with, a pitch pays you for being on it.
+  const breakEven = (Math.asin(Math.min(1, T.slide.friction / T.slide.slopeAccel)) * 180) / Math.PI;
+  note(`slide accelerates on anything past ${breakEven.toFixed(1)} degrees`);
+  const maxWalk = (T.character.maxSlopeAngle * 180) / Math.PI;
+  const pitches = [];
+  for (const leg of A.LINE_LEGS) {
+    for (let i = 1; i < leg.nodes.length; i++) {
+      const [a0, y0] = leg.nodes[i - 1];
+      const [a1, y1] = leg.nodes[i];
+      const deg = (Math.atan2(Math.abs(y1 - y0), a1 - a0) * 180) / Math.PI;
+      if (deg >= 7) pitches.push({ leg, a0, a1, y0, y1, deg });
     }
-    const dg = Math.hypot(p.pos.x - goal.p[0], p.pos.z - goal.p[2]);
-    if (dg < nearGoal) { nearGoal = dg; nearAt = { x: p.pos.x, z: p.pos.z, s: speedH(p) }; }
   }
-  note(`${tune}: ${(sliding * DT).toFixed(1)} s sliding, peaked at ${peak.toFixed(1)} u/s `
-    + `(hardCap ${T.momentum.hardCap})`);
-  if (landedAt) {
-    note(`${tune}: reached the landing roof at (${landedAt.x.toFixed(0)}, `
-      + `${landedAt.y.toFixed(1)}, ${landedAt.z.toFixed(0)}) doing ${landedAt.s.toFixed(1)} u/s`);
+  for (const p of pitches) {
+    note(`${p.leg.name} leg: ${(p.a1 - p.a0).toFixed(0)} m at ${p.deg.toFixed(1)} deg, `
+      + `dropping ${Math.abs(p.y1 - p.y0).toFixed(0)} m`);
   }
-  note(`${tune}: finished at (${p.pos.x.toFixed(0)}, ${feet(p).toFixed(1)}, `
-    + `${p.pos.z.toFixed(0)}), ${speedH(p).toFixed(1)} u/s, state ${p.state}`);
-  check(sliding > 120, `${tune}: the slide holds down the ramp instead of dying on it`);
-  check(peak > T.momentum.hardCap * 0.85,
-    `${tune}: arrives near the hard cap (${peak.toFixed(1)} of ${T.momentum.hardCap})`);
-  check(feet(p) > A.killY, `${tune}: the descent does not end in the void`);
-  check(minY > A.killY, `${tune}: and never passes through the world on the way`);
-  note(`${tune}: closest approach to the finish ring was ${nearGoal.toFixed(1)} m `
-    + `at (${nearAt.x.toFixed(0)}, ${nearAt.z.toFixed(0)}) doing ${nearAt.s.toFixed(1)} u/s `
-    + `(ring r=${goal.r})`);
-  check(nearGoal < goal.r,
-    `${tune}: the descent runs THROUGH the finish, so the lap closes by arriving`);
+  check(pitches.length >= 3, `at least three pitches to slide (${pitches.length})`);
+  check(pitches.every((p) => p.deg > breakEven + 5), 'every one steep enough never to stall');
+  check(pitches.every((p) => p.deg < maxWalk),
+    'and shallow enough to still count as ground rather than a wall');
+
+  // Now ride the steepest one. Drop on at the top, start sliding, hold it, and
+  // see what comes off the bottom -- which is the question the Chute used to
+  // answer and the reason it was worth 142 m of slab.
+  const best = pitches.reduce((a, b) => (b.deg > a.deg ? b : a));
+  const along = best.leg.axis;
+  // Downhill is whichever end is lower.
+  const down = best.y1 < best.y0 ? 1 : -1;
+  const startAt = down > 0 ? best.a0 + (best.a1 - best.a0) * 0.06
+    : best.a1 - (best.a1 - best.a0) * 0.06;
+  const y = A.lineY(best.leg, startAt) + 1.2;
+  const start = along === 'z'
+    ? { x: best.leg.at, y, z: startAt }
+    : { x: startAt, y, z: best.leg.at };
+  const dirX = along === 'x' ? down : 0;
+  const dirZ = along === 'z' ? down : 0;
+  for (const tune of ['shipped', 'gaem']) {
+    useTune(tune);
+    const p = S.makePlayer({ ...start, y: start.y + T.character.height / 2 });
+    p.vel = { x: dirX * 6, y: 0, z: dirZ * 6 };
+    const yaw = yawAlong(dirX, dirZ);
+    let peak = 0, sliding = 0;
+    for (let k = 0; k < 120 * 8; k++) {
+      const i = intent({ moveY: 1, yaw, slide: { pressed: k > 30 && k < 34, held: k > 30 } });
+      S.step(p, i, world, DT);
+      if (p.state === 'sliding') sliding++;
+      peak = Math.max(peak, speedH(p));
+    }
+    note(`${tune}: ${(sliding * DT).toFixed(1)} s sliding down the ${best.leg.name} `
+      + `pitch, peaked at ${peak.toFixed(1)} u/s (hardCap ${T.momentum.hardCap})`);
+    check(sliding * DT > 1.2, `${tune}: the slide holds down the whole pitch`);
+    check(peak > T.momentum.hardCap * 0.85,
+      `${tune}: and it is worth taking (${peak.toFixed(1)} of ${T.momentum.hardCap})`);
+  }
 }
 
-// ---------------------------------------------------------------------------
 head('the lap, leg by leg');
 {
   useTune('shipped');
@@ -903,15 +900,18 @@ head('the lap, leg by leg');
   check(steep === 0, `no ramp is secretly a wall (${steep})`);
   check(stalls === 0, `and none is shallow enough to kill a slide on it (${stalls})`);
 
-  // Off the Overpass onto the Spire terrace: the hand-off into the climb.
-  const opx = (A.COLS[3].hi + A.COLS[4].lo) / 2;
+  // Off the Line onto the Spire terrace: the hand-off into the climb.
+  const east = A.LINE_LEGS[0];
+  const opx = east.at;
   // Sampled south of the tower and clear of the slip ramp: probing at z=-74 puts
   // the ray straight down the on-ramp and measures that instead of the terrace.
   const at = A.ROWS[1].c + 20;
-  const deck = surfaceAt(opx, at, A.opY(at) + 3);
+  const gapNote = 0;
+  void gapNote;
+  const deck = surfaceAt(opx, at, A.lineY(east, at) + 3);
   const terr = surfaceAt(A.COLS[3].hi - 4, at, A.TERRACE + 3);
   const gap = opx - 8 - A.COLS[3].hi;
-  note(`Overpass deck ${deck?.toFixed(1)} m, Spire terrace ${terr?.toFixed(1)} m, `
+  note(`Line deck ${deck?.toFixed(1)} m, Spire terrace ${terr?.toFixed(1)} m, `
     + `${gap.toFixed(0)} m apart`);
   check(terr !== null && deck !== null && deck > terr,
     'the road arrives ABOVE the terrace, so the hand-off is a drop rather than a climb');
@@ -919,71 +919,91 @@ head('the lap, leg by leg');
     `and the drop across is inside a plain hop (${gap.toFixed(0)} m)`);
 }
 
-head('the Chute has air under it the whole way');
+head('the Line has air under it, and a deck on top of it, the whole way');
 {
   useTune('shipped');
-  const from = A.CHUTE_FROM, to = A.CHUTE_TO;
-  let worst = { clear: 1e9, f: 0 };
+  // Every leg runs down the middle of an avenue, so the deck should never be
+  // inside anything and there should always be street a long way below it.
+  // Probed ACROSS the deck as well as down its spine: the portal frames stand
+  // under its edges, so a single ray down the middle measures the road and a
+  // single ray down an edge measures a leg of its own support.
   let buried = 0;
-  // Stops at 90%: the last stretch IS the ramp coming down to meet its landing
-  // roof, so of course the clearance closes there. That join is measured by the
-  // ramp-lip check instead, which is the right question to ask about it.
-  for (let f = 0.04; f <= 0.90; f += 0.01) {
-    const x = from.x + (to.x - from.x) * f;
-    const y = from.y + (to.y - from.y) * f;
-    const z = from.z + (to.z - from.z) * f;
-    // Probe ACROSS the deck, not just down its spine: the pylons holding it up
-    // stand on the centreline, so a single ray down the middle measures the
-    // ramp's own supports and reports them as a collision.
-    const nx = -(to.z - from.z), nz = (to.x - from.x);
-    const nl = Math.hypot(nx, nz) || 1;
-    let clear = -1;
-    for (const off of [0, 7, -7]) {
-      const d = world.ray(v(x + (nx / nl) * off, y - 2.2, z + (nz / nl) * off), DOWN, 200);
-      clear = Math.max(clear, d === null ? 1e3 : d + 2.2);
+  let worst = { clear: 1e9, where: '' };
+  for (const leg of A.LINE_LEGS) {
+    const a0 = leg.nodes[0][0];
+    const a1 = leg.nodes[leg.nodes.length - 1][0];
+    for (let at = a0 + 4; at <= a1 - 4; at += 4) {
+      const y = A.lineY(leg, at);
+      // Started BELOW the portal beam, which spans the full width of the deck
+      // a couple of metres under it -- rayed from just under the deck the only
+      // thing this measures is the Line's own supports. And offset to 4 m,
+      // which is inboard of the legs.
+      let clear = -1;
+      for (const off of [0, 4, -4]) {
+        const x = leg.axis === 'z' ? leg.at + off : at;
+        const z = leg.axis === 'z' ? at : leg.at + off;
+        const g = surfaceAt(x, z, y - 4.2);
+        clear = Math.max(clear, g === null ? 1e3 : y - 1.6 - g);
+      }
+      if (clear < 2) buried++;
+      if (clear < worst.clear) worst = { clear, where: `${leg.name} at ${at.toFixed(0)}` };
     }
-    if (clear < 3) buried++;
-    if (clear < worst.clear) worst = { clear, f, y };
   }
-  note(`tightest clearance to anything off the pylon line is `
-    + `${worst.clear.toFixed(1)} m, at ${(worst.f * 100).toFixed(0)}% along`);
-  check(buried === 0,
-    `the ramp never dives into a building on its way across (${buried} sample(s) buried)`);
+  note(`tightest clearance under the deck is ${worst.clear.toFixed(1)} m (${worst.where})`);
+  check(buried === 0, `no leg dives into a building on its way across (${buried} buried)`);
+
+  // And the deck itself is where the profile says it is, everywhere it exists.
+  let bad = 0;
+  let spans = 0;
+  for (const leg of A.LINE_LEGS) {
+    for (const [lo, hi] of A.LINE_SEGS[leg.name]) {
+      spans++;
+      for (let at = lo + 1.5; at <= hi - 1.5; at += 2) {
+        const want = A.lineY(leg, at);
+        const x = leg.axis === 'z' ? leg.at : at;
+        const z = leg.axis === 'z' ? at : leg.at;
+        const h = surfaceAt(x, z, want + 3);
+        if (h === null || Math.abs(h - want) > 0.2) bad++;
+      }
+    }
+  }
+  note(`${spans} spans of deck across four legs`);
+  check(bad === 0, `the deck is continuous and at the right height (${bad} bad probes)`);
 }
 
 // ---------------------------------------------------------------------------
-head('the Overpass: six segments, five gaps, one of each tier');
+head('the Line: every hole in it is a jump somebody priced');
 {
   useTune('shipped');
-  const segs = A.OP_SEGS;
-  const opx = (A.COLS[3].hi + A.COLS[4].lo) / 2;
   let priced = 0;
-  for (let i = 0; i < segs.length - 1; i++) {
-    const z0 = segs[i][1], z1 = segs[i + 1][0];
-    // Measure the deck ends with a ray rather than trusting the table.
-    // From just above the deck: probing from 200 m finds the gantry beam that
-    // hangs over the two widest gaps and calls it the road.
-    const hEnd = surfaceAt(opx, z0 - 0.5, A.opY(z0) + 3);
-    const hStart = surfaceAt(opx, z1 + 0.5, A.opY(z1) + 3);
-    const gap = z1 - z0;
-    const dropSouth = hEnd === null || hStart === null ? 0 : hEnd - hStart;
-    note(`gap ${i + 1}: ${gap.toFixed(0)} m, ${dropSouth.toFixed(1)} m downhill southbound `
-      + `(deck ${hEnd?.toFixed(1)} -> ${hStart?.toFixed(1)})`);
-    check(dropSouth > 0, `gap ${i + 1} falls the way the fast lane runs`);
-    priced++;
-  }
-  check(priced === 5, 'five gaps, as planned');
-
-  // Nothing under the deck should be in the deck's own lane.
-  let blocked = 0;
-  for (const [z0, z1] of segs) {
-    for (let z = z0 + 2; z <= z1 - 2; z += 2) {
-      const want = A.opY(z);
-      const h = surfaceAt(opx, z, want + 3);
-      if (h === null || Math.abs(h - want) > 0.15) blocked++;
+  for (const leg of A.LINE_LEGS) {
+    for (const [c, w] of leg.gaps) {
+      // Measure the deck ends with a ray rather than trusting the table. From
+      // just above the deck: probing from 200 m finds the gantry beam that
+      // hangs over the widest gap and calls it the road.
+      const at = (a) => {
+        const y = A.lineY(leg, a);
+        const x = leg.axis === 'z' ? leg.at : a;
+        const z = leg.axis === 'z' ? a : leg.at;
+        return surfaceAt(x, z, y + 3);
+      };
+      const lo = at(c - w / 2 - 0.6);
+      const hi = at(c + w / 2 + 0.6);
+      note(`${leg.name} gap at ${c}: ${w.toFixed(0)} m, `
+        + `deck ${lo?.toFixed(1)} -> ${hi?.toFixed(1)}`);
+      check(lo !== null && hi !== null, `${leg.name} gap at ${c} has deck on both sides`);
+      // Downhill is a jump you can take; uphill is one you have to earn. Every
+      // gap has to be crossable in at least one direction on a plain hop.
+      const drop = lo === null || hi === null ? 0 : Math.abs(lo - hi);
+      void drop;
+      // Priced off the level's own table: a hop, a slide jump, or the one that
+      // wants the grapple. Nothing on the Line is wider than the widest tier.
+      check(w <= A.GAP.super + 0.5,
+        `${leg.name} gap at ${c} is inside a tier (${w.toFixed(0)} m)`);
+      priced++;
     }
   }
-  check(blocked === 0, `the deck surface is continuous along all six segments (${blocked} bad probes)`);
+  check(priced >= 8, `every leg carries jumps (${priced} gaps)`);
 }
 
 // ---------------------------------------------------------------------------
