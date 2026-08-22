@@ -286,7 +286,15 @@ function shareTextures(gltf: { scene: THREE.Object3D; parser: any }) {
     const uri = json.images?.[src]?.uri;
     // Embedded images are per-file by definition and their URI is the whole
     // payload, so there is nothing to share and nothing worth keying on.
-    return typeof uri === 'string' && !uri.startsWith('data:') ? uri : null;
+    if (typeof uri !== 'string' || uri.startsWith('data:')) return null;
+    // Keyed on the BASENAME, not the path as written. Three packs reference the
+    // same kind of file three different ways -- `T_X.png`, `Textures/T_X.png`,
+    // `../Textures/T_X.png` -- and the loader already resolves all of them to
+    // one file by basename, so keying on the raw string is a cache that misses
+    // on a difference that does not exist. It showed up as 542 live textures
+    // for about ninety files: every extra copy is video memory and a bind the
+    // renderer has to make.
+    return decodeURIComponent(uri).split('/').pop() ?? null;
   };
   gltf.scene.traverse((o) => {
     const mesh = o as THREE.Mesh;
@@ -356,9 +364,17 @@ export interface Instance {
 /**
  * A fresh copy, fitted to the unit cube and ready to be parented to anything.
  *
- * Materials are cloned per instance. glTF shares one material across every copy
- * of a model, so tinting a single dummy red on a hit would flash the whole map
- * — the same trap as sharing a geometry, one level up.
+ * Materials are cloned per instance by default. glTF shares one material across
+ * every copy of a model, so tinting a single dummy red on a hit would flash the
+ * whole map — the same trap as sharing a geometry, one level up.
+ *
+ * `share` opts out, and a level's scenery wants it. Cloning is what makes a
+ * prop expensive to DRAW: every clone is a distinct material, so every prop is
+ * a program switch and four or five texture binds that the renderer cannot
+ * batch away. Measured on Ashgate, 791 shared-geometry props with cloned
+ * materials cost about 14 ms a frame on their own — more than the entire rest
+ * of the city — and sharing them back is most of that time returned. Nothing
+ * tints a lamppost, so nothing pays for the ability to.
  */
 export function instance(
   name: string,
@@ -368,6 +384,12 @@ export function instance(
     animate?: boolean;
     /** Metres tall, standing on the returned group's origin. Wins over `uniform`. */
     stand?: number;
+    /**
+     * Reuse the cached materials instead of cloning them. Only for objects
+     * nothing will ever tint — and note that `disposeInstance` must not be
+     * called on one, because the materials are not its to free.
+     */
+    share?: boolean;
   } = {},
 ): Instance | null {
   const got = cache.get(name);
@@ -382,6 +404,7 @@ export function instance(
     if (!mesh.isMesh) return;
     mesh.castShadow = false;
     mesh.receiveShadow = false;
+    if (opts.share) return;
     const mat = mesh.material;
     mesh.material = Array.isArray(mat) ? mat.map((m) => m.clone()) : (mat as THREE.Material).clone();
   });

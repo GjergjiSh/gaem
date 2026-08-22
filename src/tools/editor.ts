@@ -47,7 +47,6 @@ import { MODEL_NAMES, warm } from '../engine/models';
 import type { V3 } from '../core/vec';
 
 const BRUSH_COLOR = 0x8b5cf6;
-const HILITE = 0x2a3550;
 /** Editor fly speed, metres/sec. Shift multiplies it. */
 const FLY_SPEED = 34;
 const FLY_FAST = 4;
@@ -221,6 +220,11 @@ export class Editor {
   enter() {
     this.active = true;
     document.body.classList.add('editing');
+    // Wireframes on. In play they are a second draw call per brush for an
+    // outline you cannot see on a textured wall; in here they are the only
+    // thing that shows where a collider is when a model is sitting over it.
+    this.gfx.edges = true;
+    this.gfx.buildLevel();
     document.exitPointerLock?.();
     // Drop focus out of whatever it was in. Every key here is gated on
     // typingInAField, so opening the editor straight from a tuning slider would
@@ -245,6 +249,8 @@ export class Editor {
   exit() {
     this.active = false;
     document.body.classList.remove('editing');
+    this.gfx.edges = false;
+    this.gfx.buildLevel();
     this.toolbar.style.display = 'none';
     // F2 mid-drag: the rectangle would otherwise stay painted over the game.
     if (this.marquee) this.endMarquee();
@@ -445,8 +451,11 @@ export class Editor {
 
   private highlight(kind: Sel['kind'], index: number, on: boolean) {
     if (kind === 'enemy') { this.enemies.highlight(index, on); return; }
-    const mesh = this.gfx.brushMeshes[index];
-    if (mesh) (mesh.material as THREE.MeshLambertMaterial).emissive.setHex(on ? HILITE : 0);
+    // The renderer owns this now. Brush materials are shared across every brush
+    // with the same surface and colour, so reaching in and setting `emissive`
+    // here lights up the whole district and clearing it afterwards puts out
+    // every window in the city.
+    this.gfx.highlightBrush(index, on);
   }
 
   /** Hand one object back to the group it came from, keeping it where it looks. */

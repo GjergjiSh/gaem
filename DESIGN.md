@@ -2888,3 +2888,489 @@ pack — and ~1286 draw calls, *fewer* than the 1694 the previous dressing cost,
 because the sci-fi models carry fewer primitives and the stretched deck plates
 are gone. 70 checks, all passing, including new ones for prop distortion (worst:
 0.0000%), every named model resolving to a file on disk, and the draw budget.
+
+
+## 36. Surfaces, or why a textured pack was not enough
+
+§35 put a textured art pack on everything you get close to, and Ashgate still
+read as boxes. The reason is worth stating plainly, because it survived two
+dressing passes: **the props were textured and the world was not.** A brush was
+one flat `MeshLambertMaterial` in whatever colour the level asked for, and
+almost all of the visible surface of a district — every wall, every roof deck,
+every road, the whole street — is brush. Detail on the furniture cannot fix a
+room with painted walls.
+
+A flat fill is not merely plain, it is *information-free*. A wall thirty metres
+away and a wall three metres away are the same pixels, so the eye has no ruler
+and no depth. Put a grain on both and the near one has texels you can count.
+
+### A surface is a material recipe, and a colour is still a rule
+
+`src/engine/surfaces.ts` names ten of them — `panel`, `plinth`, `deck`, `trim`,
+`road`, `street`, `steel`, `crate`, `padded`, `lamp`, `marked` — and a brush
+picks one with `b.t`. The colour on the brush does not change meaning: it is
+multiplied *under* the base map. That is deliberate and it is the constraint the
+whole pass was built around. Both levels encode rules in colour — amber is
+something to wallrun, violet is something to slide — and an art pass that
+repaints the world is an art pass that costs the player the rules.
+
+Levels that name no surface get `panel`, so `figure8`, `arena` and any saved
+track gain the grain without being touched.
+
+### The pack ships trim sheets, not tiling materials
+
+Every surface therefore takes a **crop** of a sheet, and mirrored wrapping makes
+an arbitrary crop tile without a seam — a mirror symmetry nothing at these
+distances can see. Two details that are not obvious:
+
+* **A base crop and a normal crop need not be the same region.**
+  `T_Trim_03_BaseColor` is featureless grunge, so nothing in it can misalign
+  with anything, while its normal map is a trim sheet with real panel seams.
+  Pairing the two gives a tintable concrete with seams in it out of a pack that
+  ships neither.
+* **The ORM maps are used for occlusion only.** A trim sheet's ORM is authored
+  for a model that uses the whole sheet at once, so across a crop it is near
+  enough constant: roughness 0.35, metalness 1.0 in this pack. Multiplied into
+  the material those do not add variation, they silently overrule every value
+  the surface sets — the entire district came out as polished metal and a low
+  sun turned every street into a mirror. A constant is not a texture.
+
+### UVs in metres, not in brush-fractions
+
+A brush mesh is unit geometry scaled to the brush, so a stock box's 0..1 UVs
+stretch with it: a 54 m wall and a 2 m handrail would each get exactly one
+repeat. That is the same distortion the measured model table exists to keep off
+the props, arriving through the back door on every surface that has no model.
+`boxFor` builds the box with its UVs sized from the brush in **world metres**,
+cached per (surface, size), so a metre of wall is a metre of wall everywhere.
+
+### The rest of the frame
+
+* **A sky.** A gradient dome, kept centred on the camera — left at the origin it
+  works from the middle of the map and clips into a black dome-shaped hole from
+  the edges, because its far side is then past the far plane. Raw
+  `ShaderMaterial` output must go through `<tonemapping_fragment>` and
+  `<colorspace_fragment>` by hand: a `THREE.Color` is converted *into* linear
+  working space, so a sky authored at `#1b2742` and written straight out arrives
+  at about `#030509`. That does not look like a colour-space bug. It looks like
+  the sky is black.
+* **Sun shadows, baked once.** The district is static and so is the sun, so
+  `shadowMap.autoUpdate` is off and `needsUpdate` is set on level rebuild: a
+  4096² map over the whole city for a one-off cost. The price is that nothing
+  which moves may cast, which is why the player does not.
+* **Filmic tone mapping**, because half the world is now emissive and without a
+  curve every lamp, window and marked surface clips to the same white disc.
+* **Light raised across the board** (sun 1.6 → 3.2, sky 1.1 → 2.2, fill 0.55 →
+  1.5). A base map is a multiplier below one and the curve pulls the top end
+  down again; together they cost about a stop and a half. Same intent, more
+  light going into it.
+* **The palette lightened to match.** Slates around `0x2b3446` went through the
+  multiply and the curve and came out very close to black — a district you
+  cannot see rather than a district that is dark.
+
+### And what the level does with all of it
+
+Lit floors above every other service band and under every cornice, warm or cold
+by building, which is what turns a row of silhouettes into a city after dark.
+Facade tints picked per building by position, because a skyline of forty boxes
+in one colour is one building drawn forty times. Beacons on the tall masts. A
+street kit down both frontage avenues — lamp columns, crates, lockers, drums —
+and a dashed centre line down each one, which is the cheapest thing in the file
+and the difference between a road and a gap between two buildings.
+
+Behind the rim there is a **ring of 54 masses that are not part of the map**:
+three brushes each, no props, no gameplay, pushed out until their footprints
+clear the district rectangle — a circle around a rectangle plants towers on the
+corner roofs otherwise, which is exactly where the first two landed. They exist
+so the edge of the world is a hazy city instead of an edge.
+
+`assets/more-scifi` arrived during the pass and is the prop half of the same
+kit — the trim sheets are byte-identical between the two folders, which is the
+test that matters; two packs that merely look similar are two styles. It brings
+crates, drums, lockers, shelves and a satellite dish, measured into the same
+table. One name collides (`Prop_Chest`, at two different sizes) and models are
+keyed by bare filename, so the table has to carry whichever file the glob
+actually resolves — the environment pack's, which sorts last.
+
+`assets/factory` arrived at the same time and is deliberately **not** used: a
+flat-shaded toy-factory set off a single colour map. A perfectly good look, and
+not this one.
+
+### Windows, which the pack does not have
+
+A district of blank walls is not a city whatever else is on them, and there is
+not a window anywhere in either pack. So they are painted — the one thing in
+`surfaces.ts` not lifted from the art: a pane grid at **2.4 m centres over a
+12 m tile**, drawn twice from one seeded walk so the base map and the emissive
+map cannot disagree about where the glass is. About 42% of them are lit, warm
+for most and cold for a few, and half the lit ones have something dark standing
+in front of the window.
+
+Two things that were wrong before they were right:
+
+* **Lit panes were painted paler in the base map too.** That is the obvious
+  reading of "a lit window" and it is backwards: the sun then lands on the pale
+  rectangle, and a sunlit wall of pale rectangles is *panelling*. Lit and unlit
+  glass now share one dark base and the light lives only in the emissive map,
+  where the sun cannot reach it.
+* **Emissive strength is set by the sunlit wall, not the shadowed one.**
+  Emissive is added after lighting, so the value that reads as a lit room on a
+  dark facade blows out on a west face the dusk sun is already hitting.
+
+Buildings also alternate between two facade materials — same windows, a wider
+bay and a different panel rhythm — because one facade material over forty
+buildings is a terrace built by one contractor in one year.
+
+### Telling the floor from the walls
+
+The district read as one continuous material folded into buildings and ground,
+because it *was* one: walls, roads and roofs all came off the same grunge crop
+in the same greys. Three changes, in rough order of how much each bought:
+
+1. **The street is cut from a different sheet.** Dark worn panel from Trim_01
+   instead of the walls' light grunge from Trim_03. Two surfaces meeting at a
+   right angle have to disagree about something.
+2. **A footway round every block** — one box, 14 cm proud, in a third material.
+   A pale apron with the dark road between two of them is the oldest way a
+   street has of saying where you are, and it costs thirty boxes for the whole
+   city. It is deliberately under `character.stepHeight`; the Yard is left bare
+   because it is a loading yard and because a 14 cm apron under the spawn point
+   puts the player 14 cm above the street, which `verify:level` refuses.
+3. **A palette with hue in it.** The first facade list was six greys a few
+   points apart, which at dusk under a warm key and a blue fill is one grey.
+   Oxide, sand, verdigris, bone, slate, weathered mauve — still muted, still
+   nothing primary, but six *materials*. Roofs take 42% of their building's
+   tint, so from above you can tell which roof belongs to which wall.
+
+### Where it ended up
+
+1524 brushes, 708 wearing a model, 58 distinct models from one pack family,
+~2340 draw calls against the 2600 budget, and all 70 checks still passing.
+
+
+## 37. Bringing it to life, and paying for it
+
+Three things were still wrong after 36. Buildings met the ground as one box
+driven into another. The skyline behind the map was a row of flat-topped
+silhouettes. And nowhere in the district was doing anything in particular —
+every frontage was the same lamp, the same crate, the same door.
+
+### Where a building meets the ground
+
+Nothing on a street is one plane from the pavement to the roof. It steps, and
+that step is the part you actually stand next to. Every mass now gets three
+brushes at its base: a wide low **foot** in the pavement's own material, a
+**ground storey** in a different material half a metre proud of the wall, and a
+**canopy** in paint over the footway with a lit strip tucked up into its soffit.
+
+All of it is built OUTWARD, because the mass is one solid box and a recess would
+simply be hidden inside it. Proud is the better shape anyway: the canopy is a
+metre of ledge round every building in the district at a height you can reach.
+
+Two tuning notes that cost a rebuild each. The ground storey wears the road
+surface, whose base map is dark, so a tint picked to *look like* a dark
+shopfront lands at nearly black — the tint has to be chosen against the map, not
+against the intention. And the canopy's overhang shadows everything under it,
+which is where all the street detail lives, so it came back from 1.5 m to 1.1 m.
+
+### Paint that survives being in shadow
+
+Every coloured thing here — canopies, awnings, hazard lips — hangs at the bottom
+of a street, under an overhang, on a face the dusk sun never reaches. Lit only
+by the sky it goes black, and a black canopy is not a colour, it is a gap. The
+`paint` surface carries a quarter of a stop of its own colour, which is enough
+to read as paint at street level and never enough to read as a light.
+
+The palette for it is deliberately **the rest of the wheel**: coral, green,
+magenta, sea, lime, periwinkle. The first version had an orange, a lilac and a
+teal in it, and every one of those was a quiet lie told to a player who has been
+taught that amber means wallrun, violet means slide and cyan means thruster.
+
+### Places that are somewhere
+
+Ten frontages are hand-assigned a job instead of the generic kit — **loading
+dock, garage, market row, plant compound** — from a table rather than a hash,
+because the whole point is that a bay differs from its neighbour and a random
+draw puts two loading docks side by side about as often as not. Each is about a
+dozen brushes off the same pack: something big against the wall for silhouette,
+a colour, a light, and one piece of paint that names it. The generic street kit
+now leaves a hole where a bay is, because a street lamp in the middle of a
+loading dock undoes the entire idea.
+
+Signage everywhere else: the pack's floor decals mounted vertically — `wallProp`
+already tips a flat-Y model face-out, which is exactly what a poster needs.
+
+The backdrop towers ended flat; now every one of them ends in one of four ways
+by hash, one of which is a mast, and a few carry a billboard the size of a
+building turned to face the middle of the district.
+
+### What it cost, and what was done about it
+
+Adding all of that took the frame from about 9 ms to 25 ms at 720p, which is not
+a price worth paying for scenery. Measured rather than guessed at:
+
+* Halving the resolution changed nothing and turning shadows off changed
+  nothing, so it was never fill-rate. It was **CPU-bound on draw submission**.
+* Hiding the props dropped the frame from 24.6 ms to 10.7 ms while removing only
+  930 of 3260 calls — so props cost roughly 15 µs a call against 4.5 µs for
+  everything else.
+
+The cause was `instance()` cloning every material per copy, which is correct for
+a robot that flashes red when hit and pure waste for a lamppost: every clone is
+a program bind and five texture binds the renderer cannot batch. Scenery now
+shares its materials (`share: true`) — **24.6 ms to 17 ms**. The brush outlines
+were doing the same thing on a smaller scale, a fresh `LineBasicMaterial` per
+brush for seventeen hundred identical black lines; one shared material took the
+scene from 1927 materials to 207.
+
+The draw budget in `verify:level` was also lying, and had been since Ashgate
+moved onto the sci-fi pack: it only knew how to price the old Platforms kit, so
+every sci-fi model fell through to a `?? 1` default and the estimate came in a
+quarter under the truth. It sweeps every pack now. The ceiling moved to 3800,
+which is a frame-time budget wearing a draw-call costume — at ~3260 real calls
+the widest view of the whole city costs about 15 ms, and the thing to do when it
+is hit is to submit fewer calls, not to raise it again.
+
+### Where it ended up
+
+1721 brushes, 791 wearing a model, ~3680 estimated calls (~3260 real on the
+widest view), 70 checks passing.
+
+
+## 38. A third kit, and the one that is actually about buildings
+
+`assets/city` is a modular building kit: brick and concrete wall modules,
+shopfronts with glass and a fake interior behind it, cornices, corner columns,
+entrances with their own steps, sidewalks with a real curb, doors, bollards,
+planters, manhole covers, and a full set of road markings. Neither of the other
+two packs has ever had anything to say about the part of a building a person
+walks past -- the sci-fi kit is infrastructure and the Platforms kit is
+untextured -- so the ground floor had been brushes pretending, and it looked it.
+
+It is authored in metres on a clean grid: panels 2 m wide by 3 m tall by 0.2
+thick, insets 4 m, storeys 3 m, corners 2x2, sidewalks in 3 m slabs. Panels are
+thin on **Z** and face their own +Z, which is the same convention as a door in
+the sci-fi kit and the opposite of that kit's `_Straight` wall pieces -- the one
+mix-up most likely to leave a facade standing edge-on to its own street.
+`src/levels/city.ts` is the measured table, `tools/measure-city.py` regenerates
+it, and `propBoxOf` now answers from both tables so the verifier can still price
+every prop on the map.
+
+### Where it is used, and where it is not
+
+**The ground storey of every street-facing frontage**, and nothing above 3 m. A
+glazed module is five primitives and therefore five draw calls; cladding forty
+masses to the roof is twenty thousand of them and the eye is not up there
+anyway. Above the shopfront the mass keeps its textured facade, and the join
+happens at a cornice.
+
+The cornice itself is a *brush* wearing the pack's ornament material, not a run
+of `Cornice_*` modules: 2 m pieces over twenty-two frontages is six hundred draw
+calls for a line you read as a line, against two dozen for the brush, and at
+street level you cannot tell them apart. Roughly every other bay is glazed and
+the rest is blank wall -- partly because an unbroken run of identical windows is
+a texture rather than a building, and partly because blank is three primitives
+against five.
+
+The cheap pieces go everywhere, because they are one call each: bollards,
+planters, manhole covers, drains, wall-mounted condenser units, and the road
+markings -- double yellow, lane lines, crosswalks, stop bars and turn arrows at
+the junction. The kit's tiling *materials* are used far more widely than its
+models, since a texture costs nothing: brick, concrete, ornament and asphalt are
+now the district's facades, footways, trims and roads.
+
+### The brush outline became an editor affordance
+
+A wireframe over every brush was how a world of flat-shaded boxes stayed
+readable. A textured world does not need it -- hiding every outline changes the
+rendered frame by under half a percent of its JPEG size -- and it was the single
+largest block of draw calls in the frame, one extra call for every plain brush.
+It is on in the editor, where you are looking at colliders and often at ones a
+model is hiding, and off in play. The verifier's estimate prices a plain brush
+at one call to match.
+
+### Where it ended up
+
+2016 brushes, 1072 wearing a model from one of the two textured kits, ~3350
+estimated calls against a 3800 ceiling, and 70 checks passing. Measured in a
+throttled tab: 1390 real calls and ~13 ms at street level, 2979 and ~22 ms on
+the widest possible view of the entire city.
+
+## 39. Using the buildings, in the place you can reach them
+
+The city kit ships three finished buildings -- `Building_Small_1`,
+`Building_Medium_2_001` and `Building_Large_2`. The first pass through the kit
+ignored them and assembled ground storeys out of its 4 m wall modules instead.
+The second pass used them, and used them outside the rim, where they lined the
+street mouths of a city you could look at over an 8 m wall and never touch.
+Both were wrong in the same direction, and the second was wrong in a way worth
+recording: it is very easy to spend an afternoon making the part of the map
+nobody can reach look like the part they can.
+
+The buildings belong on the streets you run down. They are there now.
+
+### The arithmetic, which was not what it looked like
+
+A finished building is twelve or thirteen primitives -- brick and concrete, a
+cornice, a glazed ground floor with a lit interior behind it, sash windows with
+stone lintels up the front, entrance steps with a railing, a flat roof. Twelve
+draw calls for all of that. The modular ground storey it replaced was around
+sixty per face: a glazed 4 m inset is five calls, a blank one three, and a 54 m
+frontage is thirteen of them plus a cornice, two corner columns and a doorway.
+
+So the finished building is not the expensive option. It is a QUARTER of the
+price of the thing that was there, and it stands seventeen to thirty metres
+instead of three. Once that was clear the district went from two dressed streets
+to all four of its wide ones -- every 22 m and 24 m gap in the block grid, both
+sides -- and the count went DOWN.
+
+### How a model becomes the front of a collider
+
+A block is one solid mass with a facade texture on it, and that is the right way
+to build something you run along the roof of and wallrun the side of: one
+collider, one draw call, and a box is what the movement was tuned against.
+Nothing about that changed. What changed is the surface.
+
+Each street face is lined with buildings sunk into the mass until only the
+building line is proud of it. `cityProp` sizes the brush from the measured box,
+so the scale is uniform by construction and `verify:level`'s distortion rule
+holds. Each is scaled to stand its stretch of wall up to the parapet, capped at
+1.6 and floored at 0.8 -- a building stops being a building once its windows are
+three metres tall, and stops being one going the other way too.
+
+Three things had to be got right, and each one was wrong first.
+
+**The wall is not the bounding box.** A model is fitted to its brush by its
+bounds, and these do not end at their brickwork: `Building_Small_1` carries 2.3 m
+of cornice and stoop in front of its wall. Line the BOXES up on the street and
+the brick sits two metres back inside the mass, with the block's own painted
+canopy sailing out in front of it, cutting the building in half at the first
+floor. Each model is pushed out by its own overhang, and what lands on the line
+is the wall.
+
+**The height has to be measured, not looked up.** A `step` block's face is only
+as tall as its base; a `wing` changes height halfway along. So the room is read
+off the masses themselves, sampled along the face -- and sampled INSIDE it,
+because a sample taken exactly on a block corner is not on the mass at all and
+reports no wall, which is enough to condemn the whole face to the fallback.
+That bug put buildings on seven faces out of twenty-two with nothing anywhere to
+say so.
+
+**Measure where you build.** The first version measured the wall over the next
+24 m, sized a row against it, then centred the row in the stretch -- which moves
+it off the ground it was measured over. On one face that put a thirty-metre
+building half onto a fourteen-metre wing, standing eight metres over a roof the
+route launches from. The face is now cut into stretches of constant height
+first, and each is filled and centred within itself. `verify:level` was the only
+thing that caught it.
+
+### What had to give
+
+The plinth, the dark shopfront band and the painted canopy over it are the right
+base for a mass with a texture on it and exactly the wrong one for a mass with a
+building against it -- and they wrap all four sides, so they cannot be switched
+off on one. On a clad mass they are pulled in to a fifth of their depth: still a
+plinth and still a painted line down the alley, and comfortably behind the
+building line on the street. Which mass is which is not known until the
+frontages are built, so the bases are deferred and decided in one pass at the
+end.
+
+The outer city gave up its finished buildings and went back to being masses
+wearing the window facade -- one call each, low, broken by gaps. The far ring is
+down to eighteen towers from the fifty-four it started at. The avenue lane lines
+are laid every other stride, since the model is already a run of dashes and
+laying them end to end paints a dashed line at twice the price of a dashed line.
+The kerbside floodlight and the clutter alternate between lamp posts instead of
+every post carrying one of each.
+
+### Where it ended up
+
+1870 brushes, 79 finished buildings, all of them inside the map, ~3780 estimated
+calls against the same 3800 ceiling that was there before, and 70 checks
+passing. Measured in a throttled tab at 978x918: 13.8 ms on the avenue, 17.7 ms
+down the new one, 21.5 ms in the worst view a player gets -- the whole map end
+to end from the spawn -- and 8.9 ms from the crown. All of them at or below what
+the same views cost before any of this, because what came out paid for what
+went in.
+
+## 40. Instancing, and then every wall in the district
+
+Two streets, then four, then every wall — and each time the answer to "why not
+all of them" was the same number: a kit model is a group of meshes, one per
+material, and the renderer submitted every one of them separately. A finished
+building is thirteen pieces, so cladding every street face of forty blocks was
+twenty thousand draw calls and the conversation ended there.
+
+That number was never real. Every copy of `Building_Small_1` is the SAME
+thirteen geometries and the same thirteen materials — `share: true` had already
+stopped the materials being cloned and the geometry was never cloned at all. The
+copies differ in a matrix. That is what `InstancedMesh` is for, and the whole
+district's kit now collapses into one instanced draw per distinct piece.
+
+### The cell size is the whole design
+
+The naive version — one batch per piece for the entire map — took the spawn view
+from 3003 calls to 800 and the frame got SLOWER in two of five viewpoints. One
+batch spanning the district is one bounding sphere the size of the district,
+which no frustum ever rejects, so every triangle in the city is submitted from
+every camera. The frame had stopped being call-bound and started being
+triangle-bound.
+
+So the batches are cut by position as well, into 128 m cells. A street view
+submits the cells it can see. Measured across five viewpoints, 128 m beat both
+96 m (too many batches) and no cells at all (nothing culled).
+
+The verifier's estimate had to learn the same thing, or it would be guarding a
+renderer that no longer exists. It prices a model at its primitive count ONCE
+PER CELL it appears in, which is what the renderer does, and its number matches
+the live count exactly. The ceiling came DOWN, from 3800 to 2600 — the opposite
+of making room, and the point: what changed underneath is that the cost of
+dressing the map no longer scales with how much of it you dress, so the thing to
+guard is the number of distinct pieces in play. A level that doubles its
+buildings and holds this line added no draws at all.
+
+### Every outward face of every block
+
+With the price of the hundredth building down to a matrix, what decides where a
+building goes is whether one FITS. Two questions, both measured per face:
+
+**How tall is the wall behind it** — sampled off the masses themselves, since a
+`step` block's face is only as tall as its base and a `wing` changes height
+halfway along. The face is cut into stretches of constant height and each is
+filled and centred within itself.
+
+**How wide is the street in front of it** — and this is the one that decides
+what an alley gets. An avenue has 22 m and an alley has 8, and these models do
+not end at their brickwork: `Building_Small_1` carries 2.3 m of stoop, which is
+most of an alley once there is one on each side. So each face is told how far it
+may reach and the alleys quietly take the two models that stay close to their
+own wall. The alleys also lost their lamp posts — a 2.6 m column each side of an
+8 m gap leaves under three metres in the middle, which reads as a blocked street
+and plays as one. They get a lamp bracketed to the wall instead, which is what an
+alley has anyway.
+
+177 buildings, up from 79, and the draw estimate went from 3780 to 2161.
+
+### Two Ashgates
+
+The district ships twice off one generator: `ashgate`, whose street faces are
+clad, and `ashgate-raw`, the same district with nothing but its own masses on
+it. Same plan, same heights, same lap, same collision everywhere that matters —
+the difference is entirely what the walls are made of, which makes the pair a
+straight answer to what the art is buying and what it costs.
+
+The mechanism is worth a line because the obvious version is wrong. Brushes that
+belong to one variant only are recorded as they are emitted; the clad ones are
+scattered through the file and are filtered out of the raw list, but the RAW-only
+ones — the full-depth ground storey on masses the clad level hides behind a
+building — are all emitted at the very end of the file and spliced off the tail.
+Anything else shifts an index something else is holding, and `RAMP_BRUSHES` is
+holding several.
+
+### Where it ended up
+
+2967 brushes, 177 finished buildings, ~2161 estimated calls against a ceiling
+that came down to 2600, 70 checks passing. Measured in a throttled tab at
+978x918: 13.2 ms on the avenue, 14.1 ms in an alley, 11.6 ms from the crown,
+16.1 ms in the worst view a player gets. Every one of those is faster than the
+same view was before this pass, with twice the buildings in it.

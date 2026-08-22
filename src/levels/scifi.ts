@@ -1,5 +1,10 @@
-// Natural sizes of the sci-fi environment pack in /assets/scifi, measured from
-// each glTF's POSITION accessors -- regenerate with tools/measure-scifi.py.
+// Natural sizes of the sci-fi pack -- /assets/scifi for the environment and
+// /assets/more-scifi for the props -- measured from each glTF's POSITION
+// accessors. Regenerate with tools/measure-scifi.py.
+//
+// The two folders are one kit: the prop set is textured off the same trim
+// sheets as the environment set, byte for byte, which is the test that matters.
+// Two packs that merely look similar are two styles.
 //
 // Unlike the older Platforms kit this one is authored IN METRES: a crate is
 // 1.0 tall, a barrel 1.1, a handrail 0.86, a wall panel 4 wide by 3 high. So
@@ -200,6 +205,47 @@ export const SCIFI: Record<string, readonly [number, number, number]> = {
   Decal_X: [0.8648, 0.0, 1.2136],
   Decal_XSign: [0.3615, 0.0, 0.3424],
   Decal_Z: [0.7181, 0.0, 1.2136],
+  // --- assets/more-scifi ------------------------------------------------------
+  // The same pack's prop half: crates, drums, lockers, shelves, a dish. Same
+  // authoring scale, same trim sheets (the texture files are byte-identical to
+  // the environment set's), so it is one kit and one table -- which is the only
+  // reason it may stand in a level that has a rule about not mixing styles.
+  Enemy_EyeDrone: [0.9965, 0.9955, 0.8923],
+  Enemy_QuadShell: [2.0153, 1.4943, 1.9705],
+  Enemy_Trilobite: [2.5411, 2.4927, 2.7169],
+  Gun_Pistol: [0.4425, 0.2523, 0.0685],
+  Gun_Revolver: [0.5306, 0.2616, 0.0814],
+  Gun_Rifle: [1.0599, 0.3739, 0.087],
+  Gun_SMG_Ammo: [0.0642, 0.2772, 0.0391],
+  Gun_Sniper: [1.7176, 0.3299, 0.0592],
+  Gun_Sniper_Ammo: [0.1384, 0.1546, 0.0275],
+  Prop_Ammo: [0.5707, 0.2819, 0.7229],
+  Prop_Ammo_Closed: [0.5707, 0.4122, 0.7229],
+  Prop_Ammo_Small: [0.4023, 0.2834, 0.4338],
+  Prop_Barrel1: [0.722, 1.1111, 0.6485],
+  Prop_Barrel2_Closed: [0.5422, 0.7661, 0.5422],
+  Prop_Barrel2_Open: [0.5422, 1.096, 0.5422],
+  Prop_Chair: [0.8807, 1.6417, 1.1224],
+  Prop_Crate: [1.569, 1.5, 1.5],
+  Prop_Crate_Large: [3.466, 1.5, 1.5],
+  Prop_Crate_Tarp: [1.7168, 1.5676, 1.7149],
+  Prop_Crate_Tarp_Large: [3.2196, 1.5676, 1.7168],
+  Prop_Desk_L: [2.2222, 0.9396, 2.2222],
+  Prop_Desk_Medium: [2.8431, 0.9396, 1.0289],
+  Prop_Desk_Small: [2.0635, 0.9396, 1.0289],
+  Prop_Grenade: [0.1272, 0.2409, 0.087],
+  Prop_HealthPack: [0.4307, 0.6013, 0.1745],
+  Prop_HealthPack_Tube: [0.1495, 0.3146, 0.1495],
+  Prop_KeyCard: [0.1815, 0.4757, 0.0484],
+  Prop_Locker: [0.983, 2.6685, 0.4994],
+  Prop_Mine: [0.8056, 0.8162, 0.6982],
+  Prop_Mug: [0.1825, 0.1718, 0.1325],
+  Prop_SatelliteDish: [1.8401, 5.7949, 2.7792],
+  Prop_Shelves_ThinShort: [1.3724, 1.2104, 0.5407],
+  Prop_Shelves_ThinTall: [1.3724, 2.67, 0.5407],
+  Prop_Shelves_WideShort: [1.9765, 1.2104, 0.5407],
+  Prop_Shelves_WideTall: [1.9765, 2.67, 0.5407],
+  Prop_Syringe: [0.114, 0.6525, 0.114],
 };
 
 /**

@@ -5,6 +5,7 @@ import { currentCap } from '../core/solver';
 import type { CollisionWorld, Intent, Player } from '../core/types';
 import { level } from '../levels';
 import { instance, warm } from './models';
+import { boxFor, DEFAULT_SURFACE, materialFor, useAnisotropy } from './surfaces';
 
 /** Unit square pyramid: 1x1 base centred at y=-0.5, apex at (0, 0.5, 0). */
 function pyramidGeometry(): THREE.BufferGeometry {
@@ -24,16 +25,141 @@ const UNIT_PYRAMID = pyramidGeometry();
 const BOX_EDGES = new THREE.EdgesGeometry(UNIT_BOX);
 const PYRAMID_EDGES = new THREE.EdgesGeometry(UNIT_PYRAMID);
 
+/** What a brush wears once a model has taken over the drawing. */
+const HIDDEN = new THREE.MeshBasicMaterial({ visible: false });
+/**
+ * The outline every brush wears, and there is ONE of it.
+ *
+ * It used to be a fresh `LineBasicMaterial` per brush, which is seventeen
+ * hundred distinct materials for seventeen hundred identical black lines — and
+ * a distinct material is a program bind and a uniform upload the renderer
+ * cannot batch away. Nothing has ever wanted a per-brush outline colour.
+ */
+const EDGE = new THREE.LineBasicMaterial({ color: 0x000000, opacity: 0.35, transparent: true });
+/** What a brush wears while the editor has hold of it. */
+const SELECTED = new THREE.MeshLambertMaterial({ color: 0x6b7280, emissive: 0x2a3550 });
+
+/**
+ * Dusk over the district: the colours the sky, the fog and the lights all agree
+ * on. They have to be one set of numbers, because the single loudest tell that
+ * a world is fake is a horizon that fades to a grey nothing the sky above it
+ * never mentions.
+ */
+const SKY = {
+  /** Straight up: the last of the night still in it. */
+  zenith: 0x1b2742,
+  /** The band the buildings actually stand against. */
+  horizon: 0x4d5c80,
+  /** Low and warm, where the sun went. Also what the key light is coloured. */
+  ember: 0xa86a44,
+  /**
+   * Fog, and therefore the colour distance turns things. Sits between the
+   * horizon and the ember: a fog colour darker than the sky it fades into is
+   * the classic tell, because the far towers come out as dark shapes on a
+   * bright sky instead of pale ones, and the depth reads backwards.
+   */
+  haze: 0x445070,
+} as const;
+
+/**
+ * A gradient dome, drawn inside everything else.
+ *
+ * Cheaper and more controllable than a cube map, and it is the difference
+ * between a level standing in a place and a level standing in a void — a black
+ * background gives the eye no horizon, so a 76 m tower and a 20 m block read as
+ * the same distance away. `depthWrite: false` and a low render order let the
+ * whole world draw over it without a depth fight.
+ */
+function skyDome(): THREE.Mesh {
+  const mat = new THREE.ShaderMaterial({
+    side: THREE.BackSide,
+    depthWrite: false,
+    fog: false,
+    uniforms: {
+      zenith: { value: new THREE.Color(SKY.zenith) },
+      horizon: { value: new THREE.Color(SKY.horizon) },
+      ember: { value: new THREE.Color(SKY.ember) },
+      // Where the sun set, matched to the key light's bearing so the glow is
+      // behind the buildings the key light rims.
+      sunDir: { value: new THREE.Vector3(0.62, 0.06, 0.42).normalize() },
+    },
+    vertexShader: `
+      varying vec3 vDir;
+      void main() {
+        vDir = normalize(position);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }`,
+    fragmentShader: `
+      uniform vec3 zenith, horizon, ember;
+      uniform vec3 sunDir;
+      varying vec3 vDir;
+      void main() {
+        vec3 d = normalize(vDir);
+        // Up the dome: horizon to zenith, biased so most of the sky is dark and
+        // the gradient is concentrated in the first few degrees, which is where
+        // a real one is.
+        float h = pow(clamp(d.y, 0.0, 1.0), 0.42);
+        vec3 c = mix(horizon, zenith, h);
+        // Afterglow: a wide, low lobe towards the set sun.
+        float glow = pow(max(0.0, dot(d, sunDir)), 3.0) * (1.0 - clamp(d.y * 2.4, 0.0, 1.0));
+        c = mix(c, ember, glow * 0.85);
+        // And a little of the same warmth spilled along the whole horizon.
+        c = mix(c, ember * 0.5, (1.0 - smoothstep(-0.06, 0.22, d.y)) * 0.35);
+        gl_FragColor = vec4(c, 1.0);
+        // Through the same two steps as every other pixel in the frame.
+        //
+        // Not optional and not cosmetic: a THREE.Color built from a hex is
+        // converted INTO linear working space, and a shader that writes it
+        // straight out is writing a linear number into an sRGB buffer. A sky
+        // authored at #1b2742 arrives on screen at about #030509 — which does
+        // not look like a colour-space bug, it looks like the sky is black, and
+        // the first three things you try are all in the gradient.
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }`,
+  });
+  // Radius is well inside the camera's far plane, because the dome is kept
+  // CENTRED ON THE CAMERA every frame rather than on the world. Left at the
+  // origin it works from the middle of the map and fails at the edges: stand in
+  // the west street and the far side of the dome is 700 m away, past the far
+  // plane, and the sky is clipped into a black dome-shaped hole hanging over
+  // the district. Moving it with the eye makes the horizon unreachable, which
+  // is what a horizon is.
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(300, 32, 20), mat);
+  dome.renderOrder = -1;
+  dome.frustumCulled = false;
+  return dome;
+}
+
 export class Renderer {
   scene = new THREE.Scene();
-  camera = new THREE.PerspectiveCamera(T.camera.fovBase, 1, 0.1, 600);
+  // Far enough to hold the city BEHIND the city: the backdrop ring stands up to
+  // 400 m off the origin, and from the far corner of the district that is 620 m
+  // away. At the old 600 the horizon used to tear open as you crossed the map.
+  camera = new THREE.PerspectiveCamera(T.camera.fovBase, 1, 0.1, 1000);
   renderer: THREE.WebGLRenderer;
   player: THREE.Group;
   /** One mesh per brush, index-aligned with level.brushes — the editor's handle. */
   brushMeshes: THREE.Mesh[] = [];
   /** 0..1 scope amount, written by the weapon each frame. Pulls FOV in. */
   adsT = 0;
+  /**
+   * Draw a black wireframe over every brush. Off in play, on in the editor.
+   *
+   * These were how a world of flat-shaded boxes stayed readable: without an
+   * outline, two untextured boxes at slightly different angles are one shape.
+   * A textured world does not need them — measured, hiding every outline
+   * changes the rendered frame by under half a percent of its JPEG size — and
+   * they are not free: an outline is a second draw call for every plain brush
+   * on the map, which is the single largest block of calls in the frame.
+   *
+   * The editor is the other case entirely. There you are looking AT brushes,
+   * often ones a model is hiding, and the outline is the only thing that says
+   * where a collider's corner is.
+   */
+  edges = false;
   private levelGroup = new THREE.Group();
+  private dome!: THREE.Mesh;
   private sky!: THREE.HemisphereLight;
   private sun!: THREE.DirectionalLight;
   private fill!: THREE.DirectionalLight;
@@ -50,18 +176,59 @@ export class Renderer {
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-    this.scene.background = new THREE.Color(0x0b0d12);
-    this.scene.fog = new THREE.Fog(0x0b0d12, 90, 320);
+    // Behind the dome, so any pixel the dome somehow misses is still sky-coloured
+    // rather than a hole punched through to the void.
+    this.scene.background = new THREE.Color(SKY.haze);
+    // Filmic, because half this world is now emissive. Without a curve every
+    // lamp, window and marked surface clips to the same white disc and the
+    // range between "lit" and "very lit" disappears exactly where the art is
+    // trying to use it.
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.15;
+    // Shadows, drawn ONCE. The district is static and so is the sun, so the map
+    // is baked at build time and never touched again — the per-frame cost of
+    // nine hundred casters is a cost this does not pay. The price is that
+    // nothing which moves may cast, which is why the player does not.
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.autoUpdate = false;
+    useAnisotropy(this.renderer.capabilities.getMaxAnisotropy());
 
-    this.sky = new THREE.HemisphereLight(0x9fb4ff, 0x1a1a22, T.light.sky);
+    this.dome = skyDome();
+    this.scene.add(this.dome);
+    // Fog the colour of the horizon, reaching most of the way across the
+    // district. Distance has to do something to a surface or the far side of a
+    // 400 m city sits in your face.
+    // Near is out at the far side of a city block on purpose. Fog that starts at
+    // arm's length is atmosphere applied to a room; this one only begins where
+    // the district itself ends, so the streets stay crisp and the haze is
+    // something that happens to the OTHER city, behind this one.
+    this.scene.fog = new THREE.Fog(SKY.haze, 130, 620);
+
+    this.sky = new THREE.HemisphereLight(0x8ea6d8, 0x241d20, T.light.sky);
     this.scene.add(this.sky);
-    this.sun = new THREE.DirectionalLight(0xffffff, T.light.sun);
-    this.sun.position.set(30, 60, 20);
+    // The key, warm and LOW — a dusk sun rakes across a district instead of
+    // flattening it from overhead, so every wall in the city gets a lit face and
+    // a dark one and the volumes read.
+    this.sun = new THREE.DirectionalLight(0xffd2a1, T.light.sun);
+    this.sun.position.set(260, 120, 180);
+    this.sun.castShadow = true;
+    this.sun.shadow.mapSize.set(4096, 4096);
+    // The shadow camera has to hold the whole city, because it is drawn once and
+    // there is no second chance to move it: 400 m of district plus its towers.
+    const cam = this.sun.shadow.camera;
+    cam.left = -320; cam.right = 320; cam.top = 320; cam.bottom = -320;
+    cam.near = 1; cam.far = 900;
+    // At 4096 texels over 640 m a shadow is ~16 cm to a texel, and acne at that
+    // resolution needs a bias measured against the same scale.
+    this.sun.shadow.bias = -0.0006;
+    this.sun.shadow.normalBias = 0.6;
     this.scene.add(this.sun);
+    this.scene.add(this.sun.target);
     // From behind and below the key. The kit's models are dark and unlit faces
     // read as holes without something to catch them.
-    this.fill = new THREE.DirectionalLight(0xbfd4ff, T.light.fill);
-    this.fill.position.set(-40, 25, -30);
+    this.fill = new THREE.DirectionalLight(0x7f9ad6, T.light.fill);
+    this.fill.position.set(-200, 90, -160);
     this.scene.add(this.fill);
 
     // The camera goes IN the scene so anything parented to it — the sword
@@ -102,6 +269,31 @@ export class Renderer {
     return this.brushMeshes.filter((m) => !m.userData.decor);
   }
 
+  /**
+   * Light a brush up as selected, and put it back afterwards.
+   *
+   * Swapping the whole material rather than setting `emissive` on the one it
+   * has, which is what this used to do and is now actively wrong: surface
+   * materials are SHARED between every brush wearing the same surface and
+   * colour, so tinting one tints the district — and clearing it afterwards sets
+   * the emissive of every window strip and every amber wall to black, which
+   * does not come back until the page reloads.
+   *
+   * A brush hidden under a model is left alone, exactly as before: its box does
+   * not draw, so there was never anything there to light up.
+   */
+  highlightBrush(index: number, on: boolean) {
+    const mesh = this.brushMeshes[index];
+    if (!mesh || mesh.material === HIDDEN) return;
+    if (on) {
+      if (mesh.material !== SELECTED) mesh.userData.surfaceMaterial = mesh.material;
+      mesh.material = SELECTED;
+    } else if (mesh.userData.surfaceMaterial) {
+      mesh.material = mesh.userData.surfaceMaterial as THREE.Material;
+      mesh.userData.surfaceMaterial = undefined;
+    }
+  }
+
   /** Lights follow the sliders. Three assignments a frame is not worth an event. */
   private syncLights() {
     this.sky.intensity = T.light.sky;
@@ -110,20 +302,29 @@ export class Renderer {
   }
 
   buildLevel() {
-    for (const child of [...this.levelGroup.children]) {
-      this.levelGroup.remove(child);
-      const m = child as THREE.Mesh;
-      if (m.material) (m.material as THREE.Material).dispose();
-    }
+    // Nothing is disposed here any more. Materials and geometries belong to the
+    // surface cache and are shared across brushes and across rebuilds — the
+    // editor rebuilds the whole level on every edit, and disposing a shared
+    // material there would take the rest of the map with it.
+    for (const child of [...this.levelGroup.children]) this.levelGroup.remove(child);
     this.brushMeshes = [];
 
     for (let i = 0; i < level.brushes.length; i++) {
       const b = level.brushes[i];
       const pyramid = b.kind === 'pyramid';
-      const m = new THREE.Mesh(
-        pyramid ? UNIT_PYRAMID : UNIT_BOX,
-        new THREE.MeshLambertMaterial({ color: b.c ?? 0x6b7280 }),
+      const colour = b.c ?? 0x6b7280;
+      // Geometry carries the tiling (UVs in metres of THIS brush) and the
+      // material carries the look, so two brushes of different sizes wearing
+      // the same surface still share one material and one shader.
+      const m: THREE.Mesh = new THREE.Mesh(
+        pyramid ? UNIT_PYRAMID : boxFor(b.s[0], b.s[1], b.s[2], b.t ?? DEFAULT_SURFACE),
+        materialFor(b.t ?? DEFAULT_SURFACE, colour),
       );
+      // A brush is a building, and buildings shade the street. Decor is left out
+      // of the shadow pass: it is small, there is a lot of it, and a handrail's
+      // shadow is not worth a texel of a map that has a city to cover.
+      m.castShadow = !b.d;
+      m.receiveShadow = true;
       m.position.set(b.p[0], b.p[1], b.p[2]);
       if (b.q) m.quaternion.set(b.q[0], b.q[1], b.q[2], b.q[3]);
       else if (b.r) m.rotation.set(b.r[0], b.r[1], b.r[2]);
@@ -131,11 +332,10 @@ export class Renderer {
       m.userData.brushIndex = i;
       m.userData.decor = b.d === true;
       // Edge lines ride along as a child, so every gizmo drag moves them too.
-      const edges = new THREE.LineSegments(
-        pyramid ? PYRAMID_EDGES : BOX_EDGES,
-        new THREE.LineBasicMaterial({ color: 0x000000, opacity: 0.35, transparent: true }),
-      );
-      m.add(edges);
+      const edges = this.edges
+        ? new THREE.LineSegments(pyramid ? PYRAMID_EDGES : BOX_EDGES, EDGE)
+        : null;
+      if (edges) m.add(edges);
 
       // A model, if this brush names one. It is a CHILD of the box rather than
       // a replacement for it: the box keeps its place in brushMeshes as the
@@ -146,14 +346,28 @@ export class Renderer {
       // box. A deck must stretch to its collider or the collider shows at the
       // edges, but a lamppost stretched to a box is not a lamppost.
       if (b.m) {
-        const inst = instance(b.m, { uniform: b.d, ground: b.d });
+        // Shared materials: a level's props are scenery and nothing ever tints
+        // one, so they have no business each carrying their own copy of a
+        // material with five textures hanging off it. See models.ts — this one
+        // flag is worth more frame time than every other change in the pass.
+        const inst = instance(b.m, { uniform: b.d, ground: b.d, share: true });
         if (inst) {
           m.add(inst.object);
+          // Kit props stand in the same light as everything else. Without this
+          // a lamppost is the one object in the district with no shadow under
+          // it, which is exactly the sort of thing you see without seeing.
+          inst.object.traverse((o) => {
+            const mesh = o as THREE.Mesh;
+            if (!mesh.isMesh) return;
+            mesh.castShadow = !b.d;
+            mesh.receiveShadow = true;
+          });
           // The box itself stops drawing, but stays raycastable and selectable.
-          // material.visible, not object.visible: the renderer skips it either
-          // way, and only this one leaves the raycast alone.
-          (m.material as THREE.Material).visible = false;
-          edges.visible = false;
+          // A dedicated hidden material, NOT `m.material.visible = false`: the
+          // surface materials are shared between every brush that wears them,
+          // so hiding one that way hides the whole district.
+          m.material = HIDDEN;
+          if (edges) edges.visible = false;
         } else {
           // Not in memory yet. Fetch it and rebuild once, rather than popping
           // in a frame later with the box still showing underneath.
@@ -177,6 +391,94 @@ export class Renderer {
       ring.rotation.x = Math.PI / 2;
       this.levelGroup.add(ring);
     }
+
+    // Every copy of every kit model in the district, collapsed into one draw
+    // call per distinct piece. Not in the editor, where a model has to stay a
+    // child of the brush it belongs to so the gizmo drags it.
+    if (!this.edges) this.batchModels();
+
+    // The city has changed shape, so the baked shadow map is out of date. One
+    // flag, one extra pass on the next frame, and then never again — which is
+    // what makes 4096² of sun shadow affordable at all. The editor's live gizmo
+    // drags are the one thing this does not catch: shadows there are as of the
+    // last rebuild, and a rebuild is one edit away.
+    this.renderer.shadowMap.needsUpdate = true;
+  }
+
+  /**
+   * Collapse the level's kit models into instanced draws.
+   *
+   * A model hung on a brush is a group of meshes, one per material, and the
+   * renderer submits every one of them separately — so a district costs a draw
+   * call for every window frame on every building in it, and the price of
+   * dressing the map scales with how much of it you dress. That is the wall
+   * this hit: a finished building is thirteen pieces, and cladding every street
+   * face of forty blocks with them is twenty thousand draw calls.
+   *
+   * But every copy of `Building_Small_1` is the SAME thirteen geometries and
+   * the same thirteen materials — `share: true` already stopped the materials
+   * being cloned, and the geometry was never cloned at all. So the copies
+   * differ in nothing but a matrix, which is exactly what `InstancedMesh` is
+   * for. Grouped by (geometry, material), the whole district's kit collapses to
+   * one draw per distinct piece: a few hundred, however many buildings there
+   * are, and adding the hundredth costs a matrix.
+   *
+   * Geometry stays shared, so this is a few hundred kilobytes of matrices
+   * rather than a merged copy of every building in the city.
+   *
+   * The catch is culling. One batch per piece for the whole district is one
+   * bounding sphere the size of the district, which no frustum ever rejects —
+   * so every triangle in the city is submitted from every camera, and the frame
+   * stops being call-bound and starts being triangle-bound. So the batches are
+   * cut into 128 m cells as well: a few more draws, and a street view submits
+   * the two cells it can see instead of the whole map.
+   */
+  private static readonly CELL = 128;
+  private batchModels() {
+    interface Batch {
+      geo: THREE.BufferGeometry;
+      mat: THREE.Material;
+      shadow: boolean;
+      m: THREE.Matrix4[];
+    }
+    const batches = new Map<string, Batch>();
+    const roots: THREE.Object3D[] = [];
+    for (const brush of this.brushMeshes) {
+      for (const child of brush.children) {
+        if ((child as THREE.LineSegments).isLineSegments) continue;
+        child.updateWorldMatrix(true, true);
+        let found = false;
+        child.traverse((o) => {
+          const mesh = o as THREE.Mesh;
+          if (!mesh.isMesh || Array.isArray(mesh.material)) return;
+          const C = Renderer.CELL;
+          const cell = `${Math.round(brush.position.x / C)},${Math.round(brush.position.z / C)}`;
+          const key = `${mesh.geometry.uuid}|${mesh.material.uuid}|${mesh.castShadow}|${cell}`;
+          let b = batches.get(key);
+          if (!b) {
+            b = { geo: mesh.geometry, mat: mesh.material, shadow: mesh.castShadow, m: [] };
+            batches.set(key, b);
+          }
+          b.m.push(mesh.matrixWorld.clone());
+          found = true;
+        });
+        if (found) roots.push(child);
+      }
+    }
+    if (!batches.size) return;
+    for (const b of batches.values()) {
+      const im = new THREE.InstancedMesh(b.geo, b.mat, b.m.length);
+      for (let i = 0; i < b.m.length; i++) im.setMatrixAt(i, b.m[i]);
+      im.instanceMatrix.needsUpdate = true;
+      im.castShadow = b.shadow;
+      im.receiveShadow = true;
+      im.userData.batched = true;
+      this.levelGroup.add(im);
+    }
+    // The originals stay parented where they were — the brush still owns its
+    // model, and leaving the tree alone is what keeps a rebuild the only thing
+    // that has to know about any of this — but they no longer draw.
+    for (const r of roots) r.visible = false;
   }
 
   /**
@@ -194,6 +496,9 @@ export class Renderer {
    */
   draw() {
     this.syncLights();
+    // The sky rides with the eye. Position only — turning it with the camera
+    // would take the sunset round the sky with you.
+    this.dome.position.copy(this.camera.position);
     this.renderer.render(this.scene, this.camera);
   }
 

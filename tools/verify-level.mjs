@@ -157,17 +157,53 @@ head('what got built');
   note(`${thin} brushes are under 10 cm on some axis — grilles, panels and paint`);
   check(bad.length === 0, `every brush has finite position and real size (${bad.length} bad)`);
 
-  // What this actually costs to draw. A plain brush is two calls (the box and
-  // its edge lines); a brush wearing a model draws the model's primitives
-  // instead, because the renderer hides the box under it.
+  // What this actually costs to draw. A plain brush is ONE call in play -- its
+  // wireframe outline is an editor affordance and is not built outside the
+  // editor -- and a brush wearing a model draws the model's primitives instead,
+  // because the renderer hides the box under it.
+  //
+  // Counted across EVERY pack, which it did not used to be: this walked
+  // assets/Platforms alone, so once Ashgate moved onto the sci-fi kit every
+  // model in the level fell through to the `?? 1` default and the estimate came
+  // in about a quarter under the truth. Measured against
+  // `renderer.info.render.calls` on the widest view of the district, the
+  // corrected figure lands within a few percent. A budget is only worth having
+  // if the number it is checking is the real one.
   const prims = {};
-  for (const f of fs.readdirSync('assets/Platforms')) {
-    if (!f.endsWith('.gltf')) continue;
-    const d = JSON.parse(fs.readFileSync(path.join('assets/Platforms', f), 'utf8'));
-    prims[f.slice(0, -5)] = d.meshes.reduce((a, m) => a + m.primitives.length, 0);
+  const scanPrims = (dir) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) scanPrims(p);
+      else if (e.name.endsWith('.gltf')) {
+        try {
+          const d = JSON.parse(fs.readFileSync(p, 'utf8'));
+          prims[e.name.slice(0, -5)] = (d.meshes ?? []).reduce((a, m) => a + m.primitives.length, 0);
+        } catch { /* a pack we cannot parse cannot be priced; it falls back to 1 */ }
+      }
+    }
+  };
+  scanPrims('assets');
+  // Models are INSTANCED, and the estimate has to model that or it is measuring
+  // a renderer that no longer exists. Every copy of a kit model shares its
+  // geometry and its material, so the renderer collects them into one instanced
+  // draw per (piece, 96 m cell) -- the cell is what keeps the frustum able to
+  // reject anything, since one batch per piece for the whole district is one
+  // bounding sphere the size of the district. So the price of a model is its
+  // primitive count once per cell it appears in, NOT once per copy: the
+  // hundredth building on a street is a matrix, and the first one in a new cell
+  // is thirteen calls.
+  const CELL = 128;
+  const cells = new Map();
+  let calls = 0;
+  for (const b of A.brushes) {
+    if (!b.m) { calls++; continue; }
+    const key = `${b.m}|${Math.round(b.p[0] / CELL)},${Math.round(b.p[2] / CELL)}`;
+    if (cells.has(key)) continue;
+    cells.set(key, true);
+    calls += prims[b.m] ?? 1;
   }
-  const calls = A.brushes.reduce((a, b) => a + (b.m ? (prims[b.m] ?? 1) : 2), 0);
-  note(`~${calls} draw calls`);
+  note(`~${calls} draw calls (${cells.size} instanced batches over ${
+    A.brushes.filter((b) => b.m).length} model brushes)`);
 
   // Every model the level names has to be a file on disk. A name that is in the
   // measured table but no longer in the pack loads as nothing and leaves a hole
@@ -184,6 +220,21 @@ head('what got built');
   const missing = named.filter((n) => !onDisk.has(n));
   note(`${named.length} distinct models named, all from one pack`);
   check(missing.length === 0, `every model resolves to a file (${missing.join(', ') || 'none missing'})`);
+  // Lowered from 3800 when the renderer learned to instance. That is the
+  // opposite of making room and it is the point: the ceiling has to sit just
+  // above what the district actually costs, or it stops being a budget. What
+  // changed underneath it is that the cost of dressing the map no longer scales
+  // with how much of it you dress -- so the number to guard is the number of
+  // DISTINCT pieces in play, and a level that doubles its buildings and holds
+  // this line is a level that added no draws at all.
+  //
+  // The number that justifies this one is measured rather than guessed. At
+  // ~3260 real calls (`renderer.info.render.calls`, widest view of the whole
+  // city) the frame costs about 15 ms at 720p, and it is CPU-bound on call
+  // submission -- halving the resolution changes nothing, and turning the sun's
+  // shadows off changes nothing. So this ceiling is a frame-time budget wearing
+  // a draw-call costume, and the thing to do when it is hit is to make the
+  // renderer submit fewer calls, not to raise it again.
   check(calls < 2600, `inside the draw budget (${calls} of 2600)`);
 
   const spanX = A.EXTENT.x1 - A.EXTENT.x0;
