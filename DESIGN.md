@@ -3195,3 +3195,81 @@ at one call to match.
 estimated calls against a 3800 ceiling, and 70 checks passing. Measured in a
 throttled tab: 1390 real calls and ~13 ms at street level, 2979 and ~22 ms on
 the widest possible view of the entire city.
+
+## 39. Using the buildings, since the pack has buildings in it
+
+The city kit ships three finished buildings -- `Building_Small_1`,
+`Building_Medium_2_001` and `Building_Large_2` -- and the first pass through the
+kit ignored them in favour of assembling frontages out of its 4 m wall modules.
+That was the wrong call, and it was wrong on the pack's own terms: the modules
+exist so you can build a facade at a *specific* size against gameplay geometry,
+and nothing about that argument applies to the city outside the map, where
+nothing is a specific size and nothing is gameplay.
+
+The arithmetic makes it embarrassing. A finished building is twelve primitives
+-- brick and concrete, a cornice, a glazed ground floor with a lit interior
+behind it, window bays up the front, a flat asphalt roof, twelve draw calls for
+all of it. Cladding a single storey of a single face out of glazed modules costs
+more than that. The kit was being used at roughly five times the price for a
+worse result everywhere it did not have to fit.
+
+### Where a finished building earns twelve calls
+
+At the end of a street. A district's streets are its sightlines: run one and its
+far end is a fixed part of the view for the whole length of it, and on this map
+that end was eight metres of rim wall and then sky. So the street mouths are
+read off the block grid rather than guessed -- the gaps between `COLS` and
+`ROWS`, with their widths -- and every one of the eighteen gets filled from
+outside: one building square on the centreline of a lane, a pair sharing a party
+wall across an avenue, which is three times as wide and would show daylight
+either side of a single one. A bigger one at each corner, set back and half
+again the size, because a row of equal buildings in a line is a fence.
+
+They stand at their own size, which is the only size they read at. The windows
+and doors in them are modelled at human scale and stop being windows and doors
+the moment they are stretched, and `verify:level`'s distortion rule is what
+keeps that honest -- it compares a prop's three axes against each other, so the
+only way to place one of these is uniformly.
+
+The rim is 8 m and these are 17 to 28, so they clear it from anywhere on the
+ground. That is the whole point: the view down every street on the map now ends
+in a building instead of in a wall.
+
+### Where it does not, and what goes there instead
+
+Everything between the mouths is a plain brush with the window facade on it: one
+call, and one more for its cornice band. Fourteen to twenty-six metres tall,
+against the district's own twenty-four to seventy-six, so it reads as the city
+the finished buildings stand in rather than competing with the tower ring behind
+for the skyline.
+
+That split -- models at the sightlines, masses in between -- is the same
+principle as the ground-floor cladding one level down, and it paid for itself
+twice. The far ring of backdrop towers came down from fifty-four to thirty-two,
+because the near silhouette is buildings now and twenty towers' worth of calls
+buys a great deal more standing where you can see the brick on them. The stepped
+towers lost the cornice band on each setback: at 300 m a 1.2 m band is a pixel
+and a half, and forty of them is a building's worth of calls spent on something
+nobody can resolve.
+
+### Two things that had to be true first
+
+The buildings are glazed on their own +Z face, the same convention as the kit's
+wall panels and the opposite of the sci-fi kit's `_Straight` pieces, so turning
+one to face the district is a yaw and nothing else. Getting the along-side axis
+backwards mirrors an entire row, which is invisible until you notice that the
+street mouth on the north side is filled and the one on the south side is a gap.
+
+And they needed ground. The district's floor stops at the rim, so the first
+attempt was thirty-four models standing on nothing -- which you do not notice
+looking at a building, and do notice looking *between* two of them from the
+crown. There is a plate under the whole outer city now, dark, and wide enough
+that its edge is past where the fog has finished.
+
+### Where it ended up
+
+1990 brushes, 1106 wearing a model, ~3709 estimated calls against the same 3800
+ceiling, all 70 checks passing. The thirty-four buildings cost 439 calls and
+about 6 ms in the widest aerial view of the entire city -- and nothing
+measurable at street level, where you are looking down one street at a time and
+the frustum throws away all but a handful of them.

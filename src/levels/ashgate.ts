@@ -1678,21 +1678,178 @@ for (const s of [-1, 1]) {
 // city stops at a wall with nothing behind it, which is the moment a place
 // turns back into a level.
 //
-// So: a ring of masses beyond the rim, out where the fog is already taking
-// them. They are three brushes each and carry no props, no decals and no
-// gameplay — you cannot reach them and there is nothing on them to reach. All
-// they do is stand between the rim and the sky, which is a job that only needs
-// a silhouette and a few lit floors.
+// It is two layers, and they are two different jobs.
+//
+// The near layer is BUILDINGS. The city pack ships three finished ones —
+// `Building_Small_1`, `Building_Medium_2_001` and `Building_Large_2` — and each
+// is a whole house in one model: brick and concrete, a cornice, a glazed ground
+// floor with a lit interior behind the glass, window bays up the front, a flat
+// asphalt roof. Twelve primitives for all of it. Cladding one of the district's
+// own masses out of 4 m wall modules costs more than twelve for a SINGLE STOREY
+// of a single face, and that arithmetic is the whole argument for where each
+// kind belongs: modules on the ground floor of the blocks you run past, and
+// finished buildings everywhere the player only ever looks at.
+//
+// They stand on the ground outside the rim at their own size, which is the only
+// size they read at — the windows and doors in them are modelled at human
+// scale, and stop being windows and doors the moment they are stretched. The
+// rim is 8 m and these are 17 to 28, so they clear it from anywhere you can
+// stand: the view down every street on the map now ends in a building instead
+// of in a wall.
+//
+// The far layer is the ring of masses beyond them, out where the fog already
+// has them. Those carry no props, no decals and no gameplay — you cannot reach
+// them and there is nothing on them to reach. All they do is stand between the
+// near layer and the sky, and that is a job for a silhouette.
+
+/** The pack's finished buildings. */
+const BLOCKS = ['Building_Small_1', 'Building_Medium_2_001', 'Building_Large_2'];
+
+// The ground the rest of the city stands on. The district's floor stops at the
+// rim, so without this every building past it is a model hanging over nothing —
+// and it is the gaps BETWEEN them, seen from the crown, where you would notice.
+box([0, -0.05 - BASE / 2, 0], [1500, BASE, 1500], shade(STREET, 0.34), undefined, S_STREET);
+
+/**
+ * One building of the outer city, on the ground, turned to face the district.
+ *
+ * The kit's buildings are glazed on their own +Z face — the same convention as
+ * its wall panels, and the opposite of the sci-fi kit's `_Straight` pieces — so
+ * pointing one at the map is a yaw and nothing else. The scale is uniform by
+ * construction, because `cityProp` sizes the brush from the measured box; on a
+ * model this large that is the difference between a building and a diorama.
+ */
+function outerBlock(m: string, x: number, z: number, inx: number, inz: number, k: number) {
+  cityProp(m, x, 0, z, Math.atan2(inx, inz), k);
+}
+
+// Where they stand is not "spaced out along the rim" — it is AT THE END OF
+// EVERY STREET. A district's streets are its sightlines: run one and its far
+// end is a fixed part of the view for the whole length of it, and on this map
+// that far end was eight metres of rim and then sky. So the streets get read
+// off the block grid and every mouth is filled — one building square on the
+// centreline of the narrow ones, a pair across the mouth of the avenues, which
+// are three times as wide and would show daylight either side of a single one.
+//
+// Then a bigger one at each corner, half again the size and set back, because a
+// row of equal buildings in a line is a fence. Corners are where a real grid
+// puts its tall thing, and corners are what you see from the roofs.
+//
+// Everything BETWEEN the mouths is a plain mass with the window facade on it,
+// one draw call and one for its cornice. That split is the whole economy of
+// this ring: a finished model is twelve calls and worth every one of them when
+// it is the thing at the end of the street you are running down, and worth none
+// of them for the fifth building along a row you are seeing edge-on at 200 m.
+{
+  /** The middle of each gap between blocks — which is to say, the streets. */
+  const mids = (ss: typeof COLS) => ss.slice(1).map((s, i) => (ss[i].hi + s.lo) / 2);
+  /** And how wide each one is, since an avenue needs more building than a lane. */
+  const widths = (ss: typeof COLS) => ss.slice(1).map((s, i) => s.lo - ss[i].hi);
+  const SIDES = [
+    { ox: rimX + 1, oz: 0, inx: -1, inz: 0, at: mids(ROWS), wide: widths(ROWS), half: rimZ, seed: 31 },
+    { ox: -rimX - 1, oz: 0, inx: 1, inz: 0, at: mids(ROWS), wide: widths(ROWS), half: rimZ, seed: 977 },
+    { ox: 0, oz: rimZ + 1, inx: 0, inz: -1, at: mids(COLS), wide: widths(COLS), half: rimX, seed: 4409 },
+    { ox: 0, oz: -rimZ - 1, inx: 0, inz: 1, at: mids(COLS), wide: widths(COLS), half: rimX, seed: 8171 },
+  ];
+  type Side = typeof SIDES[number];
+  /**
+   * The centre of something standing on a side: `t` along it, `out` away from
+   * the rim.
+   *
+   * `t` runs along the side in the model's own +X once it is yawed to face in,
+   * which is the +Z side's -X and the -Z side's +X. Getting that backwards
+   * mirrors the whole row, which is invisible until you notice that the street
+   * mouth on the north side is filled and the one on the south side is a gap.
+   */
+  const spot = (s: Side, t: number, out: number): [number, number] =>
+    [s.ox + s.inz * t - s.inx * out, s.oz - s.inx * t - s.inz * out];
+  /** World coordinate along a side, in that side's own `t`. */
+  const tOf = (s: Side, c: number) => c * (s.inz - s.inx);
+  const sized = (h: number, lo: number, hi: number) => lo + ((h >>> 9) % 100) / 100 * (hi - lo);
+  for (const s of SIDES) {
+    /** What the row has already used up, so the filler knows where the gaps are. */
+    const taken: [number, number][] = [];
+    const put = (t: number, back: number, m: string, k: number) => {
+      const nat = CITY[m];
+      const [x, z] = spot(s, t, back + nat[2] * k / 2);
+      outerBlock(m, x, z, s.inx, s.inz, k);
+      taken.push([t - nat[0] * k / 2, t + nat[0] * k / 2]);
+      return nat[0] * k;
+    };
+    for (let i = 0; i < s.at.length; i++) {
+      const t = tOf(s, s.at[i]);
+      const h = hash(s.seed + i * 1013);
+      const m = BLOCKS[h % BLOCKS.length];
+      const k = sized(h, 0.95, 1.2);
+      if (s.wide[i] < 14) {
+        // A lane: one building across it, and the run is closed.
+        put(t, 0, m, k);
+        continue;
+      }
+      // An avenue: a pair sharing a party wall over the centreline, so the mouth
+      // is closed by masonry rather than by one building with sky beside it.
+      const m2 = BLOCKS[(h >>> 3) % BLOCKS.length];
+      const k2 = sized(hash(h), 0.95, 1.2);
+      put(t - CITY[m][0] * k / 2 + 0.3, 0, m, k);
+      put(t + CITY[m2][0] * k2 / 2 - 0.3, 0, m2, k2);
+    }
+    // The corners, set back behind the row and half again as tall.
+    for (const end of [-1, 1]) {
+      const h = hash(s.seed * 7 + end * 5099);
+      const m = BLOCKS[h % BLOCKS.length];
+      const k = sized(h, 1.4, 1.9);
+      put(end * (s.half - CITY[m][0] * k / 2 - 4), 22, m, k);
+    }
+    // And the rest of the row: masses in whatever the models left over. Low —
+    // 14 to 26 m, against the district's own 24 to 76 — because the job here is
+    // to be the city the finished buildings stand in, not to compete with the
+    // tower ring behind it for the skyline.
+    taken.sort((a, b) => a[0] - b[0]);
+    let cur = -s.half;
+    for (let i = 0; i <= taken.length; i++) {
+      const end = i < taken.length ? taken[i][0] : s.half;
+      let free = end - cur;
+      let at = cur;
+      // Split anything longer than a building into buildings, rather than
+      // stretching one mass over sixty metres of frontage.
+      for (let n = 0; free > 16 && n < 3; n++) {
+        const h = hash(s.seed * 3 + i * 809 + n * 97);
+        const bw = Math.min(free - 2, 16 + (h % 18));
+        const bd = 14 + ((h >>> 5) % 12);
+        const th = 14 + ((h >>> 9) % 13);
+        const [x, z] = spot(s, at + bw / 2 + 1, bd / 2 + ((h >>> 15) % 7));
+        const tint = shade(pick(FACADE_TINTS, s.seed + i * 5 + n), 0.95);
+        const sx = Math.abs(s.inz) > 0.5 ? bw : bd;
+        const sz = Math.abs(s.inz) > 0.5 ? bd : bw;
+        box([x, (th - 10) / 2, z], [sx, th + 10, sz], tint, undefined, S_MASS);
+        box([x, th - 0.6, z], [sx + 1, 1.2, sz + 1], TRIM, undefined, S_TRIM);
+        at += bw + 2;
+        free -= bw + 2;
+      }
+      if (i < taken.length) cur = Math.max(cur, taken[i][1]);
+    }
+  }
+}
+
 {
   const RING_IN = 250;
   const RING_OUT = 380;
-  /** The rectangle nothing out here may stand inside: the district and its rim. */
-  const CLEAR_X = (EXTENT.x1 - EXTENT.x0) / 2 + PAVE + 30;
-  const CLEAR_Z = (EXTENT.z1 - EXTENT.z0) / 2 + PAVE + 30;
-  for (let i = 0; i < 54; i++) {
+  /**
+   * The rectangle nothing out here may stand inside: the district, its rim, and
+   * now the two rows of buildings against it. That last clearance is why this
+   * is 75 m rather than the 30 it was — the far ring used to start where the
+   * near city now stands, and a backdrop tower growing out of a rooftop is the
+   * same bug whether the roof belongs to the map or to the city behind it.
+   */
+  const CLEAR_X = (EXTENT.x1 - EXTENT.x0) / 2 + PAVE + 75;
+  const CLEAR_Z = (EXTENT.z1 - EXTENT.z0) / 2 + PAVE + 75;
+  // Thirty-two, down from fifty-four. The near silhouette is buildings now, and
+  // twenty towers' worth of draw calls buys a great deal more standing where
+  // you can see the brick on them than it ever did out here.
+  for (let i = 0; i < 32; i++) {
     const h = hash(i * 7919);
     // Spread round the compass with a jitter, so the ring is not a polygon.
-    const ang = (i / 54) * Math.PI * 2 + ((h % 100) / 100 - 0.5) * 0.09;
+    const ang = (i / 32) * Math.PI * 2 + ((h % 100) / 100 - 0.5) * 0.09;
     let rad = RING_IN + ((h >>> 7) % 100) / 100 * (RING_OUT - RING_IN);
     // Taller further out, which is how a skyline behind a skyline reads: the
     // near ring cannot hide the far one, so the depth stays legible.
@@ -1730,14 +1887,16 @@ for (const s of [-1, 1]) {
     const cap = h % 4;
     let crest = top;
     if (cap === 0 || cap === 1) {
-      // Stepped: a smaller mass set back on top, twice for the tall ones.
+      // Stepped: a smaller mass set back on top, twice for the tall ones. The
+      // step used to carry a cornice band of its own, the way the main mass
+      // does. At 300 m a 1.2 m band is a pixel and a half, and forty of them
+      // is a whole building's worth of calls spent on something unresolvable.
       let cy = top;
       let cw = w * 0.62;
       let cd = d * 0.62;
       for (let step = 0; step < (cap === 0 ? 1 : 2); step++) {
         const ch = 8 + ((h >>> (3 + step * 4)) % 20);
         box([x, cy + ch / 2, z], [cw, ch, cd], tint, undefined, S_MASS);
-        box([x, cy + ch - 0.6, z], [cw + 1, 1.2, cd + 1], TRIM, undefined, S_TRIM);
         cy += ch;
         cw *= 0.62;
         cd *= 0.62;
