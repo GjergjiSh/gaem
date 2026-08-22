@@ -3046,3 +3046,92 @@ in the same greys. Three changes, in rough order of how much each bought:
 
 1524 brushes, 708 wearing a model, 58 distinct models from one pack family,
 ~2340 draw calls against the 2600 budget, and all 70 checks still passing.
+
+
+## 37. Bringing it to life, and paying for it
+
+Three things were still wrong after 36. Buildings met the ground as one box
+driven into another. The skyline behind the map was a row of flat-topped
+silhouettes. And nowhere in the district was doing anything in particular —
+every frontage was the same lamp, the same crate, the same door.
+
+### Where a building meets the ground
+
+Nothing on a street is one plane from the pavement to the roof. It steps, and
+that step is the part you actually stand next to. Every mass now gets three
+brushes at its base: a wide low **foot** in the pavement's own material, a
+**ground storey** in a different material half a metre proud of the wall, and a
+**canopy** in paint over the footway with a lit strip tucked up into its soffit.
+
+All of it is built OUTWARD, because the mass is one solid box and a recess would
+simply be hidden inside it. Proud is the better shape anyway: the canopy is a
+metre of ledge round every building in the district at a height you can reach.
+
+Two tuning notes that cost a rebuild each. The ground storey wears the road
+surface, whose base map is dark, so a tint picked to *look like* a dark
+shopfront lands at nearly black — the tint has to be chosen against the map, not
+against the intention. And the canopy's overhang shadows everything under it,
+which is where all the street detail lives, so it came back from 1.5 m to 1.1 m.
+
+### Paint that survives being in shadow
+
+Every coloured thing here — canopies, awnings, hazard lips — hangs at the bottom
+of a street, under an overhang, on a face the dusk sun never reaches. Lit only
+by the sky it goes black, and a black canopy is not a colour, it is a gap. The
+`paint` surface carries a quarter of a stop of its own colour, which is enough
+to read as paint at street level and never enough to read as a light.
+
+The palette for it is deliberately **the rest of the wheel**: coral, green,
+magenta, sea, lime, periwinkle. The first version had an orange, a lilac and a
+teal in it, and every one of those was a quiet lie told to a player who has been
+taught that amber means wallrun, violet means slide and cyan means thruster.
+
+### Places that are somewhere
+
+Ten frontages are hand-assigned a job instead of the generic kit — **loading
+dock, garage, market row, plant compound** — from a table rather than a hash,
+because the whole point is that a bay differs from its neighbour and a random
+draw puts two loading docks side by side about as often as not. Each is about a
+dozen brushes off the same pack: something big against the wall for silhouette,
+a colour, a light, and one piece of paint that names it. The generic street kit
+now leaves a hole where a bay is, because a street lamp in the middle of a
+loading dock undoes the entire idea.
+
+Signage everywhere else: the pack's floor decals mounted vertically — `wallProp`
+already tips a flat-Y model face-out, which is exactly what a poster needs.
+
+The backdrop towers ended flat; now every one of them ends in one of four ways
+by hash, one of which is a mast, and a few carry a billboard the size of a
+building turned to face the middle of the district.
+
+### What it cost, and what was done about it
+
+Adding all of that took the frame from about 9 ms to 25 ms at 720p, which is not
+a price worth paying for scenery. Measured rather than guessed at:
+
+* Halving the resolution changed nothing and turning shadows off changed
+  nothing, so it was never fill-rate. It was **CPU-bound on draw submission**.
+* Hiding the props dropped the frame from 24.6 ms to 10.7 ms while removing only
+  930 of 3260 calls — so props cost roughly 15 µs a call against 4.5 µs for
+  everything else.
+
+The cause was `instance()` cloning every material per copy, which is correct for
+a robot that flashes red when hit and pure waste for a lamppost: every clone is
+a program bind and five texture binds the renderer cannot batch. Scenery now
+shares its materials (`share: true`) — **24.6 ms to 17 ms**. The brush outlines
+were doing the same thing on a smaller scale, a fresh `LineBasicMaterial` per
+brush for seventeen hundred identical black lines; one shared material took the
+scene from 1927 materials to 207.
+
+The draw budget in `verify:level` was also lying, and had been since Ashgate
+moved onto the sci-fi pack: it only knew how to price the old Platforms kit, so
+every sci-fi model fell through to a `?? 1` default and the estimate came in a
+quarter under the truth. It sweeps every pack now. The ceiling moved to 3800,
+which is a frame-time budget wearing a draw-call costume — at ~3260 real calls
+the widest view of the whole city costs about 15 ms, and the thing to do when it
+is hit is to submit fewer calls, not to raise it again.
+
+### Where it ended up
+
+1721 brushes, 791 wearing a model, ~3680 estimated calls (~3260 real on the
+widest view), 70 checks passing.

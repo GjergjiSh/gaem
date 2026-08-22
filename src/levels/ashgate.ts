@@ -233,6 +233,31 @@ const PLINTH_C = 0x5a6070;  // the base course every mass stands on
 /** The footway: pale, warm, and nothing like either the road or the walls. */
 const PAVE_C = 0x9aa0a4;
 const PROP_C = 0xffffff;    // never seen: a prop's model hides its brush
+/**
+ * Paint. The one thing in this district that is allowed to be a colour rather
+ * than a material — canopies, shutters, signs, awnings, the stripe round a
+ * loading bay.
+ *
+ * Chosen to stay OUT OF THE WAY of the three colours that carry rules. Amber,
+ * violet and cyan mean run along it, slide down it and thrust off it, and they
+ * only mean that while nothing else on the map is wearing them. So the paint
+ * list is deliberately the rest of the wheel — coral, green, magenta, sea, lime,
+ * periwinkle — with no amber, no violet and no cyan in it. The first version had
+ * an orange, a lilac and a teal in the list and every one of them was a quiet
+ * lie told to the player at street level.
+ *
+ * They are also never on anything you can run along, and they are small: a
+ * canopy, an awning, a hazard lip, a sign.
+ */
+const ACCENT = [
+  0xe86a6a,   // coral
+  0x74c07a,   // green
+  0xd94f7a,   // magenta
+  0x2e8f6f,   // sea
+  0xd6d05f,   // lime
+  0x6f8fd6,   // periwinkle
+];
+
 /** Window light, warm — the common one, because most of this place is offices. */
 const LIT_WARM = 0xffb765;
 /** Window light, cold. A few buildings on a different shift. */
@@ -289,6 +314,8 @@ const S_CRATE = 'crate';
 const S_PADDED = 'padded';
 const S_MARKED = 'marked';
 const S_LAMP = 'lamp';
+/** Colour that keeps reading when the sun cannot reach it — see surfaces.ts. */
+const S_PAINT = 'paint';
 
 const HALF_PI = Math.PI / 2;
 
@@ -940,11 +967,56 @@ function mast(r: Roof, k: number) {
  * collider count of the district for exactly the same silhouette.
  */
 const PLINTH = 5.5;
+
+/**
+ * Where a building meets the ground, which is the part you actually stand next
+ * to and the part that was a box driven straight into another box.
+ *
+ * Nothing on a street is one plane from the pavement to the roof. It steps: a
+ * foot wide enough to kick, a ground storey that is not the same thing as the
+ * wall above it, and something sticking out over the pavement to stand under.
+ * Three brushes, in three moves, and the profile does the work — this is not
+ * detail, it is silhouette, which is the only kind of detail that survives
+ * being looked at from forty metres away at speed.
+ *
+ * All of it is proud of the wall rather than cut into it, because the mass is
+ * one solid box and a recess would simply be hidden inside it. Proud is also
+ * the more useful shape: the canopy is a metre and a half of ledge round every
+ * building on the map, at a height you can reach.
+ */
+const FOOT_H = 1.0, FOOT_OUT = 1.0;
+const SHOP_H = 4.6, SHOP_OUT = 0.5;
+const CANOPY_OUT = 1.1;
+function groundStorey(r: Roof, k: number) {
+  // The foot. Wide, low, and the same material as the pavement it stands on, so
+  // the building looks like it was poured onto the footway rather than dropped.
+  box([r.cx, FOOT_H / 2, r.cz], [r.w + FOOT_OUT * 2, FOOT_H, r.d + FOOT_OUT * 2],
+    PLINTH_C, undefined, S_PAVING);
+  // The ground storey: darker, glazed, and its own thing. This is the band your
+  // eye uses to judge how tall everything above it is.
+  // Lighter than it looks it should be. This band wears the ROAD surface, whose
+  // base map is the dark worn panel, so a tint chosen to look like a dark
+  // shopfront lands at nearly black and every building on the map ends up
+  // standing in its own shadow. The tint has to be picked against the map, not
+  // against the intention.
+  box([r.cx, (FOOT_H + SHOP_H) / 2, r.cz],
+    [r.w + SHOP_OUT * 2, SHOP_H - FOOT_H, r.d + SHOP_OUT * 2],
+    0xa8b0bd, undefined, S_ROAD);
+  // And the canopy over it, in paint. One brush, and it is the single most
+  // visible thing at street level in the whole district — a line of colour at
+  // head height running the length of every block, with a shadow under it.
+  const c = pick(ACCENT, k * 3 + 1);
+  box([r.cx, SHOP_H + 0.3, r.cz],
+    [r.w + CANOPY_OUT * 2, 0.6, r.d + CANOPY_OUT * 2], c, undefined, S_PAINT);
+  // A lit strip tucked under the canopy's lip, which is what a shopfront is
+  // after dark: not a bright wall, a bright soffit and a dark pavement.
+  box([r.cx, SHOP_H - 0.15, r.cz],
+    [r.w + (CANOPY_OUT - 0.35) * 2, 0.3, r.d + (CANOPY_OUT - 0.35) * 2],
+    LIT_WARM, undefined, S_LAMP);
+}
+
 function facade(r: Roof, from = 0) {
-  if (from === 0) {
-    box([r.cx, PLINTH / 2, r.cz], [r.w + 0.16, PLINTH, r.d + 0.16], PLINTH_C,
-      undefined, S_PLINTH);
-  }
+  if (from === 0) groundStorey(r, Math.round(r.cx) * 31 + Math.round(r.cz));
   // Whether this building's lights are on, and what colour they are. By
   // position, so a building is consistent with itself and different from the one
   // next to it — a street where every window is the same warm strip is a
@@ -1073,6 +1145,184 @@ for (let ri = 0; ri < ROWS.length; ri++) {
 
 interface Face { x: number; z: number; nx: number; nz: number; along: 'x' | 'z'; len: number }
 
+// --- the places that are somewhere ---------------------------------------------
+//
+// A street lined with identical lamps and identical crates is a street with a
+// texture on it, not a street. What makes a place read as a PLACE is that
+// stretches of it are doing different jobs — this bit is a loading dock, that
+// bit is a workshop with the door up, that bit is a row of stalls — and you can
+// tell which is which from across the road, before you can see any of the
+// detail, purely from the shape and the colour of what is stuck to the wall.
+//
+// So a handful of frontages get a THEME instead of the generic kit. Each one is
+// about a dozen brushes and every one of them is off the same pack, and each is
+// built the same way: something big against the wall to give the bay a
+// silhouette, a colour, a light, and one piece of paint that names it.
+//
+// All of it stands on the footway and inside `APRON_OUT` of the wall, which is
+// the strip the route never runs down.
+
+/** A sign board hung flat on a wall: a lit panel with pack art on top of it. */
+function signboard(
+  f: Face, along: number, y: number, w: number, h: number, c: number, art: string,
+) {
+  const x = f.along === 'x' ? f.x + along : f.x;
+  const z = f.along === 'z' ? f.z + along : f.z;
+  // The board itself, 20 cm proud, lit so it reads at night.
+  const sw = f.along === 'x' ? w : 0.25;
+  const sd = f.along === 'x' ? 0.25 : w;
+  box([x + f.nx * 0.16, y + h / 2, z + f.nz * 0.16], [sw, h, sd], c, undefined, S_LAMP);
+  // And the artwork, hung on the board. The pack's decals are floor plates, so
+  // `wallProp` tips them up to face out — the same quarter turn a vent gets.
+  wallProp(art, f.nx, f.nz, x + f.nx * 0.3, y + h * 0.12, z + f.nz * 0.3,
+    Math.min(w, h) * 0.62);
+}
+
+/** A poster: pack art straight on the wall, no board. Cheap, and there can be many. */
+function poster(f: Face, along: number, y: number, art: string, scale: number) {
+  const x = f.along === 'x' ? f.x + along : f.x;
+  const z = f.along === 'z' ? f.z + along : f.z;
+  wallProp(art, f.nx, f.nz, x, y, z, scale);
+}
+
+/** Art that reads as signage rather than as floor marking. */
+const SIGN_ART = ['Decal_Logo', 'Decal_Logo_Letters', 'Decal_Sign', 'Decal_XSign'];
+const POSTER_ART = ['Decal_Logo_Small', 'Decal_Sign', 'Decal_A', 'Decal_K', 'Decal_V',
+  'Decal_X', 'Decal_Z', 'Decal_XSign'];
+
+export type Bay = 'loading' | 'garage' | 'market' | 'plant';
+
+/**
+ * Dress a stretch of frontage as somewhere in particular.
+ *
+ * `at` is the offset along the face of the bay's centre and `span` how much of
+ * the face it takes; everything is placed relative to those two, so a bay can be
+ * dropped on any wall on the map without knowing which wall it is. `out` is
+ * measured away from the wall and never exceeds the footway, because the middle
+ * of the street is the run-up for every roof in the district.
+ */
+function bay(f: Face, kind: Bay, at: number, span: number, k: number) {
+  /** World position at `t` along the face and `out` metres off the wall. */
+  const on = (t: number, out: number): [number, number] => [
+    (f.along === 'x' ? f.x + at + t : f.x) + f.nx * out,
+    (f.along === 'z' ? f.z + at + t : f.z) + f.nz * out,
+  ];
+  /** A box lying along the face: `len` along it, `dep` off it. */
+  const slab = (
+    t: number, out: number, y: number, len: number, dep: number, h: number,
+    c: number, surf: string,
+  ) => {
+    const [x, z] = on(t, out);
+    box([x, y + h / 2, z], f.along === 'x' ? [len, h, dep] : [dep, h, len], c, undefined, surf);
+  };
+  const c = pick(ACCENT, k);
+  const back = APRON;
+
+  if (kind === 'loading') {
+    // A dock at truck-bed height, which is the one piece of street furniture
+    // that tells you what a building is FOR. Two shutters behind it, a canopy
+    // over it, and the pallets nobody has moved.
+    const DEP = 4.2;
+    slab(0, DEP / 2, back, span, DEP, 1.1, shade(PLINTH_C, 1.2), S_DECK);
+    // The painted lip: hazard colour, a hand's width proud, right on the edge.
+    slab(0, DEP - 0.25, back + 1.1, span, 0.5, 0.12, c, S_PAINT);
+    slab(0, DEP / 2, 6.4, span, DEP + 0.6, 0.5, c, S_PAINT);           // canopy
+    // The soffit light sits UP INTO the canopy rather than under it. A strip
+    // hung a hand's width below the thing it is fixed to is a strip attached to
+    // nothing, which is both the rule this level keeps and, at this scale,
+    // visibly true.
+    slab(0, DEP / 2 + 0.4, 6.25, span * 0.9, 0.35, 0.28, LIT_WARM, S_LAMP);
+    for (const sgn of [-1, 1]) {
+      const t = sgn * span * 0.26;
+      const [x, z] = on(t, 0);
+      wallProp('Door_Frame_Square', f.nx, f.nz, x, back + 1.1, z);
+      wallProp('Door_DarkMetal', f.nx, f.nz, x, back + 1.1, z);
+    }
+    // Freight on the dock, and a drum that rolled off it.
+    const [px, pz] = on(-span * 0.4, 1.6);
+    prop('Prop_Crate_Tarp_Large', px, back + 1.1, pz, yawOf(f));
+    const [qx, qz] = on(span * 0.42, 2.2);
+    prop('Prop_Crate_Large', qx, back + 1.1, qz, yawOf(f));
+    const [bx, bz] = on(span * 0.5 + 2.4, 1.2);
+    prop('Prop_Barrel1', bx, back, bz);
+    signboard(f, at, 7.6, span * 0.34, 1.9, c, pick(SIGN_ART, k));
+    decalAt(f, at - span * 0.5 - 3, DEP - 1, 'Decal_Dashes', 2.4);
+  } else if (kind === 'garage') {
+    // A workshop with the door up. The recess is the trick: a dark box set into
+    // the frontage reads as a room you cannot quite see into, and one hole in a
+    // wall does more for a street than ten objects in front of it.
+    slab(0, 1.4, back, span * 0.62, 2.8, 5.2, 0x1a1e26, S_ROAD);
+    const [gx, gz] = on(0, 0.2);
+    wallProp('Door_Frame_SquareTall', f.nx, f.nz, gx, back, gz);
+    // Lit from inside, low down, so the light spills onto the pavement.
+    slab(0, 2.6, back + 0.06, span * 0.5, 0.5, 0.18, LIT_COLD, S_LAMP);
+    // The shop: shelves down one side, a bench, drums, a locker.
+    const [sx, sz] = on(-span * 0.24, 1.1);
+    prop('Prop_Shelves_WideTall', sx, back, sz, yawOf(f));
+    const [wx, wz] = on(span * 0.24, 1.2);
+    prop('Prop_Desk_Medium', wx, back, wz, yawOf(f));
+    const [lx, lz] = on(span * 0.42, 0.9);
+    prop('Prop_Locker', lx, back, lz, yawOf(f));
+    const [dx, dz] = on(-span * 0.46, 2.0);
+    prop('Prop_Barrel2_Open', dx, back, dz);
+    prop('Prop_Barrel2_Closed', dx + 1.1, back, dz);
+    signboard(f, at + span * 0.42, 6.2, span * 0.3, 1.6, c, pick(SIGN_ART, k + 3));
+    poster(f, at - span * 0.5 - 2.2, 3.1, pick(POSTER_ART, k), 1.7);
+    decalAt(f, at, 3.4, 'Decal_XSign', 2.2);
+  } else if (kind === 'market') {
+    // Three stalls under three awnings in three colours. The most colour
+    // anywhere on the map, all of it at head height, none of it on anything you
+    // can run along.
+    for (let i = -1; i <= 1; i++) {
+      const t = i * (span / 3);
+      const ac = ACCENT[(hash(k + i + 2) % ACCENT.length)];
+      slab(t, 2.0, back, span / 3.4, 1.5, 1.0, shade(FURN, 0.9), S_CRATE);   // counter
+      // The awning reaches back INTO the wall it hangs off. An awning is a
+      // cantilever and this one has to actually be attached to something —
+      // floated a metre off the frontage it is a coloured plank in mid-air.
+      slab(t, 1.2, 2.9, span / 3.1, 2.6, 0.34, ac, S_PAINT);
+      slab(t, 1.2, 2.78, span / 3.4, 2.0, 0.24, LIT_WARM, S_LAMP);           // under it
+      const [cx, cz] = on(t + span / 8, 1.4);
+      prop(pick(['Prop_Crate', 'Prop_Crate_Tarp', 'Prop_Ammo_Closed'], k + i), cx, back, cz,
+        yawOf(f));
+      poster(f, t + at, 4.6, pick(POSTER_ART, k + i * 5), 1.4);
+    }
+    decalAt(f, at, 3.6, 'Decal_Logo_Small', 2.6);
+  } else {
+    // A plant compound: railed off, humming, and lit from inside the fence.
+    const DEP = 3.4;
+    slab(0, DEP / 2, back, span, DEP, 0.2, shade(PLINTH_C, 0.9), S_STREET);
+    railAlong(f.along, ...railAt(f, at, DEP), span - 1);
+    const [px, pz] = on(-span * 0.28, 1.5);
+    prop('Column_Pipes', px, back, pz);
+    const [fx, fz] = on(span * 0.1, 1.5);
+    prop('Prop_Fan_Small', fx, back + 0.2, fz);
+    const [bx, bz] = on(span * 0.34, 1.3);
+    prop('Prop_Barrel_Large', bx, back + 0.2, bz);
+    prop('Prop_AccessPoint', bx + 1.4, back + 0.2, bz);
+    slab(0, 0.6, back + 0.2, span * 0.7, 0.4, 0.2, LIT_COLD, S_LAMP);
+    signboard(f, at, 5.4, span * 0.28, 1.5, ACCENT[0], 'Decal_XSign');
+  }
+}
+
+/** The yaw that turns a prop to face out of `f`. */
+function yawOf(f: Face) { return Math.atan2(f.nx, f.nz); }
+/** Where a rail runs along the outer edge of a bay `dep` metres deep. */
+function railAt(f: Face, at: number, dep: number): [number, number, number] {
+  return [
+    (f.along === 'x' ? f.x + at : f.x) + f.nx * dep,
+    APRON + 0.2,
+    (f.along === 'z' ? f.z + at : f.z) + f.nz * dep,
+  ];
+}
+/** Floor paint in front of a bay. */
+function decalAt(f: Face, at: number, out: number, art: string, scale: number) {
+  const x = (f.along === 'x' ? f.x + at : f.x) + f.nx * out;
+  const z = (f.along === 'z' ? f.z + at : f.z) + f.nz * out;
+  decal(art, x, APRON, z, f.along === 'x' ? 0 : HALF_PI, scale);
+}
+
+
 function frontage(f: Face, k: number) {
   // Clad the ground storey. The pack is modular on a 4 m grid, so the panels go
   // on as panels — at double size, which is a uniform scale and therefore not a
@@ -1120,30 +1370,50 @@ function solidFace(ri: number, ci: number, axis: 'x' | 'z') {
   return (ri + ci) % 2 === 0 ? axis === 'z' : axis === 'x';
 }
 
+/**
+ * Which frontage does which job, keyed by the same seed the face is dressed
+ * with. Hand-written rather than hashed: the point of a themed bay is that it is
+ * DIFFERENT from its neighbours, and a random draw puts two loading docks side
+ * by side about as often as not.
+ */
+const BAY_PLAN: Record<number, Bay> = {
+  100: 'loading', 102: 'market', 104: 'garage',
+  201: 'garage', 203: 'plant', 205: 'loading',
+  300: 'market', 302: 'plant',
+  401: 'loading', 403: 'garage',
+};
+
+/** Dress one street-facing wall: generic kit, a theme if it has one, posters. */
+function street(f: Face, k: number) {
+  frontage(f, k);
+  const kind = BAY_PLAN[k];
+  const span = Math.min(19, f.len * 0.4);
+  if (kind) bay(f, kind, 0, span, k);
+  streetKit(f, k, kind ? span : 0);
+  // A poster or two on the blank stretches either side, whatever the wall does
+  // for a living. Paper on a wall is the cheapest life there is.
+  for (const sgn of [-1, 1]) {
+    poster(f, sgn * f.len * 0.36, 4.2 + (hash(k + sgn) % 3) * 1.2,
+      pick(POSTER_ART, k * 7 + sgn), 1.5 + (hash(k * 5 + sgn) % 3) * 0.35);
+  }
+}
+
 for (let ci = 0; ci < COLS.length; ci++) {
   const C = COLS[ci];
   if (solidFace(1, ci, 'x')) {
-    const f: Face = { x: C.c, z: ROWS[1].hi, nx: 0, nz: 1, along: 'x', len: C.size };
-    frontage(f, 100 + ci);
-    streetKit(f, 100 + ci);
+    street({ x: C.c, z: ROWS[1].hi, nx: 0, nz: 1, along: 'x', len: C.size }, 100 + ci);
   }
   if (solidFace(2, ci, 'x')) {
-    const f: Face = { x: C.c, z: ROWS[2].lo, nx: 0, nz: -1, along: 'x', len: C.size };
-    frontage(f, 200 + ci);
-    streetKit(f, 200 + ci);
+    street({ x: C.c, z: ROWS[2].lo, nx: 0, nz: -1, along: 'x', len: C.size }, 200 + ci);
   }
 }
 for (let ri = 0; ri < ROWS.length; ri++) {
   const R = ROWS[ri];
   if (solidFace(ri, 1, 'z')) {
-    const f: Face = { x: COLS[1].hi, z: R.c, nx: 1, nz: 0, along: 'z', len: R.size };
-    frontage(f, 300 + ri);
-    streetKit(f, 300 + ri);
+    street({ x: COLS[1].hi, z: R.c, nx: 1, nz: 0, along: 'z', len: R.size }, 300 + ri);
   }
   if (solidFace(ri, 2, 'z')) {
-    const f: Face = { x: COLS[2].lo, z: R.c, nx: -1, nz: 0, along: 'z', len: R.size };
-    frontage(f, 400 + ri);
-    streetKit(f, 400 + ri);
+    street({ x: COLS[2].lo, z: R.c, nx: -1, nz: 0, along: 'z', len: R.size }, 400 + ri);
   }
 }
 
@@ -1157,11 +1427,14 @@ for (let ri = 0; ri < ROWS.length; ri++) {
  *
  * `(nx, nz)` points AWAY from the wall, so `out` is measured into the street.
  */
-function streetKit(f: Face, k: number) {
+function streetKit(f: Face, k: number, clear = 0) {
   const SPACING = 24;
   const n = Math.max(2, Math.floor(f.len / SPACING));
   for (let i = 0; i < n; i++) {
     const t = ((i + 0.5) / n - 0.5) * f.len;
+    // Nothing generic inside a themed bay. A street lamp standing in the middle
+    // of a loading dock is the whole point of having themed bays, undone.
+    if (Math.abs(t) < clear / 2 + 3) continue;
     const ax = f.along === 'x' ? f.x + t : f.x;
     const az = f.along === 'z' ? f.z + t : f.z;
     // A column with a light on it, standing 2.6 m off the wall.
@@ -1328,27 +1601,53 @@ for (const s of [-1, 1]) {
     // tower standing on its own visible bottom edge is a card, not a building.
     box([x, (top - 60) / 2, z], [w, top + 60, d], tint, undefined, S_MASS);
     box([x, top - 0.7, z], [w + 1.2, 1.4, d + 1.2], TRIM, undefined, S_TRIM);
-    // Two lit floors, at heights that do not line up with their neighbours'.
+    // No lit bands out here any more. They were carrying the backdrop's night
+    // read before the walls had windows in them; now they are two brushes per
+    // tower saying something the facade already says, and 54 towers' worth of
+    // that is a hundred draw calls better spent inside the map.
     const lit = h % 4 === 0 ? LIT_COLD : LIT_WARM;
-    for (let b = 1; b <= 2; b++) {
-      const y = top * (b === 1 ? 0.42 : 0.72);
-      box([x, y, z], [w + 0.5, 0.7, d + 0.5], lit, undefined, S_LAMP);
-    }
-    // Half of them get a crown — a smaller mass stepped back on top. Flat-topped
-    // boxes all the way round the horizon is the one thing that gives a backdrop
-    // away, because a real skyline is mostly things standing on other things.
-    if (h % 2 === 0) {
-      const cw = w * 0.55;
-      const cd = d * 0.55;
-      const ch = 8 + ((h >>> 3) % 22);
-      box([x, top + ch / 2, z], [cw, ch, cd], tint, undefined, S_MASS);
-      box([x, top + ch - 0.6, z], [cw + 1, 1.2, cd + 1], TRIM, undefined, S_TRIM);
-      // A beacon on top of whatever ends up highest.
-      if (top + ch > 90) {
-        box([x, top + ch + 1.2, z], [3, 1.4, 3], 0xff5a4a, undefined, S_LAMP);
+    // What it does at the top. Flat-topped boxes all the way round the horizon
+    // is the one thing that gives a backdrop away — a real skyline is mostly
+    // things standing on other things — so every tower ends in one of four
+    // ways, by hash, and no two neighbours end the same way for long.
+    const cap = h % 4;
+    let crest = top;
+    if (cap === 0 || cap === 1) {
+      // Stepped: a smaller mass set back on top, twice for the tall ones.
+      let cy = top;
+      let cw = w * 0.62;
+      let cd = d * 0.62;
+      for (let step = 0; step < (cap === 0 ? 1 : 2); step++) {
+        const ch = 8 + ((h >>> (3 + step * 4)) % 20);
+        box([x, cy + ch / 2, z], [cw, ch, cd], tint, undefined, S_MASS);
+        box([x, cy + ch - 0.6, z], [cw + 1, 1.2, cd + 1], TRIM, undefined, S_TRIM);
+        cy += ch;
+        cw *= 0.62;
+        cd *= 0.62;
       }
-    } else if (top > 88) {
-      box([x, top + 1.2, z], [3, 1.4, 3], 0xff5a4a, undefined, S_LAMP);
+      crest = cy;
+    } else if (cap === 2) {
+      // A mast — the outline that says communications rather than offices, and
+      // the one shape on a horizon that is unmistakably not a box.
+      const mh = 14 + ((h >>> 5) % 26);
+      box([x, top + mh / 2, z], [2.2, mh, 2.2], MAST, undefined, S_STEEL);
+      box([x, top + mh * 0.42, z], [9, 1.2, 9], MAST, undefined, S_STEEL);
+      crest = top + mh;
+    }
+    // A beacon on anything tall enough to need one, wherever its top ended up.
+    if (crest > 84) box([x, crest + 1.2, z], [3.2, 1.5, 3.2], 0xff5a4a, undefined, S_LAMP);
+    // And on a few of them, a sign the size of a building — the thing your eye
+    // goes to first in any night skyline, and the only saturated colour out
+    // here. Turned to face the middle of the district, because a billboard
+    // facing away from the only person in the city is a wasted billboard.
+    if (h % 7 === 0 && top > 50) {
+      const bw = Math.min(w, d) * 0.8;
+      const bh = Math.min(24, top * 0.3);
+      const inx = -Math.cos(ang);
+      const inz = -Math.sin(ang);
+      box([x + inx * (w / 2 + 0.6), top * 0.66, z + inz * (d / 2 + 0.6)],
+        Math.abs(inx) > Math.abs(inz) ? [1.2, bh, bw] : [bw, bh, 1.2],
+        pick(ACCENT, i * 5), undefined, S_LAMP);
     }
   }
 }

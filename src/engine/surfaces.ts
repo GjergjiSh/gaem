@@ -378,6 +378,23 @@ export const SURFACES: Record<string, SurfaceDef> = {
     emissive: 0xffffff, emissiveIntensity: 0.9,
   },
   /**
+   * Paint that survives being in shadow.
+   *
+   * Everything coloured in this district — canopies, awnings, hazard lips,
+   * shutters — hangs at the bottom of a street, under an overhang, on the side
+   * of a building the dusk sun never reaches. Lit only by the sky it goes black,
+   * and a black canopy is not a colour, it is a gap. A quarter of a stop of its
+   * own colour is enough to keep it reading as PAINT at street level without it
+   * ever looking like a light.
+   */
+  paint: {
+    base: { file: `${TRIM02}_BaseColor`, crop: PLATE_BAND },
+    normal: { file: `${TRIM02}_Normal`, crop: PLATE_BAND },
+    orm: { file: `${TRIM02}_ORM`, crop: PLATE_BAND },
+    tile: 2.4, roughness: 0.62, metalness: 0.1, bump: 1,
+    emissive: 'brush', emissiveIntensity: 0.28,
+  },
+  /**
    * A lit strip: no map at all, just the brush's own colour burning. Window
    * bands, floor lights, the beacons on the masts. This is what turns a
    * silhouette into a skyline after dark, and it costs one material.
