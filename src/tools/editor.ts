@@ -47,7 +47,6 @@ import { MODEL_NAMES, warm } from '../engine/models';
 import type { V3 } from '../core/vec';
 
 const BRUSH_COLOR = 0x8b5cf6;
-const HILITE = 0x2a3550;
 /** Editor fly speed, metres/sec. Shift multiplies it. */
 const FLY_SPEED = 34;
 const FLY_FAST = 4;
@@ -445,8 +444,11 @@ export class Editor {
 
   private highlight(kind: Sel['kind'], index: number, on: boolean) {
     if (kind === 'enemy') { this.enemies.highlight(index, on); return; }
-    const mesh = this.gfx.brushMeshes[index];
-    if (mesh) (mesh.material as THREE.MeshLambertMaterial).emissive.setHex(on ? HILITE : 0);
+    // The renderer owns this now. Brush materials are shared across every brush
+    // with the same surface and colour, so reaching in and setting `emissive`
+    // here lights up the whole district and clearing it afterwards puts out
+    // every window in the city.
+    this.gfx.highlightBrush(index, on);
   }
 
   /** Hand one object back to the group it came from, keeping it where it looks. */

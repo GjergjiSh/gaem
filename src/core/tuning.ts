@@ -493,10 +493,20 @@ export const T = {
     // The glTF kit's materials sit around 0.17 grey with no metalness, which is
     // a lot darker than the flat colours the placeholder boxes used. These are
     // here so the look can be dialled in live rather than guessed at in code.
-    sky: 1.1,           // hemisphere fill from above
-    sun: 1.6,           // the key light
-    fill: 0.55,         // a second light facing the other way, so unlit faces
-                        // are dim rather than black
+    //
+    // Raised across the board when the world stopped being flat fills and
+    // became textured PBR under a filmic curve: a base map is a multiplier
+    // BELOW one, tone mapping pulls the top end down again, and the two
+    // together cost about a stop and a half. Same scene, same intent, more
+    // light going into it.
+    sky: 2.2,           // hemisphere fill from above — also the ambient bounce
+                        // that keeps a shadow from being a hole
+    sun: 3.2,           // the key light
+    fill: 1.5,          // a second light facing the other way, so unlit faces
+                        // are dim rather than black. Carries more than it used
+                        // to: the kit's own models are dark, and against a
+                        // textured, sunlit district an unlit prop stops being
+                        // "in shadow" and starts being a hole
   },
 
   meters: {

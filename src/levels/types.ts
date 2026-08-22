@@ -13,6 +13,13 @@ export interface Brush {
    */
   m?: string;
   /**
+   * Which surface this brush is made of — see `engine/surfaces.ts`. Names a
+   * material recipe (maps, tiling rate, roughness), never a colour: `c` is
+   * still the colour and is multiplied over the texture, so a level's colour
+   * language survives an art pass intact. Omitted means the default surface.
+   */
+  t?: string;
+  /**
    * Decor: drawn, never collided with. Signs, railings, antennas, lights — the
    * things that make a place look like somewhere without being one more object
    * to hit at 40 u/s. A level can be dressed as heavily as you like and the

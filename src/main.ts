@@ -13,6 +13,7 @@ import { Wheel } from './tools/wheel';
 import { updates } from './tools/updates';
 import { Enemies, ROBOTS } from './engine/enemies';
 import { preloadModels } from './engine/models';
+import { preloadSurfaces } from './engine/surfaces';
 import { Weapon } from './engine/weapon';
 import { Projectiles } from './engine/projectiles';
 import { Sword } from './engine/sword';
@@ -26,7 +27,9 @@ const MAX_STEPS = 8;
 await initPhysics();
 // Models before anything builds a scene, so the world is never briefly made of
 // placeholder boxes that then pop. Everything else loads on demand.
-await preloadModels([...ROBOTS, ...LEVEL_MODELS]);
+// Surfaces alongside them, for the same reason: the first frame should be of
+// a finished world, not of one that dresses itself while you watch.
+await Promise.all([preloadModels([...ROBOTS, ...LEVEL_MODELS]), preloadSurfaces()]);
 
 const canvas = document.getElementById('view') as HTMLCanvasElement;
 const world = new RapierWorld(level.brushes, level.spawn);
