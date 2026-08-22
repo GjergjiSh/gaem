@@ -267,6 +267,26 @@ function paintLights(ctx: CanvasRenderingContext2D, w: number, h: number) {
 
 export const SURFACES: Record<string, SurfaceDef> = {
   /**
+   * No maps at all: the brush's colour, lit, and nothing else.
+   *
+   * This is what `ashgate-raw` is made of, and the only reason it exists. That
+   * level is the district with nothing from the asset packs on it — no models
+   * and no textures — so that the pair can be flown one after the other and the
+   * difference between them IS the art, with no argument about what counts.
+   *
+   * `tile` is meaningless here and has to be present anyway, because `boxFor`
+   * reads it to build UVs for a material that will never sample one.
+   */
+  flat: { tile: 1, roughness: 0.9, metalness: 0.05 },
+  /**
+   * The same, still glowing. A lamp, a painted canopy, a padded wall and a
+   * marked floor carry this map's colour language — amber is something to
+   * wallrun, violet is something to slide — and stripping the TEXTURES off a
+   * level is not the same as turning its lights off. The glow is the brush's
+   * own colour and comes from no file.
+   */
+  flatLit: { tile: 1, roughness: 0.85, metalness: 0.0, emissive: 'brush', emissiveIntensity: 0.5 },
+  /**
    * The default, and most of the district by area: the building volumes. A big
    * repeat, because these are read at fifty metres and a tight one turns into
    * moire long before you get close enough to see the detail.
