@@ -3381,6 +3381,15 @@ floating. Nothing under `character.stepHeight` was holding anything up, so the
 level plays the same without them. And ramps are never dropped for being thin,
 because some of them are and a ramp is a floor.
 
+No textures either. Every surface in that level is `flat` — the brush's colour,
+lit, sampling nothing — which needed one new entry in `SURFACES` and no other
+change, because a surface was already a name a brush asks for rather than
+anything a brush knows about. The exception is the ones that were GLOWING:
+lamps, painted canopies, padded walls and marked floors become `flatLit` and go
+on glowing, because stripping the textures off a level is not the same as
+turning its lights off and amber still has to mean "wallrun". 1024 flat brushes
+and 302 lit ones, and not one file sampled.
+
 `RAMP_BRUSHES` is a list of indices, so the raw level carries its own,
 renumbered as it is built. The suite runs twice now — `verify:level` on the clad
 district and `verify:level:raw` on this one — and both pass all seventy checks,

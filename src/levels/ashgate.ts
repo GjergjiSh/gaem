@@ -2689,12 +2689,20 @@ const RAW_PROP = 0x8f97a6;
  * anything up, so the level plays exactly as it did.
  */
 const PAINT_THIN = 0.35;
+/**
+ * And no textures either. Every surface in this level is `flat` — the brush's
+ * colour, lit, sampling nothing — except the ones that were glowing, which
+ * become `flatLit` and go on glowing. Stripping the textures off a level is not
+ * the same as turning its lights off, and amber still has to mean "wallrun".
+ */
+const LIT_SURFACES = new Set([S_LAMP, S_PAINT, S_MARKED, S_PADDED]);
+const rawSurface = (t?: string) => (t && LIT_SURFACES.has(t) ? 'flatLit' : 'flat');
 const bare = (b: Brush): Brush | null => {
-  if (!b.m) return b;
+  if (!b.m) return { ...b, t: rawSurface(b.t) };
   if (Math.min(b.s[0], b.s[1], b.s[2]) < PAINT_THIN) return null;
   const { m, ...rest } = b;
   void m;
-  return b.c === PROP_C ? { ...rest, c: RAW_PROP } : rest;
+  return { ...rest, t: rawSurface(b.t), c: b.c === PROP_C ? RAW_PROP : b.c };
 };
 /**
  * And the ramps, renumbered. `RAMP_BRUSHES` is a list of INDICES, and this level
