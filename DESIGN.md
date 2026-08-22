@@ -3438,3 +3438,69 @@ colours is one set in `rawColour` when that trade stops being worth it.
 of `ashgate.ts` from the clad level's brushes, so none of this touches the
 district's own generator — which is what keeps the two levels the same level.
 
+## 42. The Chute goes, the Line arrives
+
+The Chute was 142 m of 25° slab from the crown to the far side of the city, and
+it was the whole descent in one object: a single line, taken the same way every
+time, that you were on for eight seconds with nothing to do but hold the button.
+It is gone.
+
+What replaces it is not another slide. The Overpass — 300 m of elevated deck
+down the widest avenue — was the other half of the answer and had the opposite
+problem: it was a corridor with two ends. You got on it, you rode it south, and
+then you were somewhere. Both are now one thing.
+
+### Four legs, four junctions
+
+The Line runs over every wide avenue in the district: north–south over x = -72
+and x = 71, east–west over z = -35 and z = 101, about 1200 m of deck, all of it
+connected. Every ride down it is a choice about which way to turn at the next
+crossing, and the roofs either side are on-ramps rather than the only
+alternative to falling off.
+
+It falls from 38 m at the north-east end to 5 m at the south-west, and the fall
+is not spread evenly. Long runs at 2.5–3° hold the speed you arrive with; three
+PITCHES at 8.7°, 12° and 17.5° are where it is found. Slide friction (3) loses
+to slope acceleration (95) from about two degrees, so a run keeps you and a
+pitch pays you — and which one you are on is legible from the road ahead,
+because the pitches are the marked ones. In the raw level that means they are
+the red ones, which is the colour rule doing exactly the job it was kept for.
+
+The steepest is 38 m at 17.5° off the x=71 junction, running west. Measured on
+both tunes: 3.9 s of held slide, peaking at 40.1 u/s against a hard cap of 46.
+The Chute peaked higher because it was four times as long; this one is a corner
+of a network rather than the only thing to do with a minute.
+
+### Two things it broke, both caught by measurement
+
+**The avenues are the run-up.** The Overpass stood on a single 4.5 m column down
+the centreline of a 24 m street nobody else used. Four legs over four avenues is
+a different question: two of them run down the 22 m straights that are the only
+stretches long enough to reach the hard cap, and a column in the middle leaves
+7 m of lane either side. `verify:level` measures the widest contiguous clear run
+across an avenue at chest height and refused it. The supports are portal frames
+now — a leg under each edge of the deck, standing at the kerb, with a beam
+across — which leaves eleven metres of clear road straight down the middle.
+More than there was before the Line existed.
+
+Two container lines were parked down the middle of those same avenues, which
+was fine while the only thing overhead was sky. They moved to the perimeter
+road, which is 18 m of pavement nothing else uses.
+
+**One grade kills a slide.** A ramp shallower than the break-even angle is one a
+slide dies on, and the check that catches it is blunt: any ramp pitched between
+1.1° and 1.8°. Three of them appeared — one span of the east leg at 1.68°, and
+an on-ramp built as a ramp where it should have been a bridge. The east leg's
+profile moved a metre; the on-ramp became a flat deck, because the Line passes a
+metre BELOW the roof it was meant to connect and three metres off its edge, so
+what that gap needed was a floor and not a slope.
+
+### Where it ended up
+
+3181 brushes clad, 1488 raw, ~2334 draw calls against the 2600 ceiling, and 204
+checks passing across both levels. The verifier lost two sections about the
+Chute and gained three about the Line: that its pitches are steep enough to
+never stall and shallow enough to still be ground, that it has air under it and
+a continuous deck on top of it for all 1200 m, and that every hole in it is a
+jump priced off the level's own table.
+

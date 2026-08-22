@@ -54,20 +54,21 @@
 //                 the 16 m roof arrives in three stages. Those landings are why
 //                 this is a feature and not a gate: miss the timing and you
 //                 land on one, not in the street.
-//   the Overpass  300 m of elevated deck straight down the widest avenue,
-//                 falling 20 m north to south, in six segments. The five gaps
-//                 are one of each tier and southbound every one is downhill —
-//                 this is where speed is kept, not found.
+//   the Line      ~1200 m of elevated deck over every wide avenue in the
+//                 district — two legs north–south, two east–west, four
+//                 junctions — falling from 38 m at the north-east end to 5 m at
+//                 the south-west. Long runs at 2.5–3° keep the speed you
+//                 arrive with; three pitches at 8, 12 and 17.5° are where it is
+//                 found, and those are the marked ones. Every gap in it is a
+//                 jump priced at one of the tiers.
 //   the Spire     76 m. Balconies one thruster tank apart on three faces, a
 //                 shaft up the fourth — the full-depth gap between the tower
 //                 and its service core — and masts on top for the grapple.
 //                 Three ways up, none of which goes all the way on its own.
-//   the Chute     ~142 m of 25° slide from the crown, straight across the city
-//                 on pylons, landing back on the roof the Ladder tops out on —
-//                 the lap closes exactly where it began. slide.slopeAccel (95)
-//                 beats slide.friction (3) from about two degrees, so this pins
-//                 you at momentum.hardCap the whole way and throws you off a
-//                 16 m roof at ~46 u/s. That flight is the finish line.
+//                 The Chute used to be the way down from the crown: 142 m of
+//                 25° slab, one line, taken the same way every time. The Line's
+//                 pitches do that job now and there are three of them, joined
+//                 to everything else.
 //
 // The look is ONE art pack — `assets/scifi` for the environment and
 // `assets/more-scifi` for the props, measured into `scifi.ts`, and the same
@@ -226,7 +227,6 @@ const WALLRUN = 0xd97706;   // amber: run along it
  * player and a different number to the shader.
  */
 const PADDING = 0xffcf9a;
-const CHUTE_C = 0x7c3aed;   // violet: slide down it
 const PAD = 0x0ea5e9;       // cyan: a thruster step
 const ROAD = 0x646c7c;
 const TRIM = 0xaab2c2;      // bands and cornices: the line round a building
@@ -836,10 +836,6 @@ export const TOWER_W = 32, TOWER_D = 34;
 /** Shifted east off the block centre, to leave a west strip wide enough for the
  *  service core and the shaft between the two. */
 export const TOWER_X = COLS[3].c + 3, TOWER_Z = ROWS[1].c;
-export const CHUTE_FROM: P3 = {
-  x: TOWER_X - TOWER_W / 2 + 4, y: SPIRE_TOP, z: TOWER_Z + TOWER_D / 2 - 4,
-};
-export const CHUTE_TO: P3 = { x: COLS[1].c + 9, y: HEIGHT[2][1], z: ROWS[2].c - 16 };
 
 /**
  * Lanes the route runs down. Nothing gets built inside one.
@@ -848,20 +844,12 @@ export const CHUTE_TO: P3 = { x: COLS[1].c + 9, y: HEIGHT[2][1], z: ROWS[2].c - 
  * eventually put a cooling unit exactly where you needed the floor.
  */
 interface Lane { x0: number; z0: number; x1: number; z1: number; half: number }
-const LANES: Lane[] = [];
-{
-  const dx = CHUTE_TO.x - CHUTE_FROM.x;
-  const dz = CHUTE_TO.z - CHUTE_FROM.z;
-  const l = Math.hypot(dx, dz) || 1;
-  // Touchdown, and the run out to the far edge of the roof beyond it.
-  LANES.push({
-    x0: CHUTE_TO.x - (dx / l) * 8, z0: CHUTE_TO.z - (dz / l) * 8,
-    x1: CHUTE_TO.x + (dx / l) * 48, z1: CHUTE_TO.z + (dz / l) * 48,
-    half: 10,
-  });
-  // The Overpass slip road off the spine roof.
-  LANES.push({ x0: COLS[3].c - 6, z0: 10, x1: COLS[3].hi + 4, z1: 10, half: 8 });
-}
+const LANES: Lane[] = [
+  // The Line's slip roads, where they cross a roof: an on-ramp with a cooling
+  // unit parked on it is an on-ramp you cannot use.
+  { x0: COLS[3].c - 6, z0: 10, x1: COLS[3].hi + 4, z1: 10, half: 8 },
+  { x0: COLS[1].c - 6, z0: -8, x1: COLS[1].hi + 4, z1: -8, half: 8 },
+];
 
 /**
  * Where the rings go. Declared here rather than with the triggers at the bottom
@@ -2304,116 +2292,263 @@ wallProp('Prop_Light_Wide', 0, 1, ladderX - LADDER_LEN / 2 + 9, 4.4, YARD_Z - SL
 box([ladderX - LADDER_LEN / 2 + 0.6, LADDER_TOP + 1.2, YARD_Z], [1.2, 2.4, SLOT + 4],
   GANTRY, undefined, S_STEEL);
 
-// --- the Overpass ------------------------------------------------------------
-// 300 m of elevated deck straight down the widest avenue, falling 20 m from
-// north to south. Six segments; the five gaps are one of each tier, smallest at
-// the north end. Southbound every one is downhill, which is what makes this the
-// fast lane — you never have to rebuild the speed you arrived with.
+// --- the Line ----------------------------------------------------------------
+// An elevated deck over every wide avenue in the district: two legs north–south
+// over x = -72 and x = 71, two east–west over z = -35 and z = 101, meeting at
+// four junctions. About 1200 m of road in the air, and all of it connected.
+//
+// It replaces two things at once, and it is worth saying why both went.
+//
+// The Overpass was one leg of this and nothing else — 300 m down the widest
+// avenue, which made it the fast lane and also made it a corridor with two ends.
+// You got on it, you rode it south, and then you were somewhere. Four legs and
+// four junctions is a NETWORK: every ride down it is a choice about which way to
+// turn, and the roofs either side are on-ramps rather than the only alternative.
+//
+// The Chute was 142 m of 25° slab from the crown to the far side of the city,
+// and it was the whole descent in one object — a single line, taken the same way
+// every time, that you were on for eight seconds with nothing to do. What
+// replaces it is not one slide but the SHAPE of this thing: the Line falls from
+// 38 m at its north-east end to 5 m at the south-west, and the fall is not
+// spread evenly. Long shallow runs at 2.5–3° hold the speed you arrive with, and
+// three PITCHES at 8°, 12° and 17.5° are where it is found. Slide friction (3)
+// loses to slope acceleration (95) from about two degrees, so a run keeps you
+// and a pitch pays you, and which of them you are on is legible from the shape
+// of the road ahead — the pitches are the marked ones.
 
-const OP_X = (COLS[3].hi + COLS[4].lo) / 2;
-const OP_W = 16;
-const OP_T = 1.6;
-/** Deck height at a given z. */
-export const opY = (z: number) => 30 - (z / 140) * 10;
+const LINE_W = 16;
+const LINE_T = 1.6;
+/** Anything past this reads as a pitch rather than a run, and is marked. */
+const PITCH_DEG = 7;
 
 /**
- * Six segments, five gaps, one of each tier and smallest at the north end. The
- * sizes are the budgets, not round numbers — which is why the widest one has a
- * gantry over it: at 95% of a full slide-jump-plus-double it is inside the
- * budget southbound, where it is downhill, and outside it coming back the other
- * way up the slope. That asymmetry is the point of building the road on a tilt.
+ * A leg of the Line: a straight run down one avenue, with a height profile.
+ *
+ * `nodes` are the profile as [along, deck height] in increasing `along`, and
+ * every one of them is a bend in the road. Junctions appear as a PAIR of nodes
+ * at the same height, sixteen metres apart — the flat square where the two legs
+ * cross — because a 17° pitch arriving at a flat crossing is a step you catch a
+ * slide on, and the only way to not have one is for the profile itself to level
+ * out before it gets there.
  */
-const OP_GAPS = [
-  Math.round(GAP.hop * 0.8),    // a hop
-  Math.round(GAP.hop),          // a hop with nothing to spare
-  Math.round(GAP.span),         // a slide jump
-  Math.round(GAP.hop),
-  Math.round(GAP.super * 0.95), // grapple it, gas it, or arrive very fast
+export interface Leg {
+  name: string;
+  axis: 'x' | 'z';
+  /** The avenue this leg runs down, on the other axis. */
+  at: number;
+  nodes: [number, number][];
+  /** Holes in the deck: [centre, width]. Every one is a jump. */
+  gaps: [number, number][];
+}
+
+/** Where the legs cross, and how high the deck is there. */
+export const JUNCTIONS: { x: number; z: number; y: number }[] = [
+  { x: -72, z: -35, y: 16 },
+  { x: 71, z: -35, y: 32 },
+  { x: -72, z: 101, y: 10 },
+  { x: 71, z: 101, y: 22 },
 ];
-export const OP_SEGS: [number, number][] = (() => {
-  const lens = [34, 36, 28, 34, 32, 48];
-  const out: [number, number][] = [];
-  let z = -150;
-  for (let i = 0; i < lens.length; i++) {
-    out.push([z, z + lens[i]]);
-    z += lens[i] + (OP_GAPS[i] ?? 0);
-  }
-  return out;
-})();
+const JUNCT_HALF = LINE_W / 2;
 
-for (const [z0, z1] of OP_SEGS) {
-  const seg = ramp({ x: OP_X, y: opY(z0), z: z0 }, { x: OP_X, y: opY(z1), z: z1 },
-    OP_W, OP_T, ROAD, 0, undefined, S_ROAD);
-  // Railings down both edges, stopped 6 m short of each end. A rail across the
-  // lip of a jump reads as a wall, and every one of these ends is a jump.
+export const LINE_LEGS: Leg[] = [
   {
+    name: 'east',
+    axis: 'z',
+    at: 71,
+    nodes: [[-155, 38], [-43, 32], [-27, 32], [41, 29], [93, 22], [109, 22], [160, 17]],
+    gaps: [[-100, GAP.hop], [8, GAP.hop * 0.8], [136, GAP.super * 0.95]],
+  },
+  {
+    name: 'west',
+    axis: 'z',
+    at: -72,
+    nodes: [[-155, 26], [-43, 16], [-27, 16], [93, 10], [109, 10], [160, 6]],
+    gaps: [[-100, GAP.hop * 0.8], [30, GAP.span]],
+  },
+  {
+    name: 'north',
+    axis: 'x',
+    at: -35,
+    nodes: [[-190, 8], [-80, 16], [-64, 16], [25, 20], [63, 32], [79, 32], [190, 24]],
+    gaps: [[-140, GAP.hop], [-16, GAP.span], [132, GAP.hop]],
+  },
+  {
+    name: 'south',
+    axis: 'x',
+    at: 101,
+    nodes: [[-190, 5], [-80, 10], [-64, 10], [30, 15], [63, 22], [79, 22], [190, 16]],
+    gaps: [[-140, GAP.hop * 0.8], [-14, GAP.hop], [132, GAP.span]],
+  },
+];
+
+/** Deck height anywhere along a leg. */
+export function lineY(leg: Leg, at: number): number {
+  const n = leg.nodes;
+  if (at <= n[0][0]) return n[0][1];
+  for (let i = 1; i < n.length; i++) {
+    if (at <= n[i][0]) {
+      const t = (at - n[i - 1][0]) / (n[i][0] - n[i - 1][0]);
+      return n[i - 1][1] + (n[i][1] - n[i - 1][1]) * t;
+    }
+  }
+  return n[n.length - 1][1];
+}
+
+/**
+ * Every stretch of deck the Line actually builds, per leg, as [from, to].
+ * Measured rather than declared — the verifier walks this and rays the world at
+ * each end, so a table that disagreed with the geometry would be caught by the
+ * thing it was lying to.
+ */
+export const LINE_SEGS: Record<string, [number, number][]> = {};
+
+for (const leg of LINE_LEGS) {
+  const a0 = leg.nodes[0][0];
+  const a1 = leg.nodes[leg.nodes.length - 1][0];
+  // The junction squares belong to the north–south legs. An east–west leg stops
+  // at the edge of one and starts again on the far side: two flat decks at the
+  // same height in the same place is a z-fight, and the crossing has to be one
+  // surface or a slide crossing it catches on the seam.
+  const owned = leg.axis === 'z';
+  const skip: [number, number][] = owned ? [] : JUNCTIONS
+    .filter((j) => Math.abs(j.z - leg.at) < 1)
+    .map((j) => [j.x - JUNCT_HALF, j.x + JUNCT_HALF] as [number, number]);
+  for (const [c, w] of leg.gaps) skip.push([c - w / 2, c + w / 2]);
+  skip.sort((p, q) => p[0] - q[0]);
+
+  // Cut the leg at every bend and every hole, then build what is left.
+  const cuts = new Set<number>([a0, a1]);
+  for (const [n] of leg.nodes) if (n > a0 && n < a1) cuts.add(n);
+  for (const [lo, hi] of skip) { cuts.add(lo); cuts.add(hi); }
+  const marks = [...cuts].sort((p, q) => p - q);
+  const segs: [number, number][] = [];
+  for (let i = 0; i < marks.length - 1; i++) {
+    const lo = marks[i], hi = marks[i + 1];
+    if (hi - lo < 0.5) continue;
+    const mid = (lo + hi) / 2;
+    if (skip.some(([s0, s1]) => mid > s0 && mid < s1)) continue;
+    segs.push([lo, hi]);
+  }
+  LINE_SEGS[leg.name] = segs;
+
+  const pos = (at: number, y: number): P3 => (leg.axis === 'z'
+    ? { x: leg.at, y, z: at }
+    : { x: at, y, z: leg.at });
+
+  for (const [lo, hi] of segs) {
+    const yLo = lineY(leg, lo);
+    const yHi = lineY(leg, hi);
+    const deg = (Math.atan2(Math.abs(yHi - yLo), hi - lo) * 180) / Math.PI;
+    const pitch = deg >= PITCH_DEG;
+    const seg = ramp(pos(lo, yLo), pos(hi, yHi), LINE_W, LINE_T,
+      pitch ? PAD : ROAD, 0, undefined, pitch ? S_MARKED : S_ROAD);
+    // Railings down both edges, stopped short of each end. A rail across the
+    // lip of a jump reads as a wall, and every one of these ends is a jump.
     const rl = seg.len - 12;
-    // The rail's length is its own Z, and the segment already runs along Z —
-    // so unlike a catwalk this one needs no quarter turn, only the ramp's own
-    // pitch. Composing a turn it does not need is how you get a handrail lying
-    // across the road instead of down it.
     if (rl > 8) {
+      const mx = leg.axis === 'z' ? leg.at : (lo + hi) / 2;
+      const mz = leg.axis === 'z' ? (lo + hi) / 2 : leg.at;
       for (const sgn of [-1, 1]) {
-        railAlong('z', OP_X + sgn * (OP_W / 2 - 0.4), (opY(z0) + opY(z1)) / 2,
-          (z0 + z1) / 2, rl, seg.q);
+        // Offset ACROSS the leg, which is the other world axis — the same
+        // quarter turn the deck itself took, applied to where the rail stands
+        // rather than to how it lies.
+        railAlong('z',
+          mx + (leg.axis === 'z' ? sgn * (LINE_W / 2 - 0.4) : 0),
+          (yLo + yHi) / 2,
+          mz + (leg.axis === 'x' ? sgn * (LINE_W / 2 - 0.4) : 0),
+          rl, seg.q);
       }
-    }
-    // Centre line, so 300 m of deck reads as a road. It takes the segment's own
-    // rotation: laid flat at the midpoint height instead, a marking on a road
-    // that falls 3 m over its length is buried at one end and a metre in the
-    // air at the other.
-    {
+      // Centre line, so a kilometre of deck reads as a road. It takes the
+      // segment's own rotation: laid flat at the midpoint height instead, a
+      // marking on a road that falls three metres over its length is buried at
+      // one end and a metre in the air at the other.
       const ds = sciBrush('Decal_Line_Straight');
-      skinned([OP_X, (opY(z0) + opY(z1)) / 2 + 0.05, (z0 + z1) / 2],
-        [ds[0], ds[1], seg.len - 4], PROP_C, 'Decal_Line_Straight', seg.q);
+      skinned([mx, (yLo + yHi) / 2 + 0.05, mz], [ds[0], ds[1], seg.len - 4],
+        PROP_C, 'Decal_Line_Straight', seg.q);
+    }
+    // Portal frames down to the avenue floor: a leg under each edge of the deck
+    // and a beam across between them.
+    //
+    // The Overpass stood on a single 4.5 m column down the centreline and that
+    // was fine, because it ran down a 24 m avenue nothing else used. Four legs
+    // over four avenues is a different question: two of these run down the 22 m
+    // straights that are the only run-up on the map long enough to reach the
+    // hard cap, and a column in the middle of one leaves 7 m of lane either
+    // side of it — which `verify:level` measures and refused. Standing the
+    // supports at the kerb instead leaves eleven metres of clear road straight
+    // down the middle, which is more than there was before the Line existed.
+    const PY = LINE_W / 2 - 1.2;
+    for (const f of hi - lo > 26 ? [0.25, 0.75] : [0.5]) {
+      const at = lo + (hi - lo) * f;
+      const top = lineY(leg, at) - LINE_T;
+      const p = pos(at, 0);
+      for (const sgn of [-1, 1]) {
+        const px = p.x + (leg.axis === 'z' ? sgn * PY : 0);
+        const pz = p.z + (leg.axis === 'x' ? sgn * PY : 0);
+        box([px, (top - BASE) / 2, pz], [2.4, top + BASE, 2.4], MAST, undefined, S_STEEL);
+      }
+      // The beam. Without it the two legs are two posts that happen to be near
+      // a road, which is the floating-scenery look this level does not have.
+      box([p.x, top - 1.2, p.z],
+        leg.axis === 'z' ? [PY * 2 + 2.4, 1.6, 2.4] : [2.4, 1.6, PY * 2 + 2.4],
+        GANTRY, undefined, S_STEEL);
     }
   }
-  // Pylons, into the avenue floor. The deck runs down the middle of a 24 m
-  // street, so nothing holding it up is ever in a running lane.
-  for (const f of [0.25, 0.75]) {
-    const z = z0 + (z1 - z0) * f;
-    const top = opY(z) - OP_T;
-    box([OP_X, (top - BASE) / 2, z], [4.5, top + BASE, 4.5], MAST, undefined, S_STEEL);
-  }
 }
 
-// Gantries over the two widest gaps: a beam high enough that hooking it drops
-// you into a swing rather than a climb, with a leg either side of the deck.
-for (const [z0, z1] of [
-  [OP_SEGS[2][1], OP_SEGS[3][0]],
-  [OP_SEGS[4][1], OP_SEGS[5][0]],
-] as const) {
-  const zc = (z0 + z1) / 2;
-  const y = opY(zc);
-  const legOff = OP_W / 2 + 3.4;
-  // Cross-arm first: without it the beam hangs between its legs touching
-  // neither, which is exactly the floating-scenery look this level is trying
-  // not to have.
-  box([OP_X, y + 15, zc], [legOff * 2 + 2.4, 1.4, 2.4], GANTRY, undefined, S_STEEL);
-  box([OP_X, y + 15, zc], [3, 1.6, z1 - z0 + 26], GANTRY, undefined, S_STEEL);
-  for (const s of [-1, 1]) {
-    box([OP_X + s * legOff, (y + 15 - BASE) / 2, zc], [2.4, y + 15 + BASE, 2.4], MAST,
-      undefined, S_STEEL);
-    // A beacon on each leg. The two widest gaps on the road are the two you have
-    // to see coming, and a lit post either side is how you read one at speed.
-    box([OP_X + s * legOff, y + 15.9, zc], [2.0, 0.5, 2.0], LIT_WARM, undefined, S_LAMP);
-  }
-}
-
-// Slip roads. An elevated road with no on-ramps is a road you can only fall
-// off, so it is tied into the roofscape at three points down its length.
+// A gantry over the widest gap on the east leg: a beam high enough that hooking
+// it drops you into a swing rather than a climb, with a leg either side of the
+// deck. That gap is priced at 95% of a full slide-jump-plus-double, which is
+// inside the budget arriving downhill and outside it coming back up — so the
+// grapple is the way across it in one direction and not the other, which is the
+// point of building a road on a tilt.
 {
-  // North, up from the Spire's terrace.
-  ramp({ x: COLS[3].hi - 9, y: 30, z: -74 },
-    { x: OP_X - OP_W / 2 - 1, y: opY(-74), z: -74 }, 10, 1.2, ROAD, 3, undefined, S_ROAD);
-  // Middle. This is the route's own on-ramp, so it is the long shallow one —
-  // shallow enough that a slide carries up it instead of dying on it.
+  const leg = LINE_LEGS[0];
+  const [zc] = leg.gaps[2];
+  const y = lineY(leg, zc);
+  const legOff = LINE_W / 2 + 3.4;
+  // Cross-arm first: without it the beam hangs between its legs touching
+  // neither, which is exactly the floating-scenery look this level avoids.
+  box([leg.at, y + 15, zc], [legOff * 2 + 2.4, 1.4, 2.4], GANTRY, undefined, S_STEEL);
+  box([leg.at, y + 15, zc], [3, 1.6, leg.gaps[2][1] + 26], GANTRY, undefined, S_STEEL);
+  for (const s of [-1, 1]) {
+    box([leg.at + s * legOff, (y + 15 - BASE) / 2, zc], [2.4, y + 15 + BASE, 2.4], MAST,
+      undefined, S_STEEL);
+    box([leg.at + s * legOff, y + 15.9, zc], [2.0, 0.5, 2.0], LIT_WARM, undefined, S_LAMP);
+  }
+}
+
+// Slip roads. An elevated road with no on-ramps is a road you can only fall off,
+// so it is tied into the roofscape wherever a roof comes near it.
+{
+  const east = LINE_LEGS[0];
+  const west = LINE_LEGS[1];
+  const south = LINE_LEGS[3];
+  // North: up off the Spire's terrace, running ALONG the avenue rather than
+  // across it. Across is thirteen metres of horizontal for eight of climb,
+  // which is a wall; along it there is as much room as the ramp needs.
+  ramp({ x: COLS[3].hi, y: TERRACE, z: -95 },
+    { x: east.at - LINE_W / 2, y: lineY(east, -60), z: -60 }, 10, 1.2, ROAD, 3,
+    undefined, S_ROAD);
+  // Middle: the route's own on-ramp off the spine roof.
   ramp({ x: COLS[3].c, y: HEIGHT[2][3], z: 10 },
-    { x: OP_X - OP_W / 2 - 1, y: opY(10), z: 10 }, 10, 1.2, ROAD, 3, undefined, S_ROAD);
-  // South: the deck has fallen to roof height by here, so it is only a bridge.
-  const z = 138;
-  box([(COLS[3].hi + OP_X - OP_W / 2) / 2, opY(z) - OP_T / 2, z],
-    [OP_X - OP_W / 2 - COLS[3].hi + 2, OP_T, 12], ROAD, undefined, S_ROAD);
+    { x: east.at - LINE_W / 2 - 1, y: lineY(east, 10), z: 10 }, 10, 1.2, ROAD, 3,
+    undefined, S_ROAD);
+  // West leg, off the roof of the block the Ladder tops out on — which is where
+  // the Chute used to land, so the lap still closes in the same place. A bridge
+  // rather than a ramp: the deck passes a metre BELOW that roof and three
+  // metres off its edge, so what this needs is a floor over the gap. Built as a
+  // ramp it would be a 1° slope, which is the one grade a slide dies on.
+  {
+    const y = lineY(west, -8);
+    const x0 = COLS[1].hi;
+    const x1 = west.at - LINE_W / 2;
+    box([(x0 + x1) / 2, y - LINE_T / 2, -8], [x1 - x0 + 1, LINE_T, 10], ROAD,
+      undefined, S_ROAD);
+  }
+  // South leg, down to the street at its low western end: the way off.
+  ramp({ x: -150, y: lineY(south, -150), z: south.at },
+    { x: -150, y: 0, z: south.at + 26 }, 10, 1.2, ROAD, 3, undefined, S_ROAD);
 }
 
 // --- the Spire ---------------------------------------------------------------
@@ -2509,55 +2644,6 @@ for (const sx of [-1, 1]) prop('Prop_Light_Floor', TOWER_X + sx * 5, SPIRE_TOP, 
 // The top of the map, marked as the top of the map.
 decal('Decal_Logo', TOWER_X, SPIRE_TOP, TOWER_Z + 11, 0, 6);
 
-// --- the Chute ---------------------------------------------------------------
-// The way down, and the reward for the climb. From the crown's south-west
-// corner straight across the district on pylons, landing on the roof the Ladder
-// tops out on. There is no holding back on it: you arrive at momentum.hardCap,
-// cross the last roof and leave its west edge into the Yard.
-
-const CHUTE_W = 16;
-const chute = ramp(CHUTE_FROM, CHUTE_TO, CHUTE_W, 1.6, CHUTE_C, 12, undefined, S_MARKED);
-
-// Rails, so a slide that drifts does not simply leave. Trimmed at both ends: one
-// across the entry is a wall you hit at the top, and one carried all the way
-// down stands on the landing roof as a slab across the running line.
-{
-  const dir = {
-    x: Math.sin(chute.yaw) * Math.cos(chute.climb),
-    y: Math.sin(chute.climb),
-    z: Math.cos(chute.yaw) * Math.cos(chute.climb),
-  };
-  const TRIM_TOP = 8, TRIM_END = 30;
-  const len = chute.len - TRIM_TOP - TRIM_END;
-  const shift = (TRIM_TOP - TRIM_END) / 2;
-  const mid = {
-    x: (CHUTE_FROM.x + CHUTE_TO.x) / 2 - dir.x * shift,
-    y: (CHUTE_FROM.y + CHUTE_TO.y) / 2 - dir.y * shift,
-    z: (CHUTE_FROM.z + CHUTE_TO.z) / 2 - dir.z * shift,
-  };
-  for (const s of [-1, 1]) {
-    const wx = mid.x + Math.cos(chute.yaw) * s * (CHUTE_W / 2 + 0.6);
-    const wz = mid.z - Math.sin(chute.yaw) * s * (CHUTE_W / 2 + 0.6);
-    box([wx, mid.y + 2.2, wz], [1.2, 5, len], PADDING, chute.q, S_PADDED);
-    // A handrail along the top of each wall — the one piece of kit that makes
-    // 145 m of violet slab read as a structure somebody built. The chute runs
-    // along its own local Z, same as a rail does, so it takes the ramp's
-    // rotation unchanged.
-    railAlong('z', wx, mid.y + 4.7, wz, len, chute.q);
-  }
-}
-
-// Pylons, dropped to the street. The line is over avenues and alleys the whole
-// way by construction, so none of them lands on a roof or in a running lane —
-// which the verifier checks rather than trusts.
-export const CHUTE_PYLONS = [0.16, 0.36, 0.56, 0.74];
-for (const f of CHUTE_PYLONS) {
-  const x = CHUTE_FROM.x + (CHUTE_TO.x - CHUTE_FROM.x) * f;
-  const y = CHUTE_FROM.y + (CHUTE_TO.y - CHUTE_FROM.y) * f;
-  const z = CHUTE_FROM.z + (CHUTE_TO.z - CHUTE_FROM.z) * f;
-  box([x, (y - 2 - BASE) / 2, z], [4.5, y - 2 + BASE, 4.5], MAST, undefined, S_STEEL);
-}
-
 // --- the plazas --------------------------------------------------------------
 // Two blocks left as open ground, so street level is not one continuous
 // corridor. Each gets a pavilion — a low roof on columns, which is a thing to
@@ -2650,9 +2736,15 @@ for (let ri = 0; ri < ROWS.length; ri++) {
 // Three of them, and no more. The avenues are the run-up for every roof on the
 // map, so they earn their emptiness.
 
-crates(COLS[1].c - 14, (ROWS[3].hi + ROWS[4].lo) / 2, 'x', 5, 11, 2);
+// Two of these used to lie down the middle of a wide avenue, which was fine
+// while the only thing overhead was sky. The Line stands its portal frames at
+// the kerb of all four of them now, and a container line in what is left is a
+// container line in the running lane — `verify:level` measures the widest clear
+// run down an avenue and it went from 7 m to 4. So they moved out to the
+// perimeter road, which is 18 m of pavement nothing else uses.
+crates(COLS[1].c - 14, EXTENT.z1 + 9, 'x', 5, 11, 2);
 crates(COLS[4].c - 20, (ROWS[0].hi + ROWS[1].lo) / 2, 'x', 5, 10, 4);
-crates((COLS[1].hi + COLS[2].lo) / 2, ROWS[3].c - 20, 'z', 4, 12, 6);
+crates(EXTENT.x0 - 9, ROWS[3].c - 20, 'z', 4, 12, 6);
 
 // --- the other Ashgate --------------------------------------------------------
 // Everything above this line is in both levels or in the clad one. What follows
@@ -2762,7 +2854,8 @@ export const brushesRaw: Brush[] = (() => {
 export const triggers: Trigger[] = [
   { p: [RINGS.ladder.x, RINGS.ladder.y + 3, RINGS.ladder.z], r: 13, kind: 'checkpoint', name: 'ladder' },
   { p: [RINGS.stacks.x, RINGS.stacks.y + 3, RINGS.stacks.z], r: 13, kind: 'checkpoint', name: 'stacks' },
-  { p: [OP_X, opY(-74) + 3, -74], r: 11, kind: 'checkpoint', name: 'overpass' },
+  { p: [LINE_LEGS[0].at, lineY(LINE_LEGS[0], -74) + 3, -74], r: 11,
+    kind: 'checkpoint', name: 'overpass' },
   { p: [TOWER_X, SPIRE_TOP + 3, TOWER_Z + TOWER_D / 2 - 7], r: 12, kind: 'checkpoint', name: 'crown' },
   // Placed where the descent actually PUTS you, not where the Yard looks tidy.
   // Coming off the last roof at speed you cross the Yard diagonally and touch
