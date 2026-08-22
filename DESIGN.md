@@ -3438,69 +3438,84 @@ colours is one set in `rawColour` when that trade stops being worth it.
 of `ashgate.ts` from the clad level's brushes, so none of this touches the
 district's own generator — which is what keeps the two levels the same level.
 
-## 42. The Chute goes, the Line arrives
 
-The Chute was 142 m of 25° slab from the crown to the far side of the city, and
-it was the whole descent in one object: a single line, taken the same way every
-time, that you were on for eight seconds with nothing to do but hold the button.
-It is gone.
+## 42. The Chute goes, the conveyor arrives
 
-What replaces it is not another slide. The Overpass — 300 m of elevated deck
-down the widest avenue — was the other half of the answer and had the opposite
-problem: it was a corridor with two ends. You got on it, you rode it south, and
-then you were somewhere. Both are now one thing.
+The Chute was 142 m of 25° slab from the crown to the far side of the city: one
+line, taken the same way every time, eight seconds of holding a button. It is
+gone. The Overpass had the opposite problem — 300 m of elevated deck that was a
+corridor with two ends. Both are now one thing.
 
-### Four legs, four junctions
+### One piece, and that is the requirement
 
-The Line runs over every wide avenue in the district: north–south over x = -72
-and x = 71, east–west over z = -35 and z = 101, about 1200 m of deck, all of it
-connected. Every ride down it is a choice about which way to turn at the next
-crossing, and the roofs either side are on-ramps rather than the only
-alternative to falling off.
+The Line runs over every wide avenue: north–south over x = -72 and x = 71,
+east–west over z = -35 and z = 101, about 1200 m of deck, four crossings, and it
+is CONTINUOUS. No gaps, no jumps to clear, no segment that ends in air. You can
+walk from the far end of any leg to the far end of any other without leaving it.
 
-It falls from 38 m at the north-east end to 5 m at the south-west, and the fall
-is not spread evenly. Long runs at 2.5–3° hold the speed you arrive with; three
-PITCHES at 8.7°, 12° and 17.5° are where it is found. Slide friction (3) loses
-to slope acceleration (95) from about two degrees, so a run keeps you and a
-pitch pays you — and which one you are on is legible from the road ahead,
-because the pitches are the marked ones. In the raw level that means they are
-the red ones, which is the colour rule doing exactly the job it was kept for.
+That is not a stylistic preference, it is what the thing is for: something is
+going to run along the top of it, and a hole in a conveyor is a broken conveyor.
+Above the deck, carried on the same portal frames that hold it up, a pair of
+beams runs the entire length at seven metres — the rail for whatever ends up
+travelling on it — and those cross at the junctions the same way the decks do,
+so the structure overhead is as connected as the road underneath.
 
-The steepest is 38 m at 17.5° off the x=71 junction, running west. Measured on
-both tunes: 3.9 s of held slide, peaking at 40.1 u/s against a hard cap of 46.
-The Chute peaked higher because it was four times as long; this one is a corner
-of a network rather than the only thing to do with a minute.
+Two things follow from "continuous" that were not obvious until the verifier
+said so:
 
-### Two things it broke, both caught by measurement
+**Nobody builds their own crossing.** The first version had the north–south legs
+carry their portal frames straight through the junctions, which stood a 1.6 m
+post in the middle of the crossing leg's roadway — a bollard on a crossroads
+that only one of the two legs could see coming. Both legs stop at the edge of
+the square now and the junction is built once as its own thing, with its posts
+at the four corners: the one place on a crossroads nothing runs through.
+
+**Nothing drops to head height.** It falls from 46 m at the north-east end to
+18 m at the south-west and 18 is the floor. A conveyor that comes down to five
+metres over a street is a low ceiling, not a road, and the check that guards it
+is one line: the lowest deck height across 696 probes.
+
+### Where the level change lives
+
+The fall is not spread evenly. Long runs at 2.5–3° hold the speed you arrive
+with; three pitches at 7.7°, 12° and 17.5° are where it is found. Slide friction
+(3) loses to slope acceleration (95) from about two degrees, so a run keeps you
+and a pitch pays you. The steepest is 38 m at 17.5° off the x=71 junction:
+entered at 6 u/s it comes out at 40.1 on the shipped tune and 38.0 on gaem,
+against caps of 46 and 38.
+
+The pitches are not marked, and that is a correction. The first version painted
+them — a different surface, which in the raw level meant a different colour —
+and nobody asked for that. A level does not get to recolour itself because a
+piece of it is interesting.
+
+### Three things it broke, all caught by measurement
 
 **The avenues are the run-up.** The Overpass stood on a single 4.5 m column down
 the centreline of a 24 m street nobody else used. Four legs over four avenues is
 a different question: two of them run down the 22 m straights that are the only
 stretches long enough to reach the hard cap, and a column in the middle leaves
-7 m of lane either side. `verify:level` measures the widest contiguous clear run
-across an avenue at chest height and refused it. The supports are portal frames
-now — a leg under each edge of the deck, standing at the kerb, with a beam
-across — which leaves eleven metres of clear road straight down the middle.
-More than there was before the Line existed.
+7 m of lane either side. The supports are portal frames — a leg under each edge
+of the deck, at the kerb — which leaves eleven metres of clear road down the
+middle, more than there was before the Line existed. Two container lines parked
+in those avenues moved to the perimeter road.
 
-Two container lines were parked down the middle of those same avenues, which
-was fine while the only thing overhead was sky. They moved to the perimeter
-road, which is 18 m of pavement nothing else uses.
+**One grade kills a slide**, and it is a narrow one: between about 1.1° and 1.8°
+a slide neither accelerates nor holds. Three ramps landed in it. One span of the
+east leg moved a metre; an on-ramp became a flat bridge, because the Line passes
+a metre BELOW the roof it connects to and three metres off its edge — what that
+gap needed was a floor, not a slope.
 
-**One grade kills a slide.** A ramp shallower than the break-even angle is one a
-slide dies on, and the check that catches it is blunt: any ramp pitched between
-1.1° and 1.8°. Three of them appeared — one span of the east leg at 1.68°, and
-an on-ramp built as a ramp where it should have been a bridge. The east leg's
-profile moved a metre; the on-ramp became a flat deck, because the Line passes a
-metre BELOW the roof it was meant to connect and three metres off its edge, so
-what that gap needed was a floor and not a slope.
+**A rail overhead confuses a ray.** The check that asks "is this crossing
+bridged?" fired one ray down from above the roofs and got the Line's rail seven
+metres over its deck, called it the crossing, and rejected it for being too
+high — with the deck that actually bridges the gap sitting untouched underneath.
+It walks down through anything too high to land on now.
 
 ### Where it ended up
 
-3181 brushes clad, 1488 raw, ~2334 draw calls against the 2600 ceiling, and 204
-checks passing across both levels. The verifier lost two sections about the
-Chute and gained three about the Line: that its pitches are steep enough to
-never stall and shallow enough to still be ground, that it has air under it and
-a continuous deck on top of it for all 1200 m, and that every hole in it is a
-jump priced off the level's own table.
-
+3345 brushes clad, ~2506 draw calls against the 2600 ceiling, and every check in
+both levels passing. The verifier lost two sections about the Chute and gained
+two about the Line: that its pitches are steep enough never to stall and shallow
+enough to still be ground, and that the deck and the rail above it are unbroken
+from end to end of every leg with air underneath the whole way.
