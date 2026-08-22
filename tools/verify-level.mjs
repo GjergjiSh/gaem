@@ -934,56 +934,107 @@ head('the lap, leg by leg');
     `and the drop across is inside a plain hop (${gap.toFixed(0)} m)`);
 }
 
-head('the Line is one piece, and never comes down to head height');
+head('the Line is a CIRCUIT: no ends, and nothing to fall off');
 {
   useTune('shipped');
-  // The conveyor has to be continuous: something is going to run along the top
-  // of it, and a hole in it is a broken conveyor. So this walks every leg end
-  // to end -- through the junction squares, which the crossing leg builds --
-  // and rays for deck the whole way.
-  let hole = 0;
-  let low = { y: 1e9, where: '' };
-  let samples = 0;
+  const HALF = A.LINE_W / 2;
+  const near = (a, b) => Math.abs(a - b) < 0.6;
+  /** The junction a point sits in, if any. */
+  const junctionAt = (x, z) => A.JUNCTIONS.find(
+    (j) => Math.abs(j.x - x) <= HALF + 0.01 && Math.abs(j.z - z) <= HALF + 0.01);
+
+  // --- topology. Every leg has to END on a junction, and every junction has to
+  // have at least two legs on it. A junction with one is a dead end wearing a
+  // crossing's clothes, and a platform travelling this track runs off it.
+  let loose = 0;
+  const degree = new Map(A.JUNCTIONS.map((j) => [`${j.x},${j.z}`, 0]));
   for (const leg of A.LINE_LEGS) {
-    const a0 = leg.nodes[0][0];
-    const a1 = leg.nodes[leg.nodes.length - 1][0];
-    for (let at = a0 + 0.5; at <= a1 - 0.5; at += 2) {
-      const want = A.lineY(leg, at);
-      const x = leg.axis === 'z' ? leg.at : at;
-      const z = leg.axis === 'z' ? at : leg.at;
-      const h = surfaceAt(x, z, want + 3);
-      samples++;
-      if (h === null || Math.abs(h - want) > 0.25) {
-        if (hole < 6) note(`  hole: ${leg.name} at ${at.toFixed(0)}, want ${want.toFixed(1)} got ${h === null ? 'nothing' : h.toFixed(1)}`);
-        hole++;
+    for (const end of [leg.nodes[0][0], leg.nodes[leg.nodes.length - 1][0]]) {
+      const x = leg.axis === 'z' ? leg.at : end;
+      const z = leg.axis === 'z' ? end : leg.at;
+      const j = junctionAt(x, z);
+      if (!j) { loose++; note(`${leg.name} ends in air at (${x}, ${z})`); continue; }
+      if (!near(j.y, A.lineY(leg, end))) {
+        loose++;
+        note(`${leg.name} meets its junction at the wrong height`);
+        continue;
       }
-      if (want < low.y) low = { y: want, where: `${leg.name} at ${at.toFixed(0)}` };
+      degree.set(`${j.x},${j.z}`, degree.get(`${j.x},${j.z}`) + 1);
+    }
+    // A leg that PASSES THROUGH a junction is two roads out of it, not one --
+    // which is the difference between the chords' ends, where a leg stops, and
+    // the long sides, which carry straight on through.
+    const a0 = leg.nodes[0][0];
+    const a1 = leg.nodes[leg.nodes.length - 1][0];
+    for (const j of A.JUNCTIONS) {
+      if (!near(leg.axis === 'z' ? j.x : j.z, leg.at)) continue;
+      const c = leg.axis === 'z' ? j.z : j.x;
+      if (c > a0 + 0.6 && c < a1 - 0.6) {
+        degree.set(`${j.x},${j.z}`, degree.get(`${j.x},${j.z}`) + 2);
+      }
     }
   }
-  note(`${samples} probes down four legs; lowest deck is ${low.y.toFixed(0)} m (${low.where})`);
-  check(hole === 0, `the deck is unbroken from end to end of every leg (${hole} holes)`);
-  check(low.y >= 16, `and never drops to head height over a street (${low.y.toFixed(0)} m)`);
+  check(loose === 0, `every leg ends on a junction, at the junction's height (${loose} loose)`);
+  const ends = [...degree.entries()].filter(([, d]) => d < 2);
+  for (const [k, d] of ends) note(`junction ${k} has only ${d} leg(s) on it`);
+  check(ends.length === 0, `no junction is a dead end (${ends.length})`);
 
-  // The rail overhead is the other half of the structure and has to be just as
-  // continuous, because the same thing runs along it.
-  let railHole = 0;
+  // --- and then walk the loop itself, in the world, corner to corner. This is
+  // the check the whole shape exists for: something is going to travel this
+  // forever, so the deck under it and the rail over it have to be there at every
+  // step of the way round and back to the start.
+  const X = Math.max(...A.JUNCTIONS.map((j) => j.x));
+  const Z0 = Math.min(...A.JUNCTIONS.map((j) => j.z));
+  const Z1 = Math.max(...A.JUNCTIONS.map((j) => j.z));
+  const legAt = (x, z) => A.LINE_LEGS.find(
+    (l) => (l.axis === 'z' ? near(l.at, x) : near(l.at, z)));
+  const wantAt = (x, z) => {
+    const j = junctionAt(x, z);
+    if (j) return j.y;
+    const leg = legAt(x, z);
+    return leg ? A.lineY(leg, leg.axis === 'z' ? z : x) : null;
+  };
+  const path = [];
+  for (let x = -X; x <= X; x += 2) path.push([x, Z0]);
+  for (let z = Z0; z <= Z1; z += 2) path.push([X, z]);
+  for (let x = X; x >= -X; x -= 2) path.push([x, Z1]);
+  for (let z = Z1; z >= Z0; z -= 2) path.push([-X, z]);
+  let deckHole = 0, railHole = 0, low = { y: 1e9, at: '' };
+  for (const [x, z] of path) {
+    const want = wantAt(x, z);
+    if (want === null) { deckHole++; continue; }
+    const h = surfaceAt(x, z, want + 3);
+    if (h === null || Math.abs(h - want) > 0.25) deckHole++;
+    const r = surfaceAt(x, z, want + A.LINE_OVER + 3);
+    if (!(r !== null && r > want + A.LINE_OVER + 0.2 && r < want + A.LINE_OVER + 1.8)) railHole++;
+    if (want < low.y) low = { y: want, at: `${x}, ${z}` };
+  }
+  note(`${path.length} steps round the circuit; lowest deck on it is ${low.y.toFixed(0)} m `
+    + `(at ${low.at})`);
+  check(deckHole === 0, `the deck is unbroken all the way round (${deckHole} holes)`);
+  check(railHole === 0, `and so is the rail above it (${railHole} holes)`);
+  check(low.y >= 16, `nothing on the circuit drops to head height (${low.y.toFixed(0)} m)`);
+
+  // --- the chords leave the loop and rejoin it, so they get the same walk.
+  let spurHole = 0, spurRail = 0;
   for (const leg of A.LINE_LEGS) {
     const a0 = leg.nodes[0][0];
     const a1 = leg.nodes[leg.nodes.length - 1][0];
-    for (let at = a0 + 2; at <= a1 - 2; at += 2) {
-      const want = A.lineY(leg, at) + A.LINE_OVER;
-      // One rail, down the centreline. Anything solid in the metre and a half
-      // above the rail line counts: the rail itself, or the cross beam at the
-      // head of a portal that sits on top of it.
+    for (let at = a0; at <= a1; at += 2) {
       const x = leg.axis === 'z' ? leg.at : at;
       const z = leg.axis === 'z' ? at : leg.at;
+      const want = wantAt(x, z);
       const h = surfaceAt(x, z, want + 3);
-      if (!(h !== null && h > want + 0.2 && h < want + 1.8)) railHole++;
+      if (h === null || Math.abs(h - want) > 0.25) spurHole++;
+      const r = surfaceAt(x, z, want + A.LINE_OVER + 3);
+      if (!(r !== null && r > want + A.LINE_OVER + 0.2
+        && r < want + A.LINE_OVER + 1.8)) spurRail++;
     }
   }
-  check(railHole === 0, `the overhead rail runs the whole length too (${railHole} holes)`);
+  check(spurHole === 0, `every leg is unbroken end to end, chords included (${spurHole})`);
+  check(spurRail === 0, `and carries its rail the whole way (${spurRail})`);
 
-  // And there is still air under all of it.
+  // --- and there is still air under all of it.
   let buried = 0;
   let worst = { clear: 1e9, where: '' };
   for (const leg of A.LINE_LEGS) {

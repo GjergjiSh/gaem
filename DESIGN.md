@@ -3439,90 +3439,77 @@ of `ashgate.ts` from the clad level's brushes, so none of this touches the
 district's own generator — which is what keeps the two levels the same level.
 
 
-## 42. The Chute goes, the conveyor arrives
+
+## 42. The Chute goes, and the Line becomes a circuit
 
 The Chute was 142 m of 25° slab from the crown to the far side of the city: one
 line, taken the same way every time, eight seconds of holding a button. It is
 gone. The Overpass had the opposite problem — 300 m of elevated deck that was a
-corridor with two ends. Both are now one thing.
+corridor with two ends. What replaced them took three passes to get right, and
+the thing I kept failing to hold onto is the only thing that matters about it.
 
-### One piece, and that is the requirement
+### A grid has eight ends. A circuit has none.
 
-The Line runs over every wide avenue: north–south over x = -72 and x = 71,
-east–west over z = -35 and z = 101, about 1200 m of deck, four crossings, and it
-is CONTINUOUS. No gaps, no jumps to clear, no segment that ends in air. You can
-walk from the far end of any leg to the far end of any other without leaving it.
+Something is going to run along the top of this — a platform, travelling
+continuously, for as long as the level is loaded. That single sentence decides
+the shape. The first version was four legs crossing in a grid: continuous in the
+sense that you could walk all of it, and completely wrong, because a grid of
+four legs has EIGHT ENDS and a platform on a track with an end on it runs off
+the end.
 
-That is not a stylistic preference, it is what the thing is for: something is
-going to run along the top of it, and a hole in a conveyor is a broken conveyor.
-Above the deck, carried on the same portal frames that hold it up, a SINGLE beam
-runs the entire length down the centreline at seven metres — the rail for
-whatever ends up travelling on it — and it carries straight through the
-junctions on both axes, so the structure overhead is as connected as the road
-underneath. One rail, not one under each edge: that is what a gantry crane runs
-on and what the frames below are shaped to carry.
+The Line is a closed loop now. 412 m east along the avenue at z = -35, 136 m
+south down the pavement outside the district's east edge, 412 m west along
+z = 101, 136 m north up the west side, and into the first leg again. Two chords
+cross the middle over the north–south avenues, and they are chords rather than
+spurs: each one leaves the loop at a junction and rejoins it at another. There
+is no end anywhere on it.
 
-It sits ON its cross beams rather than under them, and overlapping by 15 cm
-rather than touching. A beam whose bottom plane exactly meets the top of the one
-holding it up is a beam supported by a hairline, which is what `verify:level`
-calls floating and it is right to.
+The verifier owns that now, in two halves. The topology: every leg must END on a
+junction at that junction's height, and no junction may have fewer than two legs
+on it — where a leg passing THROUGH a junction counts as two, since that is two
+roads out of it. And the physical walk: 552 steps round the circuit, corner to
+corner and back to the start, checking for deck under and rail over at every one.
+Either half alone would have passed a version of this that was broken.
 
-Two things follow from "continuous" that were not obvious until the verifier
-said so:
+### The profile is what makes it close
 
-**Nobody builds their own crossing.** The first version had the north–south legs
-carry their portal frames straight through the junctions, which stood a 1.6 m
-post in the middle of the crossing leg's roadway — a bollard on a crossroads
-that only one of the two legs could see coming. Both legs stop at the edge of
-the square now and the junction is built once as its own thing, with its posts
-at the four corners: the one place on a crossroads nothing runs through.
+Both long sides use ONE height profile. The deck is at the same height at a given
+x whether you are on the northern side or the southern one, so the two short
+sides are level, the chords between them are level at both ends, and going the
+whole way round returns you exactly to where you started. Climb eastward along
+the north at 2.3° with a 13° and a 16° pitch in it, hold 44 down the east side,
+fall westward along the south over the same pitches, hold 20 up the west side.
 
-**Nothing drops to head height.** It falls from 46 m at the north-east end to
-18 m at the south-west and 18 is the floor. A conveyor that comes down to five
-metres over a street is a low ceiling, not a road, and the check that guards it
-is one line: the lowest deck height across 696 probes.
+The chords dip rather than slope: down a 16° pitch, along the bottom, up the far
+side. That is the only way a chord can start and end at the loop's height and
+still have somewhere on it worth sliding.
 
-### Where the level change lives
+Nothing on the circuit drops below 20 m. A conveyor that comes down to five
+metres over a street is a low ceiling, not a road.
 
-The fall is not spread evenly. Long runs at 2.5–3° hold the speed you arrive
-with; three pitches at 7.7°, 12° and 17.5° are where it is found. Slide friction
-(3) loses to slope acceleration (95) from about two degrees, so a run keeps you
-and a pitch pays you. The steepest is 38 m at 17.5° off the x=71 junction:
-entered at 6 u/s it comes out at 40.1 on the shipped tune and 38.0 on gaem,
-against caps of 46 and 38.
+### Corrections worth keeping
 
-The pitches are not marked, and that is a correction. The first version painted
-them — a different surface, which in the raw level meant a different colour —
-and nobody asked for that. A level does not get to recolour itself because a
-piece of it is interesting.
+**Colour is not mine to change.** The first version painted the steep sections a
+different surface, which in the raw level meant they came out red. Nobody asked
+for that, and a level does not get to recolour itself because a piece of it is
+interesting.
 
-### Three things it broke, all caught by measurement
+**One rail, not two.** A single beam down the centreline, which is what a gantry
+runs on and what the frames below are shaped to carry.
 
-**The avenues are the run-up.** The Overpass stood on a single 4.5 m column down
-the centreline of a 24 m street nobody else used. Four legs over four avenues is
-a different question: two of them run down the 22 m straights that are the only
-stretches long enough to reach the hard cap, and a column in the middle leaves
-7 m of lane either side. The supports are portal frames — a leg under each edge
-of the deck, at the kerb — which leaves eleven metres of clear road down the
-middle, more than there was before the Line existed. Two container lines parked
-in those avenues moved to the perimeter road.
+**Nobody builds their own crossing.** Carrying a leg's portal frame through a
+junction stands a 1.6 m post in the middle of the crossing leg's roadway. The
+junctions are built once, with their posts at the four corners.
 
-**One grade kills a slide**, and it is a narrow one: between about 1.1° and 1.8°
-a slide neither accelerates nor holds. Three ramps landed in it. One span of the
-east leg moved a metre; an on-ramp became a flat bridge, because the Line passes
-a metre BELOW the roof it connects to and three metres off its edge — what that
-gap needed was a floor, not a slope.
+**The avenues are the run-up.** A single centre column down a 22 m straight
+leaves 7 m of lane either side, under the floor `verify:level` enforces. The
+supports are portal frames at the kerb, leaving eleven metres down the middle.
 
-**A rail overhead confuses a ray.** The check that asks "is this crossing
-bridged?" fired one ray down from above the roofs and got the Line's rail seven
-metres over its deck, called it the crossing, and rejected it for being too
-high — with the deck that actually bridges the gap sitting untouched underneath.
-It walks down through anything too high to land on now.
+**A rail overhead confuses a ray.** Two checks fired a ray from well above the
+roofs and got the rail seven metres over the deck instead of the deck: the
+bridged-crossing test called a good crossing too high, and the checkpoint test
+called a checkpoint on the Line floating under a roof. Both look under it now.
 
-### Where it ended up
-
-3345 brushes clad, ~2506 draw calls against the 2600 ceiling, and every check in
-both levels passing. The verifier lost two sections about the Chute and gained
-two about the Line: that its pitches are steep enough never to stall and shallow
-enough to still be ground, and that the deck and the rail above it are unbroken
-from end to end of every leg with air underneath the whole way.
+And one thing the loop cost: turning east at z = -35 left the top of the x = 71
+avenue with a 31 m roof-to-roof jump that the old Overpass had been carrying for
+free. That crossing gets a footbridge at the lower of the two roofs.
