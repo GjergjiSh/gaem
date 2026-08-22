@@ -324,6 +324,31 @@ const HALF_PI = Math.PI / 2;
 
 const brushes: Brush[] = [];
 
+/**
+ * Ashgate ships as two levels off one generator: `ashgate`, whose street faces
+ * are clad in the kit's own buildings, and `ashgate-raw`, which is the same
+ * district with nothing but its own masses on it. Same plan, same heights, same
+ * lap, same collision everywhere it matters — the difference is entirely what
+ * the walls are made of, which makes the pair a straight answer to what the
+ * models are actually buying.
+ *
+ * Brushes that belong to only one of them are recorded here. The clad ones are
+ * scattered through the file and get filtered out of the raw list; the raw ones
+ * are all emitted at the very END, after everything else, so that dropping them
+ * cannot shift an index anything else is holding — `RAMP_BRUSHES` in
+ * particular.
+ */
+const MODELED = new Set<number>();
+/** Run `fn` and mark everything it emits as belonging to the clad level only. */
+function modeledOnly<T>(fn: () => T): T {
+  const from = brushes.length;
+  const out = fn();
+  for (let i = from; i < brushes.length; i++) MODELED.add(i);
+  return out;
+}
+/** Masses a building ended up standing against — they get two different bases. */
+const CLAD_MASSES: { r: Roof; k: number }[] = [];
+
 const box = (
   p: [number, number, number], s: [number, number, number], c: number, q?: Q, t?: string,
 ): Brush => {
@@ -1131,6 +1156,14 @@ function facade(r: Roof, from = 0) {
  */
 const APRON = 0.14;
 const APRON_OUT = 3.5;
+/**
+ * The pavement round the outside of the district, between the outermost blocks
+ * and the rim. Declared here rather than with the ground it belongs to, because
+ * the frontages need it: a face on the edge of the map has this in front of it
+ * where an inner one has a street, and how far a building may stand off a wall
+ * is decided by what is in front of that wall.
+ */
+const PAVE = 18;
 function footway(cx: number, cz: number, w: number, d: number) {
   box([cx, APRON / 2, cz], [w + APRON_OUT * 2, APRON, d + APRON_OUT * 2], PAVE_C,
     undefined, S_PAVING);
@@ -1404,7 +1437,7 @@ const BLOCKS = ['Building_Small_1', 'Building_Medium_2_001', 'Building_Large_2']
  * first floor. So each one is pushed out by its own overhang as well, and what
  * lands on the line is the wall.
  */
-const WALL_OUT = 0.3;
+const WALL_OUT = 0.12;
 /** How far each of them reaches in front of its wall, in the model's own metres. */
 const BUILD_FRONT: Record<string, number> = {
   Building_Small_1: 2.31, Building_Medium_2_001: 0.57, Building_Large_2: 0.32,
@@ -1450,7 +1483,7 @@ function massTopAt(x: number, z: number): number {
  * Returns the stretches it covered, so the wall-mounted dressing knows whether
  * it is hanging on brick 1.6 m out or on the bare mass behind it.
  */
-function frontage(f: Face, k: number, clear: number): [number, number][] {
+function frontage(f: Face, k: number, clear: number, maxOut: number): [number, number][] {
   const covered: [number, number][] = [];
   const place = (c: number, m: string, s: number) => {
     const dep = CITY[m][2] * s;
@@ -1459,6 +1492,18 @@ function frontage(f: Face, k: number, clear: number): [number, number][] {
     const z = (f.along === 'z' ? f.z + c : f.z) + f.nz * out;
     cityProp(m, x, APRON, z, yawOf(f), s);
     STOOD.push({ x, z });
+  };
+  /** The lowest the wall gets over a stretch of face, sampled inside it. */
+  const roomOver = (lo: number, hi: number) => {
+    let t = Infinity;
+    const n = Math.max(2, Math.ceil((hi - lo) / 2));
+    for (let i = 0; i <= n; i++) {
+      const at = lo + 0.4 + Math.max(0, hi - lo - 0.8) * (i / n);
+      const x = (f.along === 'x' ? f.x + at : f.x) - f.nx * 2;
+      const z = (f.along === 'z' ? f.z + at : f.z) - f.nz * 2;
+      t = Math.min(t, massTopAt(x, z));
+    }
+    return t - DECK_T - 0.3;
   };
   /**
    * The face cut into stretches of equal wall height, measured off the masses
@@ -1482,7 +1527,14 @@ function frontage(f: Face, k: number, clear: number): [number, number][] {
       const room = massTopAt(x, z) - DECK_T - 0.3;
       const last = out[out.length - 1];
       if (last && Math.abs(last.room - room) < 0.5) last.hi = Math.min(half, t + 2);
-      else out.push({ lo: out.length ? t : -half, hi: Math.min(half, t + 2), room });
+      else {
+        // The boundary is somewhere in the two metres between this sample and
+        // the last, so it belongs to the SHORTER of the two. Handing the
+        // benefit of the doubt to the taller one is how a building ends up
+        // hanging a metre and a half over the low half of a wing.
+        if (last) last.hi = t - 2;
+        out.push({ lo: out.length ? t - 2 : -half, hi: Math.min(half, t + 2), room });
+      }
     }
     if (out.length) out[out.length - 1].hi = half;
     return out;
@@ -1501,7 +1553,11 @@ function frontage(f: Face, k: number, clear: number): [number, number][] {
       const fit = ORDER.map((m) => {
         const nat = CITY[m];
         return { m, s: Math.min(1.6, room / nat[1], (hi - lo - used) / nat[0]) };
-      }).filter((o) => o.s >= 0.8);
+      }).filter((o) => o.s >= 0.8
+        // And it has to fit the STREET, not just the wall. These do not end at
+        // their brickwork, and `Building_Small_1`'s 2.3 m of stoop is most of
+        // an 8 m alley once there is one on each side of it.
+        && WALL_OUT + BUILD_FRONT[o.m] * o.s <= maxOut);
       if (!fit.length) break;
       const o = fit[hash(k * 53 + salt * 131 + i * 17) % Math.min(2, fit.length)];
       const w = CITY[o.m][0] * o.s;
@@ -1520,7 +1576,12 @@ function frontage(f: Face, k: number, clear: number): [number, number][] {
     const start = lo + (hi - lo - used) / 2;
     let t = start;
     for (const p of picked) {
-      place(t + p.w / 2, p.m, p.s);
+      // One last look at the wall this one actually landed on. The row was
+      // sized against the stretch and then centred in it, and the stretch
+      // boundaries are sampled every two metres — so this is the check that a
+      // building is never taller than the thing it is standing against, however
+      // the arithmetic above rounded. A gap here reads as a break in the row.
+      if (CITY[p.m][1] * p.s <= roomOver(t, t + p.w)) place(t + p.w / 2, p.m, p.s);
       t += p.w;
     }
     covered.push([start, t]);
@@ -1622,23 +1683,23 @@ function solidFace(ri: number, ci: number, axis: 'x' | 'z') {
 }
 
 /**
- * Which frontage does which job, keyed by the same seed the face is dressed
- * with. Hand-written rather than hashed: the point of a themed bay is that it is
+ * Which frontage does which job, keyed by the seed the face is dressed with.
+ * Hand-written rather than hashed: the point of a themed bay is that it is
  * DIFFERENT from its neighbours, and a random draw puts two loading docks side
  * by side about as often as not.
  */
 const BAY_PLAN: Record<number, Bay> = {
-  100: 'loading', 102: 'market', 104: 'garage',
-  201: 'garage', 203: 'plant', 205: 'loading',
-  300: 'market', 302: 'plant',
-  401: 'loading', 403: 'garage',
+  41: 'loading', 49: 'market', 57: 'garage',
+  84: 'garage', 92: 'plant', 100: 'loading',
+  6: 'market', 86: 'plant',
+  51: 'loading', 131: 'garage',
 };
 
-/** Dress one street-facing wall: generic kit, a theme if it has one, posters. */
-function street(f: Face, k: number) {
+/** Dress one street-facing wall: buildings, a theme if it has one, posters. */
+function street(f: Face, k: number, maxOut: number) {
   const kind = BAY_PLAN[k];
   const span = Math.min(19, f.len * 0.4);
-  const cover = frontage(f, k, kind ? span : 0);
+  const cover = modeledOnly(() => frontage(f, k, kind ? span : 0, maxOut));
   /**
    * Where the wall IS at a point along this face — on the building line, or on
    * the mass behind it. Everything hung on a wall has to ask: a poster pinned
@@ -1648,7 +1709,7 @@ function street(f: Face, k: number) {
   const wallAt = (t: number) =>
     cover.some(([a, b]) => t > a + 1.5 && t < b - 1.5) ? WALL_OUT : 0;
   if (kind) bay(f, kind, 0, span, k);
-  streetKit(f, k, kind ? span : 0, wallAt);
+  streetKit(f, k, kind ? span : 0, wallAt, maxOut);
   // A poster or two on the blank stretches either side, whatever the wall does
   // for a living. Paper on a wall is the cheapest life there is.
   for (const sgn of [-1, 1]) {
@@ -1658,48 +1719,49 @@ function street(f: Face, k: number) {
   }
 }
 
-for (let ci = 0; ci < COLS.length; ci++) {
-  const C = COLS[ci];
-  if (solidFace(1, ci, 'x')) {
-    street({ x: C.c, z: ROWS[1].hi, nx: 0, nz: 1, along: 'x', len: C.size }, 100 + ci);
-  }
-  if (solidFace(2, ci, 'x')) {
-    street({ x: C.c, z: ROWS[2].lo, nx: 0, nz: -1, along: 'x', len: C.size }, 200 + ci);
-  }
-}
-for (let ri = 0; ri < ROWS.length; ri++) {
-  const R = ROWS[ri];
-  if (solidFace(ri, 1, 'z')) {
-    street({ x: COLS[1].hi, z: R.c, nx: 1, nz: 0, along: 'z', len: R.size }, 300 + ri);
-  }
-  if (solidFace(ri, 2, 'z')) {
-    street({ x: COLS[2].lo, z: R.c, nx: -1, nz: 0, along: 'z', len: R.size }, 400 + ri);
-  }
-}
-
-// The other two wide streets. There are four gaps in this grid a street could
-// be called a street in — 22, 22, 24 and 22 metres — and until the frontages
-// were whole buildings rather than a course of wall modules, dressing more than
-// two of them was not affordable. A building is now CHEAPER than the modules it
-// replaced, so the rest of the district gets the same treatment: every wide
-// street on the map is lined, and the 8 m alleys between them stay bare, which
-// is what an alley looks like anyway.
-for (let ci = 0; ci < COLS.length; ci++) {
-  const C = COLS[ci];
-  if (solidFace(3, ci, 'x')) {
-    street({ x: C.c, z: ROWS[3].hi, nx: 0, nz: 1, along: 'x', len: C.size }, 500 + ci);
-  }
-  if (solidFace(4, ci, 'x')) {
-    street({ x: C.c, z: ROWS[4].lo, nx: 0, nz: -1, along: 'x', len: C.size }, 600 + ci);
-  }
-}
-for (let ri = 0; ri < ROWS.length; ri++) {
-  const R = ROWS[ri];
-  if (solidFace(ri, 3, 'z')) {
-    street({ x: COLS[3].hi, z: R.c, nx: 1, nz: 0, along: 'z', len: R.size }, 700 + ri);
-  }
-  if (solidFace(ri, 4, 'z')) {
-    street({ x: COLS[4].lo, z: R.c, nx: -1, nz: 0, along: 'z', len: R.size }, 800 + ri);
+// Every outward face of every block in the district.
+//
+// This used to be the two avenues, then four of them, and the reason it was
+// ever a subset is that a modular ground storey cost sixty draw calls a face
+// and there was no budget for a hundred and thirty of them. There is now: the
+// renderer instances the kit, so the second building of a kind in a cell is a
+// matrix and the hundredth is a matrix. What decides where a building goes is
+// no longer what it costs — it is whether one FITS, which is a question about
+// the wall behind it and the width of the street in front of it, and both are
+// measured per face.
+//
+// The street width is the part that is easy to forget. A face on an avenue has
+// twenty-two metres in front of it and a face on an alley has eight, and these
+// models do not end at their brickwork: `Building_Small_1` carries 2.3 m of
+// stoop, which is most of an alley once there is one on each side. So each face
+// is told how far it may reach, and the alleys quietly get the two models that
+// stay close to their own wall.
+{
+  const seedOf = (ri: number, ci: number, f: number) => ri * 40 + ci * 4 + f;
+  /** The gap in front of a face: the next block's wall, or the pavement. */
+  const gap = (ss: typeof COLS, i: number, dir: -1 | 1) => {
+    const next = ss[i + dir];
+    if (!next) return PAVE;
+    return dir > 0 ? next.lo - ss[i].hi : ss[i].lo - next.hi;
+  };
+  /** How far a building on this face may stand off it, leaving a lane clear. */
+  const reach = (g: number) => Math.max(0.6, g / 2 - 2);
+  for (let ri = 0; ri < ROWS.length; ri++) {
+    for (let ci = 0; ci < COLS.length; ci++) {
+      const R = ROWS[ri], C = COLS[ci];
+      if (solidFace(ri, ci, 'x')) {
+        street({ x: C.c, z: R.lo, nx: 0, nz: -1, along: 'x', len: C.size },
+          seedOf(ri, ci, 0), reach(gap(ROWS, ri, -1)));
+        street({ x: C.c, z: R.hi, nx: 0, nz: 1, along: 'x', len: C.size },
+          seedOf(ri, ci, 1), reach(gap(ROWS, ri, 1)));
+      }
+      if (solidFace(ri, ci, 'z')) {
+        street({ x: C.hi, z: R.c, nx: 1, nz: 0, along: 'z', len: R.size },
+          seedOf(ri, ci, 2), reach(gap(COLS, ci, 1)));
+        street({ x: C.lo, z: R.c, nx: -1, nz: 0, along: 'z', len: R.size },
+          seedOf(ri, ci, 3), reach(gap(COLS, ci, -1)));
+      }
+    }
   }
 }
 
@@ -1707,12 +1769,19 @@ for (let ri = 0; ri < ROWS.length; ri++) {
 {
   const clad = (r: Roof) => STOOD.some((c) =>
     Math.abs(c.x - r.cx) < r.w / 2 + 1 && Math.abs(c.z - r.cz) < r.d / 2 + 1);
-  // A mass with a building against it still needs a base on its OTHER three
-  // sides — a block that is brick on the avenue and a bare box down the alley
-  // is worse than either. But the base wraps all four, so on these it is pulled
-  // in to a fifth of its depth: still a plinth and still a painted line, and
-  // 20 cm is comfortably behind the 30 the building line stands at.
-  for (const b of PENDING_BASE) groundStorey(b.r, b.k, clad(b.r) ? 0.18 : 1);
+  // A mass with a building against it still needs a base on whatever sides did
+  // not get one — a block that is brick on the street and a bare box down the
+  // alley is worse than either. But the base wraps all four, so on these it is
+  // pulled in to a fifth of its depth: still a plinth and still a painted line,
+  // and comfortably behind the 12 cm the building line stands at.
+  //
+  // In the raw level there is nothing to hide behind and it gets the full one
+  // instead, which is emitted right at the end of the file.
+  for (const b of PENDING_BASE) {
+    if (!clad(b.r)) { groundStorey(b.r, b.k, 1); continue; }
+    modeledOnly(() => groundStorey(b.r, b.k, 0.18));
+    CLAD_MASSES.push(b);
+  }
 }
 
 /**
@@ -1726,7 +1795,7 @@ for (let ri = 0; ri < ROWS.length; ri++) {
  * `(nx, nz)` points AWAY from the wall, so `out` is measured into the street.
  */
 function streetKit(f: Face, k: number, clear = 0,
-  wallAt: (t: number) => number = () => 0) {
+  wallAt: (t: number) => number = () => 0, maxOut = 9) {
   const SPACING = 24;
   const n = Math.max(2, Math.floor(f.len / SPACING));
   for (let i = 0; i < n; i++) {
@@ -1736,6 +1805,21 @@ function streetKit(f: Face, k: number, clear = 0,
     if (Math.abs(t) < clear / 2 + 3) continue;
     const ax = f.along === 'x' ? f.x + t : f.x;
     const az = f.along === 'z' ? f.z + t : f.z;
+    // An alley does not get a lamp post. There is 8 m between these buildings
+    // and a 2.6 m column on each side leaves under three in the middle — which
+    // reads as a blocked street and, worse, plays as one. It gets the thing a
+    // real alley has instead: a lamp bracketed to the wall, and none of the
+    // kerbside furniture that needs a kerb to stand on.
+    if (maxOut < 3) {
+      wallProp('Prop_Light_Wide', f.nx, f.nz, ax + f.nx * wallAt(t), 4.6,
+        az + f.nz * wallAt(t), 1.6);
+      if (hash(k * 7 + i) % 2 === 0) {
+        const w = wallAt(t + 3);
+        cityPanel('Prop_ACUnit', f.nx, f.nz, ax + (f.along === 'x' ? 3 : 0) + f.nx * w,
+          4.2 + (hash(k + i) % 3) * 1.4, az + (f.along === 'z' ? 3 : 0) + f.nz * w);
+      }
+      continue;
+    }
     // A column with a light on it, standing 2.6 m off the wall.
     const lx = ax + f.nx * 2.6;
     const lz = az + f.nz * 2.6;
@@ -1862,7 +1946,6 @@ for (let ci = 0; ci < COLS.length; ci++) {
 // the run, and the streets between the blocks are the only place on the map
 // long enough to reach momentum.hardCap on foot.
 
-const PAVE = 18;
 box([0, -BASE / 2, 0],
   [EXTENT.x1 - EXTENT.x0 + PAVE * 2, BASE, EXTENT.z1 - EXTENT.z0 + PAVE * 2], STREET,
   undefined, S_STREET);
@@ -2568,7 +2651,19 @@ crates(COLS[1].c - 14, (ROWS[3].hi + ROWS[4].lo) / 2, 'x', 5, 11, 2);
 crates(COLS[4].c - 20, (ROWS[0].hi + ROWS[1].lo) / 2, 'x', 5, 10, 4);
 crates((COLS[1].hi + COLS[2].lo) / 2, ROWS[3].c - 20, 'z', 4, 12, 6);
 
+// --- the other Ashgate --------------------------------------------------------
+// Everything above this line is in both levels or in the clad one. What follows
+// is the raw level's own: the full-depth ground storey on the masses the clad
+// level hides behind a building. Last in the file, so removing it from the clad
+// list is a `splice` off the end and every index anything else holds still
+// points at what it did.
+const RAW_FROM = brushes.length;
+for (const b of CLAD_MASSES) groundStorey(b.r, b.k, 1);
+const RAW_ONLY = brushes.splice(RAW_FROM);
+
 export { brushes };
+/** The same district with no kit models on its walls. */
+export const brushesRaw: Brush[] = brushes.filter((_, i) => !MODELED.has(i)).concat(RAW_ONLY);
 
 // --- the lap -----------------------------------------------------------------
 // Checkpoints sit on the surface you arrive at, never over a gap: one you have

@@ -3292,3 +3292,85 @@ down the new one, 21.5 ms in the worst view a player gets -- the whole map end
 to end from the spawn -- and 8.9 ms from the crown. All of them at or below what
 the same views cost before any of this, because what came out paid for what
 went in.
+
+## 40. Instancing, and then every wall in the district
+
+Two streets, then four, then every wall — and each time the answer to "why not
+all of them" was the same number: a kit model is a group of meshes, one per
+material, and the renderer submitted every one of them separately. A finished
+building is thirteen pieces, so cladding every street face of forty blocks was
+twenty thousand draw calls and the conversation ended there.
+
+That number was never real. Every copy of `Building_Small_1` is the SAME
+thirteen geometries and the same thirteen materials — `share: true` had already
+stopped the materials being cloned and the geometry was never cloned at all. The
+copies differ in a matrix. That is what `InstancedMesh` is for, and the whole
+district's kit now collapses into one instanced draw per distinct piece.
+
+### The cell size is the whole design
+
+The naive version — one batch per piece for the entire map — took the spawn view
+from 3003 calls to 800 and the frame got SLOWER in two of five viewpoints. One
+batch spanning the district is one bounding sphere the size of the district,
+which no frustum ever rejects, so every triangle in the city is submitted from
+every camera. The frame had stopped being call-bound and started being
+triangle-bound.
+
+So the batches are cut by position as well, into 128 m cells. A street view
+submits the cells it can see. Measured across five viewpoints, 128 m beat both
+96 m (too many batches) and no cells at all (nothing culled).
+
+The verifier's estimate had to learn the same thing, or it would be guarding a
+renderer that no longer exists. It prices a model at its primitive count ONCE
+PER CELL it appears in, which is what the renderer does, and its number matches
+the live count exactly. The ceiling came DOWN, from 3800 to 2600 — the opposite
+of making room, and the point: what changed underneath is that the cost of
+dressing the map no longer scales with how much of it you dress, so the thing to
+guard is the number of distinct pieces in play. A level that doubles its
+buildings and holds this line added no draws at all.
+
+### Every outward face of every block
+
+With the price of the hundredth building down to a matrix, what decides where a
+building goes is whether one FITS. Two questions, both measured per face:
+
+**How tall is the wall behind it** — sampled off the masses themselves, since a
+`step` block's face is only as tall as its base and a `wing` changes height
+halfway along. The face is cut into stretches of constant height and each is
+filled and centred within itself.
+
+**How wide is the street in front of it** — and this is the one that decides
+what an alley gets. An avenue has 22 m and an alley has 8, and these models do
+not end at their brickwork: `Building_Small_1` carries 2.3 m of stoop, which is
+most of an alley once there is one on each side. So each face is told how far it
+may reach and the alleys quietly take the two models that stay close to their
+own wall. The alleys also lost their lamp posts — a 2.6 m column each side of an
+8 m gap leaves under three metres in the middle, which reads as a blocked street
+and plays as one. They get a lamp bracketed to the wall instead, which is what an
+alley has anyway.
+
+177 buildings, up from 79, and the draw estimate went from 3780 to 2161.
+
+### Two Ashgates
+
+The district ships twice off one generator: `ashgate`, whose street faces are
+clad, and `ashgate-raw`, the same district with nothing but its own masses on
+it. Same plan, same heights, same lap, same collision everywhere that matters —
+the difference is entirely what the walls are made of, which makes the pair a
+straight answer to what the art is buying and what it costs.
+
+The mechanism is worth a line because the obvious version is wrong. Brushes that
+belong to one variant only are recorded as they are emitted; the clad ones are
+scattered through the file and are filtered out of the raw list, but the RAW-only
+ones — the full-depth ground storey on masses the clad level hides behind a
+building — are all emitted at the very end of the file and spliced off the tail.
+Anything else shifts an index something else is holding, and `RAMP_BRUSHES` is
+holding several.
+
+### Where it ended up
+
+2967 brushes, 177 finished buildings, ~2161 estimated calls against a ceiling
+that came down to 2600, 70 checks passing. Measured in a throttled tab at
+978x918: 13.2 ms on the avenue, 14.1 ms in an alley, 11.6 ms from the crown,
+16.1 ms in the worst view a player gets. Every one of those is faster than the
+same view was before this pass, with twice the buildings in it.

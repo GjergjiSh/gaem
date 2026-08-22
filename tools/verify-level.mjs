@@ -183,8 +183,27 @@ head('what got built');
     }
   };
   scanPrims('assets');
-  const calls = A.brushes.reduce((a, b) => a + (b.m ? (prims[b.m] ?? 1) : 1), 0);
-  note(`~${calls} draw calls`);
+  // Models are INSTANCED, and the estimate has to model that or it is measuring
+  // a renderer that no longer exists. Every copy of a kit model shares its
+  // geometry and its material, so the renderer collects them into one instanced
+  // draw per (piece, 96 m cell) -- the cell is what keeps the frustum able to
+  // reject anything, since one batch per piece for the whole district is one
+  // bounding sphere the size of the district. So the price of a model is its
+  // primitive count once per cell it appears in, NOT once per copy: the
+  // hundredth building on a street is a matrix, and the first one in a new cell
+  // is thirteen calls.
+  const CELL = 128;
+  const cells = new Map();
+  let calls = 0;
+  for (const b of A.brushes) {
+    if (!b.m) { calls++; continue; }
+    const key = `${b.m}|${Math.round(b.p[0] / CELL)},${Math.round(b.p[2] / CELL)}`;
+    if (cells.has(key)) continue;
+    cells.set(key, true);
+    calls += prims[b.m] ?? 1;
+  }
+  note(`~${calls} draw calls (${cells.size} instanced batches over ${
+    A.brushes.filter((b) => b.m).length} model brushes)`);
 
   // Every model the level names has to be a file on disk. A name that is in the
   // measured table but no longer in the pack loads as nothing and leaves a hole
@@ -201,10 +220,13 @@ head('what got built');
   const missing = named.filter((n) => !onDisk.has(n));
   note(`${named.length} distinct models named, all from one pack`);
   check(missing.length === 0, `every model resolves to a file (${missing.join(', ') || 'none missing'})`);
-  // Raised from 2600 when the count above was corrected. That is not the same
-  // as making room: the old ceiling was set against an estimate that could not
-  // see the sci-fi pack, and the same district priced honestly was most of the
-  // way to it before a single new brush was placed.
+  // Lowered from 3800 when the renderer learned to instance. That is the
+  // opposite of making room and it is the point: the ceiling has to sit just
+  // above what the district actually costs, or it stops being a budget. What
+  // changed underneath it is that the cost of dressing the map no longer scales
+  // with how much of it you dress -- so the number to guard is the number of
+  // DISTINCT pieces in play, and a level that doubles its buildings and holds
+  // this line is a level that added no draws at all.
   //
   // The number that justifies this one is measured rather than guessed. At
   // ~3260 real calls (`renderer.info.render.calls`, widest view of the whole
@@ -213,7 +235,7 @@ head('what got built');
   // shadows off changes nothing. So this ceiling is a frame-time budget wearing
   // a draw-call costume, and the thing to do when it is hit is to make the
   // renderer submit fewer calls, not to raise it again.
-  check(calls < 3800, `inside the draw budget (${calls} of 3800)`);
+  check(calls < 2600, `inside the draw budget (${calls} of 2600)`);
 
   const spanX = A.EXTENT.x1 - A.EXTENT.x0;
   const spanZ = A.EXTENT.z1 - A.EXTENT.z0;

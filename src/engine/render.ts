@@ -392,12 +392,93 @@ export class Renderer {
       this.levelGroup.add(ring);
     }
 
+    // Every copy of every kit model in the district, collapsed into one draw
+    // call per distinct piece. Not in the editor, where a model has to stay a
+    // child of the brush it belongs to so the gizmo drags it.
+    if (!this.edges) this.batchModels();
+
     // The city has changed shape, so the baked shadow map is out of date. One
     // flag, one extra pass on the next frame, and then never again — which is
     // what makes 4096² of sun shadow affordable at all. The editor's live gizmo
     // drags are the one thing this does not catch: shadows there are as of the
     // last rebuild, and a rebuild is one edit away.
     this.renderer.shadowMap.needsUpdate = true;
+  }
+
+  /**
+   * Collapse the level's kit models into instanced draws.
+   *
+   * A model hung on a brush is a group of meshes, one per material, and the
+   * renderer submits every one of them separately — so a district costs a draw
+   * call for every window frame on every building in it, and the price of
+   * dressing the map scales with how much of it you dress. That is the wall
+   * this hit: a finished building is thirteen pieces, and cladding every street
+   * face of forty blocks with them is twenty thousand draw calls.
+   *
+   * But every copy of `Building_Small_1` is the SAME thirteen geometries and
+   * the same thirteen materials — `share: true` already stopped the materials
+   * being cloned, and the geometry was never cloned at all. So the copies
+   * differ in nothing but a matrix, which is exactly what `InstancedMesh` is
+   * for. Grouped by (geometry, material), the whole district's kit collapses to
+   * one draw per distinct piece: a few hundred, however many buildings there
+   * are, and adding the hundredth costs a matrix.
+   *
+   * Geometry stays shared, so this is a few hundred kilobytes of matrices
+   * rather than a merged copy of every building in the city.
+   *
+   * The catch is culling. One batch per piece for the whole district is one
+   * bounding sphere the size of the district, which no frustum ever rejects —
+   * so every triangle in the city is submitted from every camera, and the frame
+   * stops being call-bound and starts being triangle-bound. So the batches are
+   * cut into 128 m cells as well: a few more draws, and a street view submits
+   * the two cells it can see instead of the whole map.
+   */
+  private static readonly CELL = 128;
+  private batchModels() {
+    interface Batch {
+      geo: THREE.BufferGeometry;
+      mat: THREE.Material;
+      shadow: boolean;
+      m: THREE.Matrix4[];
+    }
+    const batches = new Map<string, Batch>();
+    const roots: THREE.Object3D[] = [];
+    for (const brush of this.brushMeshes) {
+      for (const child of brush.children) {
+        if ((child as THREE.LineSegments).isLineSegments) continue;
+        child.updateWorldMatrix(true, true);
+        let found = false;
+        child.traverse((o) => {
+          const mesh = o as THREE.Mesh;
+          if (!mesh.isMesh || Array.isArray(mesh.material)) return;
+          const C = Renderer.CELL;
+          const cell = `${Math.round(brush.position.x / C)},${Math.round(brush.position.z / C)}`;
+          const key = `${mesh.geometry.uuid}|${mesh.material.uuid}|${mesh.castShadow}|${cell}`;
+          let b = batches.get(key);
+          if (!b) {
+            b = { geo: mesh.geometry, mat: mesh.material, shadow: mesh.castShadow, m: [] };
+            batches.set(key, b);
+          }
+          b.m.push(mesh.matrixWorld.clone());
+          found = true;
+        });
+        if (found) roots.push(child);
+      }
+    }
+    if (!batches.size) return;
+    for (const b of batches.values()) {
+      const im = new THREE.InstancedMesh(b.geo, b.mat, b.m.length);
+      for (let i = 0; i < b.m.length; i++) im.setMatrixAt(i, b.m[i]);
+      im.instanceMatrix.needsUpdate = true;
+      im.castShadow = b.shadow;
+      im.receiveShadow = true;
+      im.userData.batched = true;
+      this.levelGroup.add(im);
+    }
+    // The originals stay parented where they were — the brush still owns its
+    // model, and leaving the tree alone is what keeps a rebuild the only thing
+    // that has to know about any of this — but they no longer draw.
+    for (const r of roots) r.visible = false;
   }
 
   /**

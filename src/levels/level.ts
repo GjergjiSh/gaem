@@ -54,6 +54,19 @@ BUILTINS['ashgate'] = () => ({
   killY: ashgate.killY,
   enemies: clone(ashgate.enemies),
 });
+// The same district, generated the same way, with nothing on its walls but its
+// own masses. Kept as a level rather than a flag so the two can be flown one
+// after the other without a rebuild — which is the only honest way to judge
+// what an art pass is worth.
+BUILTINS['ashgate-raw'] = () => ({
+  name: 'ashgate-raw',
+  brushes: clone(ashgate.brushesRaw),
+  triggers: clone(ashgate.triggers),
+  spawn: { ...ashgate.spawn },
+  spawnYaw: ashgate.spawnYaw,
+  killY: ashgate.killY,
+  enemies: clone(ashgate.enemies),
+});
 BUILTINS['figure8'] = () => ({
   name: 'figure8',
   brushes: clone(figure8.brushes),
