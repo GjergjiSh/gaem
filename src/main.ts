@@ -11,6 +11,7 @@ import { Editor } from './tools/editor';
 import { Pause } from './tools/pause';
 import { Wheel } from './tools/wheel';
 import { updates } from './tools/updates';
+import { Carriers } from './engine/carriers';
 import { Enemies, ROBOTS } from './engine/enemies';
 import { preloadModels } from './engine/models';
 import { preloadSurfaces } from './engine/surfaces';
@@ -40,6 +41,8 @@ const panel = new Panel(() => world.syncTuning());
 
 let player = makePlayer(level.spawn);
 const enemies = new Enemies(gfx.scene);
+const carriers = new Carriers(gfx.scene);
+carriers.rebuild(level.rails);
 const rings = new Rings();
 let hitsTaken = 0;
 let laps = 0;
@@ -93,6 +96,7 @@ function restart() {
   laps = 0;
   hitsTaken = 0;
   enemies.rebuild();
+  carriers.rebuild(level.rails);
   projectiles.clear();
   sword.clear();
   hook.clear();
@@ -124,6 +128,7 @@ function finish() {
   laps++;
   run = newRun();
   enemies.rebuild();
+  carriers.rebuild(level.rails);
 }
 
 // ---------------------------------------------------------------- camera drift
@@ -243,6 +248,15 @@ function frame(now: number) {
   // for the whole tick rather than shifting under it.
   world.syncEnemies(enemies.alivePositions());
 
+  // The conveyor, before the fixed steps and for the same reason as the robots:
+  // the solver should see a world that is consistent for the whole tick rather
+  // than one shifting under it. The carry comes straight after, so a rider is
+  // moved WITH the cargo and then gets to move themselves, which is the order
+  // that makes running along a moving box feel like running along a floor.
+  carriers.update(dt);
+  carriers.carry(player);
+  world.syncCarriers(carriers.bodies());
+
   acc += dt;
   let steps = 0;
   while (acc >= FIXED && steps < MAX_STEPS) {
@@ -333,6 +347,7 @@ requestAnimationFrame(frame);
   editor,
   level,
   enemies,
+  carriers,
   weapon,
   sword,
   hook,

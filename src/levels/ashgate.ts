@@ -2318,8 +2318,14 @@ box([ladderX - LADDER_LEN / 2 + 0.6, LADDER_TOP + 1.2, YARD_Z], [1.2, 2.4, SLOT 
 
 export const LINE_W = 16;
 const LINE_T = 1.6;
-/** How far the overhead rail rides above the deck. */
-export const LINE_OVER = 7;
+/**
+ * How far the overhead rail rides above the deck.
+ *
+ * Eleven metres, which is more headroom than a road needs and exactly what this
+ * one does: the rail is not a roof, it is the thing the cargo hangs from, and
+ * the cargo has to clear the deck with room to run under it.
+ */
+export const LINE_OVER = 11;
 /** Portal legs stand this far either side of the centreline. */
 export const LINE_PY = LINE_W / 2 - 1.2;
 /** The two long sides run out here, over the pavement between blocks and rim. */
@@ -2484,17 +2490,20 @@ for (const leg of LINE_LEGS) {
       for (const sgn of [-1, 1]) {
         const [px, pz] = side(p, sgn * LINE_PY);
         box([px, (top - BASE) / 2, pz], [2.4, top + BASE, 2.4], MAST, undefined, S_STEEL);
-        box([px, y + LINE_OVER / 2, pz], [1.6, LINE_OVER, 1.6], MAST, undefined, S_STEEL);
+        box([px, y + (LINE_OVER + 1.3) / 2, pz], [1.6, LINE_OVER + 1.3, 1.6],
+          MAST, undefined, S_STEEL);
       }
       const across = LINE_PY * 2 + 2.4;
       box([p.x, top - 1.2, p.z],
         leg.axis === 'z' ? [across, 1.6, 2.4] : [2.4, 1.6, across],
         GANTRY, undefined, S_STEEL);
-      // The cross beam the rail sits ON. Under it rather than over it, and
-      // overlapping by 15 cm rather than touching: a beam whose top plane
-      // exactly meets the rail's bottom plane holds it up by a hairline, which
-      // reads as unsupported to `verify:level` and to the eye.
-      box([p.x, y + LINE_OVER - 0.8, p.z],
+      // The cross beam the rail hangs FROM, above it rather than under it. That
+      // is not a detail: the cargo hangs off the underside of the rail on a
+      // strut, and a beam crossing under the rail is a beam the strut ploughs
+      // through at every portal on the circuit. Overlapping the rail by 15 cm
+      // rather than touching, because a plane meeting a plane is a hairline and
+      // `verify:level` calls that floating.
+      box([p.x, y + LINE_OVER + 0.8, p.z],
         leg.axis === 'z' ? [across, 1.0, 1.6] : [1.6, 1.0, across],
         GANTRY, undefined, S_STEEL);
     }
@@ -2517,7 +2526,8 @@ for (const j of JUNCTIONS) {
       const px = j.x + sx * LINE_PY;
       const pz = j.z + sz * LINE_PY;
       box([px, (top - BASE) / 2, pz], [2.4, top + BASE, 2.4], MAST, undefined, S_STEEL);
-      box([px, j.y + LINE_OVER / 2, pz], [1.6, LINE_OVER, 1.6], MAST, undefined, S_STEEL);
+      box([px, j.y + (LINE_OVER + 1.3) / 2, pz], [1.6, LINE_OVER + 1.3, 1.6],
+        MAST, undefined, S_STEEL);
     }
   }
   const across = LINE_PY * 2 + 2.4;
@@ -2529,10 +2539,33 @@ for (const j of JUNCTIONS) {
   for (const sgn of [-1, 1]) {
     box([j.x, top - 1.2, j.z + sgn * LINE_PY], [across, 1.6, 2.4], GANTRY, undefined, S_STEEL);
     box([j.x + sgn * LINE_PY, top - 1.2, j.z], [2.4, 1.6, across], GANTRY, undefined, S_STEEL);
-    box([j.x, j.y + LINE_OVER - 0.8, j.z + sgn * LINE_PY], [across, 1.0, 1.6],
+    box([j.x, j.y + LINE_OVER + 0.8, j.z + sgn * LINE_PY], [across, 1.0, 1.6],
       GANTRY, undefined, S_STEEL);
   }
 }
+
+/**
+ * The circuit as a path, for the things that ride it.
+ *
+ * One closed polyline at RAIL height, anticlockwise from the west end of the
+ * north side: east along z = -35 following the profile, south down the east
+ * side, west along z = 101 following the same profile backwards, and north up
+ * the west side to close. The last point joins the first — nothing in here says
+ * where it ends because it does not have one.
+ *
+ * It is derived from the same profile the deck is built from rather than typed
+ * out again, so a bend moved in one is a bend moved in both.
+ */
+export const rails: [number, number, number][][] = [(() => {
+  const pts: [number, number, number][] = [];
+  for (const [x, y] of LOOP_PROFILE) pts.push([x, y + LINE_OVER, LOOP_Z0]);
+  pts.push([LOOP_X, 44 + LINE_OVER, LOOP_Z1]);
+  for (let i = LOOP_PROFILE.length - 2; i >= 0; i--) {
+    const [x, y] = LOOP_PROFILE[i];
+    pts.push([x, y + LINE_OVER, LOOP_Z1]);
+  }
+  return pts;
+})()];
 
 // Ways on. A conveyor with no way onto it is scenery, so it is tied into the
 // roofscape wherever one comes near — which, with nothing on it below 20 m,

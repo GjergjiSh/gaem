@@ -148,6 +148,44 @@ export class RapierWorld implements CollisionWorld {
     }
   }
 
+  private carrierBodies: RAPIER.RigidBody[] = [];
+  private carrierColliders: RAPIER.Collider[] = [];
+  private carrierCount = -1;
+
+  /**
+   * The conveyor's cargo, as solid boxes that move.
+   *
+   * Kinematic for the same reason the dummies are: being moved every frame is
+   * the whole point, and a fixed body cannot be. Rapier will not CARRY a
+   * character standing on one of these — that is done in `carriers.ts`, by
+   * adding the frame's motion to the rider — but it will stop them walking
+   * through one, which is what a collider is for.
+   */
+  syncCarriers(boxes: { x: number; y: number; z: number; hw: number; hh: number; hl: number }[]) {
+    if (boxes.length !== this.carrierCount) {
+      for (const c of this.carrierColliders) this.world.removeCollider(c, false);
+      for (const b of this.carrierBodies) this.world.removeRigidBody(b);
+      this.carrierColliders = [];
+      this.carrierBodies = [];
+      this.carrierCount = boxes.length;
+      for (const b of boxes) {
+        const body = this.world.createRigidBody(
+          RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(b.x, b.y, b.z),
+        );
+        this.carrierBodies.push(body);
+        this.carrierColliders.push(this.world.createCollider(
+          RAPIER.ColliderDesc.cuboid(b.hw, b.hh, b.hl)
+            .setCollisionGroups(groups(G_LEVEL, G_CHAR | G_RAY)),
+          body,
+        ));
+      }
+      return;
+    }
+    for (let i = 0; i < boxes.length; i++) {
+      this.carrierBodies[i].setNextKinematicTranslation(boxes[i]);
+    }
+  }
+
   /** Tuning values that Rapier caches internally need re-pushing when sliders move. */
   syncTuning() {
     this.controller.setMaxSlopeClimbAngle(T.character.maxSlopeAngle);
