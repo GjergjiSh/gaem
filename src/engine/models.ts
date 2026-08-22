@@ -286,7 +286,15 @@ function shareTextures(gltf: { scene: THREE.Object3D; parser: any }) {
     const uri = json.images?.[src]?.uri;
     // Embedded images are per-file by definition and their URI is the whole
     // payload, so there is nothing to share and nothing worth keying on.
-    return typeof uri === 'string' && !uri.startsWith('data:') ? uri : null;
+    if (typeof uri !== 'string' || uri.startsWith('data:')) return null;
+    // Keyed on the BASENAME, not the path as written. Three packs reference the
+    // same kind of file three different ways -- `T_X.png`, `Textures/T_X.png`,
+    // `../Textures/T_X.png` -- and the loader already resolves all of them to
+    // one file by basename, so keying on the raw string is a cache that misses
+    // on a difference that does not exist. It showed up as 542 live textures
+    // for about ninety files: every extra copy is video memory and a bind the
+    // renderer has to make.
+    return decodeURIComponent(uri).split('/').pop() ?? null;
   };
   gltf.scene.traverse((o) => {
     const mesh = o as THREE.Mesh;

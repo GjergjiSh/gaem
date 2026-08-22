@@ -53,6 +53,21 @@ interface Slot {
   /** Region to lift out of it. The whole sheet when omitted. */
   crop?: Crop;
   /**
+   * Tile the source this many times across the canvas before anything is
+   * painted on it, and repeat the finished texture correspondingly less.
+   *
+   * This is what lets one surface carry two materials at two different scales:
+   * `facade` wants brick at four metres and its window grid at twelve, and a
+   * texture has only one set of UVs. Drawing the brick three by three into the
+   * canvas and painting the windows over the whole thing puts both on the same
+   * UVs at the right sizes — and any map that is NOT painted (the normal, the
+   * ORM) gets the same effect for free from `repeat`, which keeps it aligned
+   * with the base to the pixel.
+   */
+  grid?: number;
+  /** Extra repeats of a plain, unpainted map. Pairs with `grid`. */
+  repeat?: number;
+  /**
    * Draw on top of the crop — or draw the whole map, when there is no `file`.
    *
    * The pack has no window in it anywhere, and a district of blank walls is not
@@ -112,6 +127,21 @@ interface SurfaceDef {
 const TRIM01 = 'T_Trim_01';
 const TRIM02 = 'T_Trim_02';
 const TRIM03 = 'T_Trim_03';
+
+// The city pack (`assets/city`) is a different kind of thing from the sci-fi
+// kit and worth its own paragraph. Where that one ships trim sheets — one sheet
+// carrying every detail of a model, tileable nowhere — this one ships genuine
+// TILING MATERIALS: brick, concrete, asphalt, ornamented stone, each seamless
+// in both directions and authored at a real-world scale. That is exactly what a
+// district made of brushes needs and what the sci-fi pack could never give it,
+// so the buildings and the ground are made of these and everything you get
+// close to is still made of the other one.
+const BRICK = 'T_RedBrick';
+const CONCRETE = 'T_Concrete';
+const ORNAMENT = 'T_Ornaments';
+const METALCON = 'T_MetalConcrete';
+/** How many brick courses go in twelve metres — the window grid's tile. */
+const BRICK_GRID = 3;
 
 /** The flat panel band out of Trim_03's normal: a seam, a field, a seam. */
 const SEAM_BAND: Crop = [0, 96, 2048, 470];
@@ -256,40 +286,40 @@ export const SURFACES: Record<string, SurfaceDef> = {
    * behind it.
    */
   facade: {
-    base: { file: `${TRIM03}_BaseColor`, paint: paintGlass, as: 'glass' },
-    normal: { file: `${TRIM03}_Normal`, crop: SEAM_BAND },
-    orm: { file: `${TRIM03}_ORM` },
+    base: { file: `${BRICK}_BaseColor`, grid: BRICK_GRID, paint: paintGlass, as: 'glass' },
+    normal: { file: `${BRICK}_Normal`, repeat: BRICK_GRID },
+    orm: { file: `${BRICK}_ORM`, repeat: BRICK_GRID },
     emissiveMap: { paint: paintLights, as: 'lights' },
-    tile: WIN_TILE, roughness: 0.7, metalness: 0.0, bump: 0.7,
-    // Held well down, and the number is set by the SUNLIT wall rather than the
-    // shadowed one. Emissive is added after the lighting, so a value that reads
-    // as a lit room on a dark facade reads as a pale rectangle on a facade the
-    // dusk sun is already hitting — and a sunlit wall of pale rectangles is
-    // panelling. At this level the shadowed sides of the district glow and the
-    // west faces merely have windows, which is what a city does at this hour.
+    tile: WIN_TILE, roughness: 0.95, metalness: 0.0, bump: 1.1,
     emissive: 0xffffff, emissiveIntensity: 0.4,
   },
   /**
-   * The other kind of building: bigger glazing on a coarser bay.
-   *
-   * Same windows, a wider tile, a different panel rhythm behind them and a
-   * different sheen. One facade material over forty buildings is a terrace
-   * built by one contractor in one year, which is not what a district is —
-   * alternating two of them is enough for the eye to stop counting.
+   * The concrete-framed kind: post-war, cheaper, and most of the district.
    */
   facade2: {
-    base: { file: `${TRIM03}_BaseColor`, paint: paintGlass, as: 'glass' },
-    normal: { file: `${TRIM02}_Normal`, crop: PLATE_BAND },
-    orm: { file: `${TRIM02}_ORM`, crop: PLATE_BAND },
+    base: { file: `${CONCRETE}_BaseColor`, grid: 2, paint: paintGlass, as: 'glass' },
+    normal: { file: `${CONCRETE}_Normal`, repeat: 2 },
+    orm: { file: `${CONCRETE}_ORM`, repeat: 2 },
     emissiveMap: { paint: paintLights, as: 'lights' },
-    tile: WIN_TILE * 1.3, roughness: 0.5, metalness: 0.12, bump: 0.8,
+    tile: WIN_TILE * 1.15, roughness: 0.92, metalness: 0.03, bump: 1,
+    emissive: 0xffffff, emissiveIntensity: 0.4,
+  },
+  /**
+   * And the newest ones: clad panel over a concrete frame, bigger glazing.
+   */
+  facade3: {
+    base: { file: `${METALCON}_BaseColor`, grid: 2, paint: paintGlass, as: 'glass' },
+    normal: { file: `${METALCON}_Normal`, repeat: 2 },
+    orm: { file: `${METALCON}_ORM`, repeat: 2 },
+    emissiveMap: { paint: paintLights, as: 'lights' },
+    tile: WIN_TILE * 1.35, roughness: 0.6, metalness: 0.2, bump: 0.9,
     emissive: 0xffffff, emissiveIntensity: 0.4,
   },
   /** The base course every mass stands on. Coarser and rougher: this is concrete. */
   plinth: {
-    base: { file: `${TRIM03}_BaseColor` },
-    normal: { file: `${TRIM03}_Normal`, crop: SEAM_BAND },
-    orm: { file: `${TRIM03}_ORM` },
+    base: { file: `${CONCRETE}_BaseColor` },
+    normal: { file: `${CONCRETE}_Normal` },
+    orm: { file: `${CONCRETE}_ORM` },
     tile: 5, roughness: 1, metalness: 0, bump: 1,
   },
   /** Roof decks and balconies — plate you stand on, so it tiles at plate size. */
@@ -301,10 +331,10 @@ export const SURFACES: Record<string, SurfaceDef> = {
   },
   /** Bands, cornices, lintels. Small repeat: these are 1 m strips seen up close. */
   trim: {
-    base: { file: `${TRIM02}_BaseColor`, crop: PLATE_BAND },
-    normal: { file: `${TRIM02}_Normal`, crop: PLATE_BAND },
-    orm: { file: `${TRIM02}_ORM`, crop: PLATE_BAND },
-    tile: 2.4, roughness: 0.58, metalness: 0.3, bump: 1,
+    base: { file: `${ORNAMENT}_BaseColor` },
+    normal: { file: `${ORNAMENT}_Normal` },
+    orm: { file: `${ORNAMENT}_ORM` },
+    tile: 3, roughness: 0.72, metalness: 0.12, bump: 1,
   },
   /** Roadway: the Overpass, catwalks, ramps. Dark, matte, unreflective. */
   road: {
@@ -330,10 +360,10 @@ export const SURFACES: Record<string, SurfaceDef> = {
    * thing for them to disagree about is what they are made of.
    */
   street: {
-    base: { file: `${TRIM01}_BaseColor`, crop: DARK_PANEL },
-    normal: { file: `${TRIM01}_Normal`, crop: DARK_PANEL },
-    orm: { file: `${TRIM01}_ORM`, crop: DARK_PANEL },
-    tile: 9, roughness: 0.99, metalness: 0.0, bump: 1.1,
+    base: { file: 'T_Concrete_Asphalt_BaseColor' },
+    normal: { file: `${CONCRETE}_Normal` },
+    orm: { file: `${CONCRETE}_ORM` },
+    tile: 8, roughness: 1, metalness: 0.0, bump: 0.8,
   },
   /**
    * The footway: the apron of paving every building stands on.
@@ -344,10 +374,10 @@ export const SURFACES: Record<string, SurfaceDef> = {
    * eye was asking for whenever the district looked like one material.
    */
   paving: {
-    base: { file: `${TRIM03}_BaseColor` },
-    normal: { file: `${TRIM03}_Normal`, crop: SEAM_BAND },
-    orm: { file: `${TRIM03}_ORM` },
-    tile: 3.2, roughness: 1, metalness: 0, bump: 1.2,
+    base: { file: `${CONCRETE}_BaseColor` },
+    normal: { file: `${CONCRETE}_Normal` },
+    orm: { file: `${CONCRETE}_ORM` },
+    tile: 4, roughness: 1, metalness: 0, bump: 1.2,
   },
   /** Structure: masts, gantries, pylons, columns. */
   steel: {
@@ -470,7 +500,8 @@ function sheet(file: string): Promise<THREE.Texture> {
  * flat" rather than as an error.
  */
 async function mapOf(slot: Slot, srgb: boolean): Promise<THREE.Texture> {
-  const key = `${slot.file ?? 'painted'}|${slot.crop?.join(',') ?? 'full'}|${slot.as ?? ''}`;
+  const key = `${slot.file ?? 'painted'}|${slot.crop?.join(',') ?? 'full'}|${slot.as ?? ''}`
+    + `|${slot.grid ?? 1}|${slot.repeat ?? 1}`;
   const got = cache.get(key);
   if (got) return got;
 
@@ -483,7 +514,12 @@ async function mapOf(slot: Slot, srgb: boolean): Promise<THREE.Texture> {
     const k = Math.min(1, MAX_EDGE / Math.max(cw, ch));
     canvas.width = Math.max(1, Math.round(cw * k));
     canvas.height = Math.max(1, Math.round(ch * k));
-    ctx.drawImage(img, cx, cy, cw, ch, 0, 0, canvas.width, canvas.height);
+    const n = slot.grid ?? 1;
+    const w = canvas.width / n;
+    const h = canvas.height / n;
+    for (let gy = 0; gy < n; gy++) {
+      for (let gx = 0; gx < n; gx++) ctx.drawImage(img, cx, cy, cw, ch, gx * w, gy * h, w, h);
+    }
   } else {
     canvas.width = MAX_EDGE;
     canvas.height = MAX_EDGE;
@@ -496,6 +532,7 @@ async function mapOf(slot: Slot, srgb: boolean): Promise<THREE.Texture> {
   tex.wrapS = THREE.MirroredRepeatWrapping;
   tex.wrapT = THREE.MirroredRepeatWrapping;
   tex.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+  if (slot.repeat) tex.repeat.set(slot.repeat, slot.repeat);
   tex.anisotropy = anisotropy;
   tex.needsUpdate = true;
   cache.set(key, tex);

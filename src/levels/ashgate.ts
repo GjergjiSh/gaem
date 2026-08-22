@@ -125,6 +125,7 @@
 import type { Brush, Trigger } from './types';
 import { axisAngle, orient, qmul, type Q } from './geom';
 import { SCIFI, sciBox, sciBrush } from './scifi';
+import { CITY, cityBox, cityBrush } from './city';
 import { DEFAULTS as D } from '../core/tuning';
 
 interface P3 { x: number; y: number; z: number }
@@ -445,8 +446,16 @@ function shade(c: number, k: number): number {
   return (r << 16) | (g << 8) | b;
 }
 
-/** The measured table, re-exported so the verifier can price a prop. */
-export const propBoxOf = (m: string) => SCIFI[m];
+/**
+ * The measured size of any model this level names, whichever kit it came from.
+ *
+ * Two tables now, and the verifier asks this one question of every prop on the
+ * map — so a model that is in neither table must not silently return undefined
+ * and skip the distortion check. It cannot: `verify:level` reads the answer and
+ * would fail on the missing entry, which is the correct way for a level to find
+ * out it is placing something nobody has measured.
+ */
+export const propBoxOf = (m: string) => SCIFI[m] ?? CITY[m];
 
 /**
  * A slab spanning two points, with its TOP SURFACE on the line between them —
@@ -497,6 +506,40 @@ function prop(m: string, x: number, y: number, z: number, yaw = 0, scale = 1) {
   const s = sciBrush(m, scale);
   skinned([x, y + s[1] / 2, z], s, PROP_C, m, yaw ? axisAngle(0, 1, 0, yaw) : undefined);
   return s;
+}
+
+/** The same, for a piece of the city kit. */
+function cityProp(m: string, x: number, y: number, z: number, yaw = 0, scale = 1) {
+  const s = cityBrush(m, scale);
+  skinned([x, y + s[1] / 2, z], s, PROP_C, m, yaw ? axisAngle(0, 1, 0, yaw) : undefined);
+  return s;
+}
+
+/**
+ * A city-kit wall module hung on a face, sitting on `y`.
+ *
+ * The kit's panels are thin on Z and face their own +Z, so this is a yaw and
+ * nothing else — no tipping, no second quarter-turn. `wallProp` exists for the
+ * sci-fi kit's mixture of Z-thin and Y-thin models and would be the wrong tool
+ * here: it measures which axis is thinnest to decide, and on a 2x3x0.2 panel it
+ * happens to get the same answer for the wrong reason.
+ */
+function cityPanel(
+  m: string, nx: number, nz: number, x: number, y: number, z: number, scale = 1,
+) {
+  const s = cityBrush(m, scale);
+  // Set back so the panel's own thickness sits against the wall rather than
+  // half inside it, less a bite so nothing rests on a hairline.
+  const out = s[2] / 2 - 0.06;
+  skinned([x + nx * out, y + s[1] / 2, z + nz * out], s, PROP_C, m,
+    axisAngle(0, 1, 0, Math.atan2(nx, nz)));
+  return s;
+}
+
+/** A flat city marking lying on the road, `yaw` turning its length. */
+function road(m: string, x: number, y: number, z: number, yaw = 0, scale = 1) {
+  const s = cityBrush(m, scale);
+  skinned([x, y + s[1] / 2, z], s, PROP_C, m, yaw ? axisAngle(0, 1, 0, yaw) : undefined);
 }
 
 /**
@@ -1324,36 +1367,84 @@ function decalAt(f: Face, at: number, out: number, art: string, scale: number) {
 
 
 function frontage(f: Face, k: number) {
-  // Clad the ground storey. The pack is modular on a 4 m grid, so the panels go
-  // on as panels — at double size, which is a uniform scale and therefore not a
-  // distortion, and which turns thirteen tiles a face into seven.
-  const PANEL = 8;
+  // The ground storey, built out of the city kit rather than painted on.
+  //
+  // This is a BUILDING kit — 2 m panels, 4 m insets, 3 m storeys, corner
+  // columns, shopfronts with glass in them and a fake interior behind the glass
+  // — and it is the only one of the three packs that has ever had anything to
+  // say about the part of a building a person walks past. The sci-fi wall
+  // panels that used to be here were service cladding pretending to be a
+  // frontage.
+  //
+  // Only the ground storey, and only on the streets the route runs down. A
+  // window module is five draw calls; cladding all forty masses to the roof is
+  // twenty thousand of them, and the eye is not up there anyway. Above 3 m the
+  // mass keeps its textured facade, which is doing that job well.
+  const PANEL = 4;
   const tiles = Math.floor(f.len / PANEL);
   const pad = (f.len - tiles * PANEL) / 2;
+  // One material per building, so a frontage is a frontage and not a sample
+  // book: brick, brick-with-trim, or the metal-and-concrete of a newer block.
+  const kind = hash(k * 13) % 3;
+  const wide = ['Brick_Inset_Window', 'Brick_Inset_Window', 'Metal_Window'][kind];
+  const blank = ['Brick_Inset', 'Brick_Inset', 'Metal_Plain_3'][kind];
   for (let i = 0; i < tiles; i++) {
     const t = -f.len / 2 + pad + PANEL * (i + 0.5);
     const cx = f.along === 'x' ? f.x + t : f.x;
     const cz = f.along === 'z' ? f.z + t : f.z;
-    clad(pick(CLAD, k * 3 + i), f.nx, f.nz, cx, 0, cz, 2);
+    // Roughly every other bay is glazed and the rest is blank wall. Not only
+    // because an unbroken run of identical windows is a texture rather than a
+    // building: a glazed module is five draw calls and a blank one is three, and
+    // over twenty-two frontages that ratio is worth several hundred of them.
+    const m = hash(k * 31 + i) % 2 === 0 ? blank : wide;
+    cityPanel(m, f.nx, f.nz, cx, APRON, cz);
+  }
+  // The band that closes the shopfront off from the mass above it. A brush and
+  // not a run of `Cornice_*` modules, and the arithmetic is the whole reason: a
+  // 2 m cornice piece over 22 frontages is six hundred draw calls for a line
+  // you read as a line. One brush per face wearing the ornament material is two
+  // dozen, and at street level you cannot tell them apart.
+  {
+    const th = 0.5;
+    const w = f.along === 'x' ? f.len : th + SHOP_OUT * 2;
+    const d = f.along === 'x' ? th + SHOP_OUT * 2 : f.len;
+    box([f.x + f.nx * (SHOP_OUT + 0.1), APRON + 3.1, f.z + f.nz * (SHOP_OUT + 0.1)],
+      [w, 0.55, d], TRIM, undefined, S_TRIM);
+  }
+  // A corner column at each end, which is the piece that stops a facade being a
+  // flat card stuck to the front of a box.
+  for (const sgn of [-1, 1]) {
+    const t = sgn * (f.len / 2 - 0.7);
+    cityPanel('Brick_CornerColumn_Bottom', f.nx, f.nz,
+      f.along === 'x' ? f.x + t : f.x, APRON, f.along === 'z' ? f.z + t : f.z);
   }
 
-  // Then the things that give it scale. A 30 m mass has no size at all until
-  // there is a 4 m door on it; after that your eye reads the whole street.
-  const n = Math.max(2, Math.round(f.len / 13));
+  // Then the things that give it scale, and a way in. A 30 m mass has no size at
+  // all until there is a 2 m door on it; after that your eye reads the street.
+  const n = Math.max(2, Math.round(f.len / 26));
   for (let i = 0; i < n; i++) {
     const t = ((i + 0.5) / n - 0.5) * f.len;
     const ax = f.along === 'x' ? f.x + t : f.x;
     const az = f.along === 'z' ? f.z + t : f.z;
-    switch (hash(k * 17 + i) % 4) {
-      case 0: wallProp('Door_Frame_Square', f.nx, f.nz, ax, 0, az); break;
-      case 1: wallProp('Prop_Light_Wide', f.nx, f.nz, ax, 4.4, az, 1.6); break;
-      case 2: wallProp('Door_Metal', f.nx, f.nz, ax, 0, az); break;
-      default: wallProp(pick(PLATES, k + i), f.nx, f.nz, ax, 3.6, az, 1.4); break;
+    switch (hash(k * 17 + i) % 3) {
+      case 0: {
+        // A doorway with its own steps out onto the pavement.
+        cityPanel('DoorFrame_Trim', f.nx, f.nz, ax, APRON, az);
+        cityProp('Entrance_Concrete_2x2', ax + f.nx * 1.2, 0, az + f.nz * 1.2,
+          Math.atan2(f.nx, f.nz));
+        break;
+      }
+      case 1:
+        cityPanel('Trim_FirstFloor_Window_001', f.nx, f.nz, ax, APRON, az);
+        wallProp('Prop_Light_Wide', f.nx, f.nz, ax, 4.4, az, 1.6);
+        break;
+      default:
+        cityPanel('DoorFrame_Metal_Single', f.nx, f.nz, ax, APRON, az);
+        cityProp('Stairs_Entrance_Concrete', ax + f.nx * 1.1, 0, az + f.nz * 1.1,
+          Math.atan2(f.nx, f.nz));
+        break;
     }
   }
-  // One service run above the cladding. It reads as plumbing, and the ledge it
-  // leaves is a metre of something to land on halfway up a blank wall.
-  wallRun('Prop_PipeHolder', f.nx, f.nz, f.x, 6.6, f.z, f.len * 0.72);
 }
 
 /**
@@ -1446,6 +1537,32 @@ function streetKit(f: Face, k: number, clear = 0) {
     box([lx, 4.9 + APRON, lz], [1.5, 0.45, 1.5], LIT_WARM, undefined, S_LAMP);
     prop('Prop_Light_Floor', lx + f.nx * 0.9, APRON, lz + f.nz * 0.9,
       Math.atan2(f.nx, f.nz));
+
+    // City furniture on the kerb: the small things a street has and nobody
+    // notices until they are missing. All of them are one draw call.
+    switch (hash(k * 41 + i) % 4) {
+      case 0:
+        cityProp('Prop_Bollard', ax + f.nx * 4.4, APRON, az + f.nz * 0.0);
+        cityProp('Prop_Bollard', ax + f.nx * 4.4 + (f.along === 'x' ? 2.2 : 0), APRON,
+          az + (f.along === 'z' ? 2.2 : 0));
+        break;
+      case 1:
+        cityProp('Prop_Planter_Single', ax + f.nx * 3.4, APRON, az + f.nz * 3.4,
+          Math.atan2(f.nx, f.nz));
+        break;
+      case 2:
+        cityProp('Prop_ManholeCover', ax + f.nx * 6.5, 0, az + f.nz * 6.5);
+        break;
+      default:
+        cityProp('Prop_Drain', ax + f.nx * 5.0, 0, az + f.nz * 5.0);
+        break;
+    }
+    // A condenser unit hung on the wall above head height, which is what the
+    // back of a building actually looks like.
+    if (hash(k * 7 + i) % 3 === 0) {
+      cityPanel('Prop_ACUnit', f.nx, f.nz, ax + (f.along === 'x' ? 3 : 0),
+        4.2 + (hash(k + i) % 3) * 1.4, az + (f.along === 'z' ? 3 : 0));
+    }
 
     // And something to walk past between the lamps, hard against the wall.
     const cm = pick(i % 2 ? BULK : UNITS, k * 29 + i);
@@ -2090,20 +2207,39 @@ for (let ri = 0; ri < ROWS.length; ri++) {
 {
   const AVE_X = (COLS[1].hi + COLS[2].lo) / 2;
   const AVE_Z = (ROWS[1].hi + ROWS[2].lo) / 2;
-  const STRIDE = 17;
-  // North–south. Skipped where the two avenues cross, so the junction is clear
-  // rather than paved through with a line nobody would paint there.
+  const STRIDE = 12;
+  // The city kit ships road markings as models — a double yellow, a broken lane
+  // line, a crosswalk, a stop bar, turn arrows — so none of this is drawn by
+  // hand any more. A 6 m marking is one draw call and it is the difference
+  // between a strip of ground and a road.
+  //
+  // The kit's lines run along X, so the north–south avenue turns them a quarter
+  // and the east–west one does not.
   for (let z = EXTENT.z0 + 8; z < EXTENT.z1 - 8; z += STRIDE) {
-    if (Math.abs(z - AVE_Z) < 16) continue;
-    decal('Decal_Line_Straight', AVE_X, 0, z, 0, 2);
+    if (Math.abs(z - AVE_Z) < 18) continue;
+    road('Decal_DoubleYellow_Straight', AVE_X, 0, z, HALF_PI);
+    // A lane line either side of the centre, so it reads as four lanes.
+    for (const sgn of [-1, 1]) {
+      road('Decal_BrokenLine_Straight', AVE_X + sgn * 5.5, 0, z, HALF_PI);
+    }
   }
-  // East–west, turned a quarter so the model's long axis lies along the street.
   for (let x = EXTENT.x0 + 8; x < EXTENT.x1 - 8; x += STRIDE) {
-    if (Math.abs(x - AVE_X) < 16) continue;
-    decal('Decal_Line_Straight', x, 0, AVE_Z, HALF_PI, 2);
+    if (Math.abs(x - AVE_X) < 18) continue;
+    road('Decal_DoubleYellow_Straight', x, 0, AVE_Z);
+    for (const sgn of [-1, 1]) {
+      road('Decal_BrokenLine_Straight', x, 0, AVE_Z + sgn * 5.5);
+    }
   }
-  // And the junction itself marked as one.
-  decal('Decal_Line_90_Round_Large', AVE_X, 0, AVE_Z, 0, 1.6);
+  // The junction: a crosswalk on each approach with a stop bar behind it, and
+  // an arrow on the road telling you which way the lane goes. This is the one
+  // place on the map where two roads meet, and it is worth eight draw calls.
+  for (const s2 of [-1, 1]) {
+    road('Decal_Crosswalk', AVE_X + s2 * 13, 0, AVE_Z, HALF_PI);
+    road('Decal_Stop', AVE_X + s2 * 18, 0, AVE_Z - s2 * 3, HALF_PI);
+    road('Decal_Crosswalk', AVE_X, 0, AVE_Z + s2 * 13);
+    road('Decal_Stop', AVE_X - s2 * 3, 0, AVE_Z + s2 * 18);
+    road('Decal_ArrowStraight', AVE_X - s2 * 3, 0, AVE_Z + s2 * 26);
+  }
 }
 
 // --- street lines ------------------------------------------------------------

@@ -3135,3 +3135,63 @@ is hit is to submit fewer calls, not to raise it again.
 
 1721 brushes, 791 wearing a model, ~3680 estimated calls (~3260 real on the
 widest view), 70 checks passing.
+
+
+## 38. A third kit, and the one that is actually about buildings
+
+`assets/city` is a modular building kit: brick and concrete wall modules,
+shopfronts with glass and a fake interior behind it, cornices, corner columns,
+entrances with their own steps, sidewalks with a real curb, doors, bollards,
+planters, manhole covers, and a full set of road markings. Neither of the other
+two packs has ever had anything to say about the part of a building a person
+walks past -- the sci-fi kit is infrastructure and the Platforms kit is
+untextured -- so the ground floor had been brushes pretending, and it looked it.
+
+It is authored in metres on a clean grid: panels 2 m wide by 3 m tall by 0.2
+thick, insets 4 m, storeys 3 m, corners 2x2, sidewalks in 3 m slabs. Panels are
+thin on **Z** and face their own +Z, which is the same convention as a door in
+the sci-fi kit and the opposite of that kit's `_Straight` wall pieces -- the one
+mix-up most likely to leave a facade standing edge-on to its own street.
+`src/levels/city.ts` is the measured table, `tools/measure-city.py` regenerates
+it, and `propBoxOf` now answers from both tables so the verifier can still price
+every prop on the map.
+
+### Where it is used, and where it is not
+
+**The ground storey of every street-facing frontage**, and nothing above 3 m. A
+glazed module is five primitives and therefore five draw calls; cladding forty
+masses to the roof is twenty thousand of them and the eye is not up there
+anyway. Above the shopfront the mass keeps its textured facade, and the join
+happens at a cornice.
+
+The cornice itself is a *brush* wearing the pack's ornament material, not a run
+of `Cornice_*` modules: 2 m pieces over twenty-two frontages is six hundred draw
+calls for a line you read as a line, against two dozen for the brush, and at
+street level you cannot tell them apart. Roughly every other bay is glazed and
+the rest is blank wall -- partly because an unbroken run of identical windows is
+a texture rather than a building, and partly because blank is three primitives
+against five.
+
+The cheap pieces go everywhere, because they are one call each: bollards,
+planters, manhole covers, drains, wall-mounted condenser units, and the road
+markings -- double yellow, lane lines, crosswalks, stop bars and turn arrows at
+the junction. The kit's tiling *materials* are used far more widely than its
+models, since a texture costs nothing: brick, concrete, ornament and asphalt are
+now the district's facades, footways, trims and roads.
+
+### The brush outline became an editor affordance
+
+A wireframe over every brush was how a world of flat-shaded boxes stayed
+readable. A textured world does not need it -- hiding every outline changes the
+rendered frame by under half a percent of its JPEG size -- and it was the single
+largest block of draw calls in the frame, one extra call for every plain brush.
+It is on in the editor, where you are looking at colliders and often at ones a
+model is hiding, and off in play. The verifier's estimate prices a plain brush
+at one call to match.
+
+### Where it ended up
+
+2016 brushes, 1072 wearing a model from one of the two textured kits, ~3350
+estimated calls against a 3800 ceiling, and 70 checks passing. Measured in a
+throttled tab: 1390 real calls and ~13 ms at street level, 2979 and ~22 ms on
+the widest possible view of the entire city.

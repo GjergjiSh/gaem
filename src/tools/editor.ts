@@ -220,6 +220,11 @@ export class Editor {
   enter() {
     this.active = true;
     document.body.classList.add('editing');
+    // Wireframes on. In play they are a second draw call per brush for an
+    // outline you cannot see on a textured wall; in here they are the only
+    // thing that shows where a collider is when a model is sitting over it.
+    this.gfx.edges = true;
+    this.gfx.buildLevel();
     document.exitPointerLock?.();
     // Drop focus out of whatever it was in. Every key here is gated on
     // typingInAField, so opening the editor straight from a tuning slider would
@@ -244,6 +249,8 @@ export class Editor {
   exit() {
     this.active = false;
     document.body.classList.remove('editing');
+    this.gfx.edges = false;
+    this.gfx.buildLevel();
     this.toolbar.style.display = 'none';
     // F2 mid-drag: the rectangle would otherwise stay painted over the game.
     if (this.marquee) this.endMarquee();

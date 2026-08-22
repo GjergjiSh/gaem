@@ -157,9 +157,10 @@ head('what got built');
   note(`${thin} brushes are under 10 cm on some axis — grilles, panels and paint`);
   check(bad.length === 0, `every brush has finite position and real size (${bad.length} bad)`);
 
-  // What this actually costs to draw. A plain brush is two calls (the box and
-  // its edge lines); a brush wearing a model draws the model's primitives
-  // instead, because the renderer hides the box under it.
+  // What this actually costs to draw. A plain brush is ONE call in play -- its
+  // wireframe outline is an editor affordance and is not built outside the
+  // editor -- and a brush wearing a model draws the model's primitives instead,
+  // because the renderer hides the box under it.
   //
   // Counted across EVERY pack, which it did not used to be: this walked
   // assets/Platforms alone, so once Ashgate moved onto the sci-fi kit every
@@ -182,7 +183,7 @@ head('what got built');
     }
   };
   scanPrims('assets');
-  const calls = A.brushes.reduce((a, b) => a + (b.m ? (prims[b.m] ?? 1) : 2), 0);
+  const calls = A.brushes.reduce((a, b) => a + (b.m ? (prims[b.m] ?? 1) : 1), 0);
   note(`~${calls} draw calls`);
 
   // Every model the level names has to be a file on disk. A name that is in the

@@ -143,6 +143,21 @@ export class Renderer {
   brushMeshes: THREE.Mesh[] = [];
   /** 0..1 scope amount, written by the weapon each frame. Pulls FOV in. */
   adsT = 0;
+  /**
+   * Draw a black wireframe over every brush. Off in play, on in the editor.
+   *
+   * These were how a world of flat-shaded boxes stayed readable: without an
+   * outline, two untextured boxes at slightly different angles are one shape.
+   * A textured world does not need them — measured, hiding every outline
+   * changes the rendered frame by under half a percent of its JPEG size — and
+   * they are not free: an outline is a second draw call for every plain brush
+   * on the map, which is the single largest block of calls in the frame.
+   *
+   * The editor is the other case entirely. There you are looking AT brushes,
+   * often ones a model is hiding, and the outline is the only thing that says
+   * where a collider's corner is.
+   */
+  edges = false;
   private levelGroup = new THREE.Group();
   private dome!: THREE.Mesh;
   private sky!: THREE.HemisphereLight;
@@ -317,8 +332,10 @@ export class Renderer {
       m.userData.brushIndex = i;
       m.userData.decor = b.d === true;
       // Edge lines ride along as a child, so every gizmo drag moves them too.
-      const edges = new THREE.LineSegments(pyramid ? PYRAMID_EDGES : BOX_EDGES, EDGE);
-      m.add(edges);
+      const edges = this.edges
+        ? new THREE.LineSegments(pyramid ? PYRAMID_EDGES : BOX_EDGES, EDGE)
+        : null;
+      if (edges) m.add(edges);
 
       // A model, if this brush names one. It is a CHILD of the box rather than
       // a replacement for it: the box keeps its place in brushMeshes as the
@@ -350,7 +367,7 @@ export class Renderer {
           // surface materials are shared between every brush that wears them,
           // so hiding one that way hides the whole district.
           m.material = HIDDEN;
-          edges.visible = false;
+          if (edges) edges.visible = false;
         } else {
           // Not in memory yet. Fetch it and rebuild once, rather than popping
           // in a frame later with the box still showing underneath.
