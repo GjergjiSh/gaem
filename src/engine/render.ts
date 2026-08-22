@@ -27,6 +27,15 @@ const PYRAMID_EDGES = new THREE.EdgesGeometry(UNIT_PYRAMID);
 
 /** What a brush wears once a model has taken over the drawing. */
 const HIDDEN = new THREE.MeshBasicMaterial({ visible: false });
+/**
+ * The outline every brush wears, and there is ONE of it.
+ *
+ * It used to be a fresh `LineBasicMaterial` per brush, which is seventeen
+ * hundred distinct materials for seventeen hundred identical black lines — and
+ * a distinct material is a program bind and a uniform upload the renderer
+ * cannot batch away. Nothing has ever wanted a per-brush outline colour.
+ */
+const EDGE = new THREE.LineBasicMaterial({ color: 0x000000, opacity: 0.35, transparent: true });
 /** What a brush wears while the editor has hold of it. */
 const SELECTED = new THREE.MeshLambertMaterial({ color: 0x6b7280, emissive: 0x2a3550 });
 
@@ -308,10 +317,7 @@ export class Renderer {
       m.userData.brushIndex = i;
       m.userData.decor = b.d === true;
       // Edge lines ride along as a child, so every gizmo drag moves them too.
-      const edges = new THREE.LineSegments(
-        pyramid ? PYRAMID_EDGES : BOX_EDGES,
-        new THREE.LineBasicMaterial({ color: 0x000000, opacity: 0.35, transparent: true }),
-      );
+      const edges = new THREE.LineSegments(pyramid ? PYRAMID_EDGES : BOX_EDGES, EDGE);
       m.add(edges);
 
       // A model, if this brush names one. It is a CHILD of the box rather than
@@ -323,7 +329,11 @@ export class Renderer {
       // box. A deck must stretch to its collider or the collider shows at the
       // edges, but a lamppost stretched to a box is not a lamppost.
       if (b.m) {
-        const inst = instance(b.m, { uniform: b.d, ground: b.d });
+        // Shared materials: a level's props are scenery and nothing ever tints
+        // one, so they have no business each carrying their own copy of a
+        // material with five textures hanging off it. See models.ts — this one
+        // flag is worth more frame time than every other change in the pass.
+        const inst = instance(b.m, { uniform: b.d, ground: b.d, share: true });
         if (inst) {
           m.add(inst.object);
           // Kit props stand in the same light as everything else. Without this
