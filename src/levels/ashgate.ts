@@ -1266,12 +1266,15 @@ function signboard(
   const x = f.along === 'x' ? f.x + along : f.x;
   const z = f.along === 'z' ? f.z + along : f.z;
   // The board itself, 20 cm proud, lit so it reads at night.
-  const sw = f.along === 'x' ? w : 0.25;
-  const sd = f.along === 'x' ? 0.25 : w;
-  box([x + f.nx * 0.16, y + h / 2, z + f.nz * 0.16], [sw, h, sd], c, undefined, S_LAMP);
+  // Set so the board's BACK is inside the wall, not resting on a hairline in
+  // front of it. It was 3.5 cm proud, which nothing noticed while a building
+  // stood behind it and `verify:level` caught the moment one did not.
+  const sw = f.along === 'x' ? w : 0.3;
+  const sd = f.along === 'x' ? 0.3 : w;
+  box([x + f.nx * 0.12, y + h / 2, z + f.nz * 0.12], [sw, h, sd], c, undefined, S_LAMP);
   // And the artwork, hung on the board. The pack's decals are floor plates, so
   // `wallProp` tips them up to face out — the same quarter turn a vent gets.
-  wallProp(art, f.nx, f.nz, x + f.nx * 0.3, y + h * 0.12, z + f.nz * 0.3,
+  wallProp(art, f.nx, f.nz, x + f.nx * 0.26, y + h * 0.12, z + f.nz * 0.26,
     Math.min(w, h) * 0.62);
 }
 
@@ -2662,8 +2665,58 @@ for (const b of CLAD_MASSES) groundStorey(b.r, b.k, 1);
 const RAW_ONLY = brushes.splice(RAW_FROM);
 
 export { brushes };
-/** The same district with no kit models on its walls. */
-export const brushesRaw: Brush[] = brushes.filter((_, i) => !MODELED.has(i)).concat(RAW_ONLY);
+
+/**
+ * The same district with NOTHING from the asset packs in it.
+ *
+ * Not just the buildings: every brush that wears a model has the model taken
+ * off it and stands as the box it always was. The collider is untouched, which
+ * is the property that makes the pair worth having — the two levels play
+ * identically and differ only in what you are looking at, so anything that
+ * feels different between them is the art and not the level.
+ *
+ * A prop's box is white, because a prop's box is never seen; unwrapped, a
+ * district of white boxes is a snowstorm. They go grey here instead.
+ */
+const RAW_PROP = 0x8f97a6;
+/**
+ * Except the flat ones. A poster, a road marking, a wall panel and a vent grille
+ * are all a few centimetres of nothing with a picture on them — as a box they
+ * are a grey wafer, and one hung on a wall is a grey wafer resting on a
+ * hairline, which `verify:level` calls floating and is right to. Anything under
+ * a hand's width on some axis existed only to carry an image, so in this level
+ * it does not exist. Nothing under `character.stepHeight` was ever holding
+ * anything up, so the level plays exactly as it did.
+ */
+const PAINT_THIN = 0.35;
+const bare = (b: Brush): Brush | null => {
+  if (!b.m) return b;
+  if (Math.min(b.s[0], b.s[1], b.s[2]) < PAINT_THIN) return null;
+  const { m, ...rest } = b;
+  void m;
+  return b.c === PROP_C ? { ...rest, c: RAW_PROP } : rest;
+};
+/**
+ * And the ramps, renumbered. `RAMP_BRUSHES` is a list of INDICES, and this level
+ * drops brushes out of the middle — so the raw level needs its own list or every
+ * ramp on it points at whatever slid into its place. A ramp is also never
+ * dropped for being thin: some of them are, and a ramp is a floor.
+ */
+export const RAMP_BRUSHES_RAW: number[] = [];
+export const brushesRaw: Brush[] = (() => {
+  const ramps = new Set(RAMP_BRUSHES);
+  const out: Brush[] = [];
+  const keep = (b: Brush | null) => { if (b) out.push(b); };
+  for (let i = 0; i < brushes.length; i++) {
+    if (MODELED.has(i)) continue;
+    const b = ramps.has(i) ? bare(brushes[i]) ?? brushes[i] : bare(brushes[i]);
+    if (!b) continue;
+    if (ramps.has(i)) RAMP_BRUSHES_RAW.push(out.length);
+    out.push(b);
+  }
+  for (const b of RAW_ONLY) keep(bare(b));
+  return out;
+})();
 
 // --- the lap -----------------------------------------------------------------
 // Checkpoints sit on the surface you arrive at, never over a gap: one you have
