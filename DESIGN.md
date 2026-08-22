@@ -2888,3 +2888,161 @@ pack — and ~1286 draw calls, *fewer* than the 1694 the previous dressing cost,
 because the sci-fi models carry fewer primitives and the stretched deck plates
 are gone. 70 checks, all passing, including new ones for prop distortion (worst:
 0.0000%), every named model resolving to a file on disk, and the draw budget.
+
+
+## 36. Surfaces, or why a textured pack was not enough
+
+§35 put a textured art pack on everything you get close to, and Ashgate still
+read as boxes. The reason is worth stating plainly, because it survived two
+dressing passes: **the props were textured and the world was not.** A brush was
+one flat `MeshLambertMaterial` in whatever colour the level asked for, and
+almost all of the visible surface of a district — every wall, every roof deck,
+every road, the whole street — is brush. Detail on the furniture cannot fix a
+room with painted walls.
+
+A flat fill is not merely plain, it is *information-free*. A wall thirty metres
+away and a wall three metres away are the same pixels, so the eye has no ruler
+and no depth. Put a grain on both and the near one has texels you can count.
+
+### A surface is a material recipe, and a colour is still a rule
+
+`src/engine/surfaces.ts` names ten of them — `panel`, `plinth`, `deck`, `trim`,
+`road`, `street`, `steel`, `crate`, `padded`, `lamp`, `marked` — and a brush
+picks one with `b.t`. The colour on the brush does not change meaning: it is
+multiplied *under* the base map. That is deliberate and it is the constraint the
+whole pass was built around. Both levels encode rules in colour — amber is
+something to wallrun, violet is something to slide — and an art pass that
+repaints the world is an art pass that costs the player the rules.
+
+Levels that name no surface get `panel`, so `figure8`, `arena` and any saved
+track gain the grain without being touched.
+
+### The pack ships trim sheets, not tiling materials
+
+Every surface therefore takes a **crop** of a sheet, and mirrored wrapping makes
+an arbitrary crop tile without a seam — a mirror symmetry nothing at these
+distances can see. Two details that are not obvious:
+
+* **A base crop and a normal crop need not be the same region.**
+  `T_Trim_03_BaseColor` is featureless grunge, so nothing in it can misalign
+  with anything, while its normal map is a trim sheet with real panel seams.
+  Pairing the two gives a tintable concrete with seams in it out of a pack that
+  ships neither.
+* **The ORM maps are used for occlusion only.** A trim sheet's ORM is authored
+  for a model that uses the whole sheet at once, so across a crop it is near
+  enough constant: roughness 0.35, metalness 1.0 in this pack. Multiplied into
+  the material those do not add variation, they silently overrule every value
+  the surface sets — the entire district came out as polished metal and a low
+  sun turned every street into a mirror. A constant is not a texture.
+
+### UVs in metres, not in brush-fractions
+
+A brush mesh is unit geometry scaled to the brush, so a stock box's 0..1 UVs
+stretch with it: a 54 m wall and a 2 m handrail would each get exactly one
+repeat. That is the same distortion the measured model table exists to keep off
+the props, arriving through the back door on every surface that has no model.
+`boxFor` builds the box with its UVs sized from the brush in **world metres**,
+cached per (surface, size), so a metre of wall is a metre of wall everywhere.
+
+### The rest of the frame
+
+* **A sky.** A gradient dome, kept centred on the camera — left at the origin it
+  works from the middle of the map and clips into a black dome-shaped hole from
+  the edges, because its far side is then past the far plane. Raw
+  `ShaderMaterial` output must go through `<tonemapping_fragment>` and
+  `<colorspace_fragment>` by hand: a `THREE.Color` is converted *into* linear
+  working space, so a sky authored at `#1b2742` and written straight out arrives
+  at about `#030509`. That does not look like a colour-space bug. It looks like
+  the sky is black.
+* **Sun shadows, baked once.** The district is static and so is the sun, so
+  `shadowMap.autoUpdate` is off and `needsUpdate` is set on level rebuild: a
+  4096² map over the whole city for a one-off cost. The price is that nothing
+  which moves may cast, which is why the player does not.
+* **Filmic tone mapping**, because half the world is now emissive and without a
+  curve every lamp, window and marked surface clips to the same white disc.
+* **Light raised across the board** (sun 1.6 → 3.2, sky 1.1 → 2.2, fill 0.55 →
+  1.5). A base map is a multiplier below one and the curve pulls the top end
+  down again; together they cost about a stop and a half. Same intent, more
+  light going into it.
+* **The palette lightened to match.** Slates around `0x2b3446` went through the
+  multiply and the curve and came out very close to black — a district you
+  cannot see rather than a district that is dark.
+
+### And what the level does with all of it
+
+Lit floors above every other service band and under every cornice, warm or cold
+by building, which is what turns a row of silhouettes into a city after dark.
+Facade tints picked per building by position, because a skyline of forty boxes
+in one colour is one building drawn forty times. Beacons on the tall masts. A
+street kit down both frontage avenues — lamp columns, crates, lockers, drums —
+and a dashed centre line down each one, which is the cheapest thing in the file
+and the difference between a road and a gap between two buildings.
+
+Behind the rim there is a **ring of 54 masses that are not part of the map**:
+three brushes each, no props, no gameplay, pushed out until their footprints
+clear the district rectangle — a circle around a rectangle plants towers on the
+corner roofs otherwise, which is exactly where the first two landed. They exist
+so the edge of the world is a hazy city instead of an edge.
+
+`assets/more-scifi` arrived during the pass and is the prop half of the same
+kit — the trim sheets are byte-identical between the two folders, which is the
+test that matters; two packs that merely look similar are two styles. It brings
+crates, drums, lockers, shelves and a satellite dish, measured into the same
+table. One name collides (`Prop_Chest`, at two different sizes) and models are
+keyed by bare filename, so the table has to carry whichever file the glob
+actually resolves — the environment pack's, which sorts last.
+
+`assets/factory` arrived at the same time and is deliberately **not** used: a
+flat-shaded toy-factory set off a single colour map. A perfectly good look, and
+not this one.
+
+### Windows, which the pack does not have
+
+A district of blank walls is not a city whatever else is on them, and there is
+not a window anywhere in either pack. So they are painted — the one thing in
+`surfaces.ts` not lifted from the art: a pane grid at **2.4 m centres over a
+12 m tile**, drawn twice from one seeded walk so the base map and the emissive
+map cannot disagree about where the glass is. About 42% of them are lit, warm
+for most and cold for a few, and half the lit ones have something dark standing
+in front of the window.
+
+Two things that were wrong before they were right:
+
+* **Lit panes were painted paler in the base map too.** That is the obvious
+  reading of "a lit window" and it is backwards: the sun then lands on the pale
+  rectangle, and a sunlit wall of pale rectangles is *panelling*. Lit and unlit
+  glass now share one dark base and the light lives only in the emissive map,
+  where the sun cannot reach it.
+* **Emissive strength is set by the sunlit wall, not the shadowed one.**
+  Emissive is added after lighting, so the value that reads as a lit room on a
+  dark facade blows out on a west face the dusk sun is already hitting.
+
+Buildings also alternate between two facade materials — same windows, a wider
+bay and a different panel rhythm — because one facade material over forty
+buildings is a terrace built by one contractor in one year.
+
+### Telling the floor from the walls
+
+The district read as one continuous material folded into buildings and ground,
+because it *was* one: walls, roads and roofs all came off the same grunge crop
+in the same greys. Three changes, in rough order of how much each bought:
+
+1. **The street is cut from a different sheet.** Dark worn panel from Trim_01
+   instead of the walls' light grunge from Trim_03. Two surfaces meeting at a
+   right angle have to disagree about something.
+2. **A footway round every block** — one box, 14 cm proud, in a third material.
+   A pale apron with the dark road between two of them is the oldest way a
+   street has of saying where you are, and it costs thirty boxes for the whole
+   city. It is deliberately under `character.stepHeight`; the Yard is left bare
+   because it is a loading yard and because a 14 cm apron under the spawn point
+   puts the player 14 cm above the street, which `verify:level` refuses.
+3. **A palette with hue in it.** The first facade list was six greys a few
+   points apart, which at dusk under a warm key and a blue fill is one grey.
+   Oxide, sand, verdigris, bone, slate, weathered mauve — still muted, still
+   nothing primary, but six *materials*. Roofs take 42% of their building's
+   tint, so from above you can tell which roof belongs to which wall.
+
+### Where it ended up
+
+1524 brushes, 708 wearing a model, 58 distinct models from one pack family,
+~2340 draw calls against the 2600 budget, and all 70 checks still passing.

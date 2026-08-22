@@ -69,22 +69,48 @@
 //                 you at momentum.hardCap the whole way and throws you off a
 //                 16 m roof at ~46 u/s. That flight is the finish line.
 //
-// The look is ONE art pack — `assets/scifi`, measured into `scifi.ts` — used
-// for everything you get close to, and flat-shaded brush for everything you
-// read at distance. That division is the whole trick. A district looks like a
-// pile of boxes when nothing shares a language; it looks like a place when the
-// detail all comes from the same hand and the volumes behind it are quiet.
+// The look is ONE art pack — `assets/scifi` for the environment and
+// `assets/more-scifi` for the props, measured into `scifi.ts`, and the same
+// trim sheets underneath both. It supplies three things, and the district needs
+// all three:
+//
+//   the models     everything you get close to. Doors, lamps, rails, vents,
+//                  crates, dishes, cladding panels, the paint on the floor.
+//   the surfaces   what every brush is MADE of — see engine/surfaces.ts. Each
+//                  volume names a material recipe cut from the same sheets, so
+//                  a wall has a grain, a road has a grain, and the two are
+//                  different grains at the same texel density.
+//   the palette    a colour on a brush is a TINT over that grain rather than
+//                  the finished pixel, which is why the numbers below are
+//                  lighter than they look.
+//
+// The surfaces are the part that was missing for a long time, and their absence
+// was not subtle: a district of nine hundred hand-placed volumes in flat fills
+// still reads as nine hundred boxes, because a flat fill tells the eye nothing
+// about how far away a wall is or how big it is. Detail on the props alone
+// cannot fix that — it puts jewellery on a box.
 //
 // Which is also why the older `assets/Platforms` kit appears nowhere in this
 // file. It is untextured, and textured props standing next to untextured ones
-// is not two styles, it is one mistake.
+// is not two styles, it is one mistake. The `assets/factory` kit is out for the
+// same reason from the other direction: it is a flat-shaded toy-factory set off
+// a single colour map, which is a perfectly good look and not this one.
 //
-// So: masses are shaded volumes with a base course, service bands and a
-// cornice — a box with a foot and a cap is a building, a bare box is a box.
-// Everything at arm's length is kit: wall panels on the ground storey of the
-// avenues, doors and lights and vents on the frontages, plant on every roof,
-// rails on every catwalk, and paint on the decks. Scale comes from the small
-// things; you cannot tell how big a 30 m mass is until there is a door on it.
+// So: masses are textured volumes with a base course, service bands, lit floors
+// and a cornice — a box with a foot and a cap is a building, a bare box is a
+// box. Everything at arm's length is kit: wall panels on the ground storey of
+// the avenues, doors and lights and vents on the frontages, plant on every
+// roof, rails on every catwalk, and paint on the decks and the roads. Scale
+// comes from the small things; you cannot tell how big a 30 m mass is until
+// there is a door on it.
+//
+// And it is dusk, which is a choice the level makes and the renderer serves: a
+// low sun rakes a grid of streets so every wall has a lit face and a dark one,
+// and everything the district builds itself out of — lit service bands, window
+// slots, beacons, the amber of a wallrunnable wall — has something to be read
+// against. Behind the rim there is a ring of masses that are not part of the
+// map at all. They exist so that the edge of the world is a hazy city rather
+// than an edge.
 //
 // The theme follows the pack rather than fighting it. It is catwalks, coolers,
 // cable runs, service doors and floor decals, so Ashgate is the back of house:
@@ -165,25 +191,104 @@ const WALL_REACH = D.character.radius + D.wall.detectDist;
 /** Height one bounce is worth. */
 const BOUNCE_RISE = apex(D.wall.jumpUp);
 
-// --- palette. Same language as the figure-8, so a surface means the same thing
-// on both maps: amber is something to wallrun, violet is something to slide.
-const MASS_LOW = 0x2b3446;
-const MASS_MID = 0x333e54;
-const MASS_HI = 0x3c4963;
-const DECK = 0x4b5b78;
-const TIER = 0x2f3a4e;
-const FURN = 0x566277;
-const MAST = 0x6b7280;
-const GANTRY = 0x94a3b8;
-const STREET = 0x1e2531;
-const CRATE = 0x475569;
+// --- palette ------------------------------------------------------------------
+//
+// Same language as the figure-8, so a surface means the same thing on both maps:
+// amber is something to wallrun, violet is something to slide.
+//
+// Every value here is a good deal lighter than it was, and that is not a change
+// of taste. A colour on a brush is now a TINT over a base map rather than the
+// finished pixel: the map is a mid grey, the multiply costs about a quarter of
+// the value, and the filmic curve takes some of what is left. The old palette —
+// slates around 0x2b3446 — went through that and came out very close to black,
+// which is a district you cannot see rather than a district that is dark.
+const MASS_LOW = 0x6d7488;
+const MASS_MID = 0x7b8298;
+const MASS_HI = 0x8b93a8;
+const DECK = 0x99a2b4;
+const TIER = 0x767e94;
+const FURN = 0x8d94a3;
+const MAST = 0x9299a4;
+const GANTRY = 0xb9c0cc;
+// Multiplies a DARK crop rather than the walls' light one, so the number has to
+// be a great deal lighter than the tarmac it is meant to produce.
+const STREET = 0xa9b0bd;
+const CRATE = 0x8a94a3;
 const WALLRUN = 0xd97706;   // amber: run along it
+/**
+ * The same rule, worn by the padded wall.
+ *
+ * `WALLRUN` is a tint meant to MAKE a grey surface amber. The padded panel is
+ * already orange with red strips lit into it, so the same tint over it lands
+ * somewhere near burnt umber and the rule stops reading. This one only has to
+ * keep it amber, which is a much lighter job — it is the same colour to the
+ * player and a different number to the shader.
+ */
+const PADDING = 0xffcf9a;
 const CHUTE_C = 0x7c3aed;   // violet: slide down it
 const PAD = 0x0ea5e9;       // cyan: a thruster step
-const ROAD = 0x415068;
-const TRIM = 0x59667f;      // bands and cornices: the line round a building
-const PLINTH_C = 0x232b3a;  // the base course every mass stands on
+const ROAD = 0x646c7c;
+const TRIM = 0xaab2c2;      // bands and cornices: the line round a building
+const PLINTH_C = 0x5a6070;  // the base course every mass stands on
+/** The footway: pale, warm, and nothing like either the road or the walls. */
+const PAVE_C = 0x9aa0a4;
 const PROP_C = 0xffffff;    // never seen: a prop's model hides its brush
+/** Window light, warm — the common one, because most of this place is offices. */
+const LIT_WARM = 0xffb765;
+/** Window light, cold. A few buildings on a different shift. */
+const LIT_COLD = 0x9fd8ff;
+
+/**
+ * Facade tints, one per building.
+ *
+ * A skyline of forty boxes in one colour is one building drawn forty times. Real
+ * districts are built out of whatever was cheap that decade, so a block gets a
+ * tint off this list by hash.
+ *
+ * These carry real HUE, not just value. The first version of this list was six
+ * greys a few points apart, which is the same mistake as one grey: at dusk,
+ * under a warm key and a blue fill, six greys are one grey. Oxide red, sand,
+ * verdigris, bone, slate and a dark steel are still a muted palette — nothing
+ * here is a primary — but they are six different materials, and a street with
+ * six materials in it is a street somebody built over time.
+ */
+const FACADE_TINTS = [
+  0x8a6a5c,   // oxide, the brick of the place
+  0x9a9078,   // sand concrete
+  0x6f8683,   // verdigris panel
+  0xa0a4ac,   // bone, the newest buildings
+  0x6b7488,   // slate
+  0x7a6f74,   // weathered mauve-grey
+];
+
+// --- surfaces -----------------------------------------------------------------
+// Which material recipe each role wears — see engine/surfaces.ts. The point of
+// naming them here rather than deriving them from colour is that a surface is a
+// MATERIAL and a colour is a RULE, and the level needs to be free to say "this
+// amber thing is padded wall and that amber thing is painted steel".
+/**
+ * A building's wall: panel grain with windows in it.
+ *
+ * Every mass on the map wears this, the ones behind the rim included — a
+ * backdrop tower is a building too, and at that distance the window grid
+ * mips down into exactly the mottled, faintly lit tone a city has from a
+ * kilometre away.
+ */
+const S_MASS = 'facade';
+/** The other kind of building — see the note in surfaces.ts. */
+const S_MASS2 = 'facade2';
+/** The footway every building stands on, which is what makes the road a road. */
+const S_PAVING = 'paving';
+const S_DECK = 'deck';
+const S_TRIM = 'trim';
+const S_PLINTH = 'plinth';
+const S_ROAD = 'road';
+const S_STREET = 'street';
+const S_STEEL = 'steel';
+const S_CRATE = 'crate';
+const S_PADDED = 'padded';
+const S_MARKED = 'marked';
+const S_LAMP = 'lamp';
 
 const HALF_PI = Math.PI / 2;
 
@@ -191,8 +296,11 @@ const HALF_PI = Math.PI / 2;
 
 const brushes: Brush[] = [];
 
-const box = (p: [number, number, number], s: [number, number, number], c: number, q?: Q): Brush => {
+const box = (
+  p: [number, number, number], s: [number, number, number], c: number, q?: Q, t?: string,
+): Brush => {
   const b: Brush = q ? { p, s, q, c } : { p, s, c };
+  if (t) b.t = t;
   brushes.push(b);
   return b;
 };
@@ -231,11 +339,27 @@ const skinned = (
 const HOUSING: readonly (readonly [number, number, number])[] = [
   [9, 5, 6], [7, 6.5, 7], [11, 4, 5], [6, 7, 6], [8, 4.5, 8], [10, 5.5, 6],
 ];
-/** What crowds around plant: vents, fans, cabinets, drums. */
+/**
+ * What crowds around plant: vents, fans, cabinets, drums, crates.
+ *
+ * Half of these come from `assets/more-scifi`, which is the prop half of the
+ * same pack — same authoring scale, same trim sheets, so they stand next to the
+ * environment set without anything looking borrowed. It is worth the wider list:
+ * six objects repeated over fifty roofs is a pattern you start to see, and
+ * fourteen is furniture.
+ */
 const UNITS = [
   'Prop_Fan_Small', 'Prop_Computer', 'Prop_Barrel_Large', 'Prop_Crate4',
   'Prop_Chest', 'Prop_ItemHolder', 'Prop_AccessPoint', 'Prop_Crate3',
+  'Prop_Barrel1', 'Prop_Barrel2_Closed', 'Prop_Barrel2_Open', 'Prop_Crate',
+  'Prop_Crate_Tarp', 'Prop_Locker', 'Prop_Shelves_WideShort', 'Prop_Ammo_Closed',
 ];
+/** Bigger things, for the ground: a street needs objects a person is smaller than. */
+const BULK = [
+  'Prop_Crate_Large', 'Prop_Crate_Tarp_Large', 'Prop_Crate_Tarp', 'Prop_Crate',
+];
+/** What stands on a roof and can be seen from the next district over. */
+const SKYLINE = ['Prop_SatelliteDish', 'Column_Pipes', 'Column_Large_Straight'];
 /** Flat plates for a wall: a few millimetres deep, so they are free. */
 const PLATES = ['Prop_Vent_Big', 'Prop_Vent_Wide', 'Prop_Vent_Small', 'Prop_AccessPoint'];
 /** Floor markings. The pack's decals are flat plates that lie in the XZ plane. */
@@ -273,6 +397,27 @@ function hash(n: number): number {
 }
 const pick = <T>(arr: readonly T[], n: number): T => arr[hash(n) % arr.length];
 
+/**
+ * The same colour, lifted or dropped in value. Hue survives, tone does not.
+ *
+ * Used to put aerial perspective INTO the palette: the tall masses at the back
+ * of a view are mixed lighter and the low ones darker, so the roofscape has a
+ * depth order even where the fog has not reached and every building is lit by
+ * the same sun.
+ */
+function mix(a: number, b: number, t: number): number {
+  const l = (c: number, sh: number) => (c >> sh) & 255;
+  const m = (sh: number) => Math.round(l(a, sh) * (1 - t) + l(b, sh) * t);
+  return (m(16) << 16) | (m(8) << 8) | m(0);
+}
+
+function shade(c: number, k: number): number {
+  const r = Math.min(255, Math.round(((c >> 16) & 255) * k));
+  const g = Math.min(255, Math.round(((c >> 8) & 255) * k));
+  const b = Math.min(255, Math.round((c & 255) * k));
+  return (r << 16) | (g << 8) | b;
+}
+
 /** The measured table, re-exported so the verifier can price a prop. */
 export const propBoxOf = (m: string) => SCIFI[m];
 
@@ -295,7 +440,9 @@ export const propBoxOf = (m: string) => SCIFI[m];
  */
 export const RAMP_BRUSHES: number[] = [];
 
-function ramp(from: P3, to: P3, w: number, thick: number, c: number, over = 0, m?: string) {
+function ramp(
+  from: P3, to: P3, w: number, thick: number, c: number, over = 0, m?: string, t?: string,
+) {
   const dx = to.x - from.x, dy = to.y - from.y, dz = to.z - from.z;
   const flat = Math.hypot(dx, dz);
   const yaw = Math.atan2(dx, dz);
@@ -313,7 +460,7 @@ function ramp(from: P3, to: P3, w: number, thick: number, c: number, over = 0, m
     (from.y + to.y) / 2 + uy * (over / 2) * down - (thick / 2) * Math.cos(climb),
     (from.z + to.z) / 2 + uz * (over / 2) * down,
   ];
-  const brush = m ? skinned(p, [w, thick, len], c, m, q) : box(p, [w, thick, len], c, q);
+  const brush = m ? skinned(p, [w, thick, len], c, m, q) : box(p, [w, thick, len], c, q, t);
   RAMP_BRUSHES.push(brushes.length - 1);
   return { yaw, climb, len, q, brush };
 }
@@ -535,7 +682,7 @@ function shaftLedges(
       ? [cx + at, y - 0.5, cz]
       : [cx, y - 0.5, cz + at];
     const sz: [number, number, number] = axis === 'x' ? [run, 1, deep] : [deep, 1, run];
-    box(p, sz, TIER);
+    box(p, sz, TIER, undefined, S_DECK);
     out.push({ x: p[0], y, z: p[2] });
   }
   return out;
@@ -547,9 +694,24 @@ export const roofs: Roof[] = [];
 
 /** One mass plus its deck. Everything solid and upright goes through here. */
 function mass(cx: number, cz: number, w: number, d: number, top: number): Roof {
-  const band = top >= 30 ? MASS_HI : top >= 20 ? MASS_MID : MASS_LOW;
-  box([cx, (top - DECK_T - BASE) / 2, cz], [w, top - DECK_T + BASE, d], band);
-  box([cx, top - DECK_T / 2, cz], [w, DECK_T, d], DECK);
+  // Tint by WHERE it stands, not by what it is, so a building keeps its colour
+  // however the plan around it is edited, and two neighbours are hardly ever the
+  // same one. Height then sets the tone on top of that.
+  const key = Math.round(cx) * 131 + Math.round(cz);
+  const tint = pick(FACADE_TINTS, key);
+  const band = shade(tint, top >= 30 ? 1.14 : top >= 20 ? 1 : 0.88);
+  // And which of the two building materials it is built out of, by the same
+  // hash — so a tint and a bay size travel together and a building is one
+  // building rather than a colour applied to a generic wall.
+  box([cx, (top - DECK_T - BASE) / 2, cz], [w, top - DECK_T + BASE, d], band,
+    undefined, hash(key * 7) % 2 ? S_MASS : S_MASS2);
+  // The roof takes some of the building's own colour rather than a single deck
+  // grey for the whole district. Not all of it — a roof is weathered plant deck
+  // and a wall is cladding, so it stays mostly neutral — but enough that from
+  // above you can tell which roof belongs to which building, which is the one
+  // view where this map is read as a plan.
+  box([cx, top - DECK_T / 2, cz], [w, DECK_T, d], shade(mix(DECK, tint, 0.42), 0.94),
+    undefined, S_DECK);
   const r = { cx, cz, w, d, top };
   roofs.push(r);
   return r;
@@ -686,7 +848,7 @@ function furnish(r: Roof, k: number) {
     // The housing itself is a volume. What makes it machinery is the cap: a
     // fan on the roof of it and a vent on the flank, both at true size, which
     // also tells your eye how big the housing is.
-    box([px, r.top + hh / 2, pz], [hw, hh, hd], FURN);
+    box([px, r.top + hh / 2, pz], [hw, hh, hd], FURN, undefined, S_CRATE);
     prop('Prop_Fan_Small', px, r.top + hh, pz);
     const sgn = hash(k + j) % 2 ? 1 : -1;
     wallProp(pick(PLATES, k + j), 0, sgn, px, r.top + hh * 0.45, pz + sgn * (hd / 2));
@@ -744,6 +906,27 @@ function mast(r: Roof, k: number) {
   const scale = 1 + (hash(k) % 3) * 0.35;
   prop('Column_Large_Straight', x, r.top, z, (hash(k * 3) % 2) * HALF_PI, scale);
   prop('Prop_Light_Floor', x - sx * 2.2, r.top, z, sx > 0 ? HALF_PI : -HALF_PI);
+
+  // The OTHER corner gets something with a different outline. A roofscape where
+  // every roof carries the same 10 m stack is a texture; a dish next to a stack
+  // next to a pipe cluster is a skyline, and the silhouette is all you have to
+  // tell one building from another at three hundred metres.
+  //
+  // Placed in the OPPOSITE CORNER, and judged by the same rule the mast beside
+  // it is: a corner is not a launch lane. `fitsEdge` is the wrong test here and
+  // fails every roof on the map when you try it — it asks for a 9 m clear ring,
+  // which by construction a corner does not have, so the whole feature quietly
+  // builds nothing at all.
+  const bx = r.cx - sx * (r.w / 2 - 4);
+  const bz = r.cz - sz * (r.d / 2 - 4);
+  const big = pick(SKYLINE, k * 5 + 1);
+  const bs = sciBox(big);
+  if (r.w > 26 && r.d > 26 && clearOfLanes(bx, bz, Math.max(bs[0], bs[2]) + 2)) {
+    prop(big, bx, r.top, bz, (hash(k * 11) % 4) * HALF_PI);
+    // A lit deck plate under it, because a working roof at night is lit where
+    // the work is and dark everywhere else.
+    box([bx, r.top + 0.06, bz], [bs[0] + 2.4, 0.12, bs[2] + 2.4], LIT_WARM, undefined, S_LAMP);
+  }
 }
 
 /**
@@ -758,14 +941,63 @@ function mast(r: Roof, k: number) {
  */
 const PLINTH = 5.5;
 function facade(r: Roof, from = 0) {
-  if (from === 0) box([r.cx, PLINTH / 2, r.cz], [r.w + 0.16, PLINTH, r.d + 0.16], PLINTH_C);
+  if (from === 0) {
+    box([r.cx, PLINTH / 2, r.cz], [r.w + 0.16, PLINTH, r.d + 0.16], PLINTH_C,
+      undefined, S_PLINTH);
+  }
+  // Whether this building's lights are on, and what colour they are. By
+  // position, so a building is consistent with itself and different from the one
+  // next to it — a street where every window is the same warm strip is a
+  // wallpaper, and one where they alternate is a place where people work
+  // different shifts.
+  const k = Math.round(r.cx) * 977 + Math.round(r.cz);
+  const lit = hash(k) % 5 === 0 ? LIT_COLD : LIT_WARM;
+  let storey = 0;
   for (let y = Math.max(from, PLINTH) + 8.5; y < r.top - 4.5; y += 8.5) {
-    box([r.cx, y, r.cz], [r.w + 0.5, 1.1, r.d + 0.5], TRIM);
+    box([r.cx, y, r.cz], [r.w + 0.5, 1.1, r.d + 0.5], TRIM, undefined, S_TRIM);
+    // A lit slot above the service band, on the tall ones only.
+    //
+    // These used to be on every band of every building, and they were carrying
+    // the whole night skyline on their own. They do not have to any more: the
+    // walls have windows in them now, and a continuous glowing line round every
+    // storey of every mass on top of that is one lighting idea too many — the
+    // bands and the window rows fight for the same horizontal, and the building
+    // ends up striped. Kept where a mass is big enough that its middle would
+    // otherwise be a blank thirty metres.
+    if (r.top > 40 && storey % 2 === 0) {
+      box([r.cx, y + 1.45, r.cz], [r.w + 0.34, 0.55, r.d + 0.34], lit, undefined, S_LAMP);
+    }
+    storey++;
   }
   // Stops just under the deck. A lip that rose ABOVE the roof would be a thing
   // to catch a slide on at every launch edge on the map.
   const capTop = r.top - DECK_T - 0.05;
-  if (capTop - from > 3) box([r.cx, capTop - 0.8, r.cz], [r.w + 0.7, 1.6, r.d + 0.7], TRIM);
+  if (capTop - from > 3) {
+    box([r.cx, capTop - 0.8, r.cz], [r.w + 0.7, 1.6, r.d + 0.7], TRIM, undefined, S_TRIM);
+    // A cornice light under the cap, so the top of every building has an edge
+    // you can pick out against the sky from the far side of the district.
+    box([r.cx, capTop - 2.1, r.cz], [r.w + 0.44, 0.4, r.d + 0.44], lit, undefined, S_LAMP);
+  }
+}
+
+/**
+ * The footway round a block: one slab, a hand's width proud of the road.
+ *
+ * This is the cheapest separation on the map and the one that was missing
+ * longest. A district where the floor and the walls are cut from the same grey
+ * has no edge between them — you cannot see where the ground stops, and every
+ * street reads as a corridor moulded out of one material. A pale apron in a
+ * different material, with the dark road between two of them, is what makes a
+ * road a road: one box per block, thirty boxes for the whole city.
+ *
+ * `APRON` is deliberately under `character.stepHeight` (0.35). It is a kerb to
+ * look at and nothing to trip on, at any speed, from any direction.
+ */
+const APRON = 0.14;
+const APRON_OUT = 3.5;
+function footway(cx: number, cz: number, w: number, d: number) {
+  box([cx, APRON / 2, cz], [w + APRON_OUT * 2, APRON, d + APRON_OUT * 2], PAVE_C,
+    undefined, S_PAVING);
 }
 
 // --- the blocks --------------------------------------------------------------
@@ -773,6 +1005,12 @@ function facade(r: Roof, from = 0) {
 for (let ri = 0; ri < ROWS.length; ri++) {
   for (let ci = 0; ci < COLS.length; ci++) {
     const kind = KIND[ri][ci];
+    // Every block gets its footway except the Yard, which is a working yard and
+    // is bare concrete for the same reason a loading bay is. It is also where
+    // you spawn, and a 14 cm apron under the spawn point puts the player 14 cm
+    // above the street — which is invisible, harmless, and exactly the kind of
+    // drift `verify:level` exists to refuse.
+    if (kind !== 'yard') footway(COLS[ci].c, ROWS[ri].c, COLS[ci].size, ROWS[ri].size);
     if (kind === 'yard' || kind === 'plaza' || kind === 'spire') continue;
     const top = HEIGHT[ri][ci];
     const R = ROWS[ri], C = COLS[ci];
@@ -885,19 +1123,64 @@ function solidFace(ri: number, ci: number, axis: 'x' | 'z') {
 for (let ci = 0; ci < COLS.length; ci++) {
   const C = COLS[ci];
   if (solidFace(1, ci, 'x')) {
-    frontage({ x: C.c, z: ROWS[1].hi, nx: 0, nz: 1, along: 'x', len: C.size }, 100 + ci);
+    const f: Face = { x: C.c, z: ROWS[1].hi, nx: 0, nz: 1, along: 'x', len: C.size };
+    frontage(f, 100 + ci);
+    streetKit(f, 100 + ci);
   }
   if (solidFace(2, ci, 'x')) {
-    frontage({ x: C.c, z: ROWS[2].lo, nx: 0, nz: -1, along: 'x', len: C.size }, 200 + ci);
+    const f: Face = { x: C.c, z: ROWS[2].lo, nx: 0, nz: -1, along: 'x', len: C.size };
+    frontage(f, 200 + ci);
+    streetKit(f, 200 + ci);
   }
 }
 for (let ri = 0; ri < ROWS.length; ri++) {
   const R = ROWS[ri];
   if (solidFace(ri, 1, 'z')) {
-    frontage({ x: COLS[1].hi, z: R.c, nx: 1, nz: 0, along: 'z', len: R.size }, 300 + ri);
+    const f: Face = { x: COLS[1].hi, z: R.c, nx: 1, nz: 0, along: 'z', len: R.size };
+    frontage(f, 300 + ri);
+    streetKit(f, 300 + ri);
   }
   if (solidFace(ri, 2, 'z')) {
-    frontage({ x: COLS[2].lo, z: R.c, nx: -1, nz: 0, along: 'z', len: R.size }, 400 + ri);
+    const f: Face = { x: COLS[2].lo, z: R.c, nx: -1, nz: 0, along: 'z', len: R.size };
+    frontage(f, 400 + ri);
+    streetKit(f, 400 + ri);
+  }
+}
+
+/**
+ * Street furniture down a frontage: lamps on columns, and clutter against the
+ * wall behind them.
+ *
+ * The avenues are the run-up for every roof on the map and they earn their
+ * emptiness — so all of this goes in the 3 m nearest the building, where nobody
+ * running the street can reach it, and the middle twenty metres stay swept.
+ *
+ * `(nx, nz)` points AWAY from the wall, so `out` is measured into the street.
+ */
+function streetKit(f: Face, k: number) {
+  const SPACING = 24;
+  const n = Math.max(2, Math.floor(f.len / SPACING));
+  for (let i = 0; i < n; i++) {
+    const t = ((i + 0.5) / n - 0.5) * f.len;
+    const ax = f.along === 'x' ? f.x + t : f.x;
+    const az = f.along === 'z' ? f.z + t : f.z;
+    // A column with a light on it, standing 2.6 m off the wall.
+    const lx = ax + f.nx * 2.6;
+    const lz = az + f.nz * 2.6;
+    prop('Column_Round', lx, APRON, lz);
+    // The head: a lit box on top of the column, which is the whole trick to a
+    // street lamp that is a model of a post and nothing else.
+    box([lx, 4.9 + APRON, lz], [1.5, 0.45, 1.5], LIT_WARM, undefined, S_LAMP);
+    prop('Prop_Light_Floor', lx + f.nx * 0.9, APRON, lz + f.nz * 0.9,
+      Math.atan2(f.nx, f.nz));
+
+    // And something to walk past between the lamps, hard against the wall.
+    const cm = pick(i % 2 ? BULK : UNITS, k * 29 + i);
+    const cs = sciBox(cm);
+    const off = ((i * 37) % 11) - 5;
+    const gx = f.along === 'x' ? ax + off : ax + f.nx * (cs[2] / 2 + 0.5);
+    const gz = f.along === 'z' ? az + off : az + f.nz * (cs[2] / 2 + 0.5);
+    prop(cm, gx, APRON, gz, (hash(k + i * 3) % 4) * HALF_PI);
   }
 }
 
@@ -920,7 +1203,8 @@ function catwalk(x: number, y: number, z: number, along: 'x' | 'z', len: number)
   // Size the deck along the world axis it spans. Swapping the size AND turning
   // the brush applies the rotation twice, which lays the catwalk across the
   // alley it was meant to bridge.
-  box([x, y - 0.4, z], along === 'x' ? [len, 0.8, w] : [w, 0.8, len], ROAD);
+  box([x, y - 0.4, z], along === 'x' ? [len, 0.8, w] : [w, 0.8, len], ROAD,
+    undefined, S_ROAD);
   for (const sgn of [-1, 1]) {
     const ox = along === 'x' ? 0 : sgn * (w / 2 - 0.1);
     const oz = along === 'x' ? sgn * (w / 2 - 0.1) : 0;
@@ -975,7 +1259,8 @@ for (let ci = 0; ci < COLS.length; ci++) {
 
 const PAVE = 18;
 box([0, -BASE / 2, 0],
-  [EXTENT.x1 - EXTENT.x0 + PAVE * 2, BASE, EXTENT.z1 - EXTENT.z0 + PAVE * 2], STREET);
+  [EXTENT.x1 - EXTENT.x0 + PAVE * 2, BASE, EXTENT.z1 - EXTENT.z0 + PAVE * 2], STREET,
+  undefined, S_STREET);
 
 // --- the edge of the world ----------------------------------------------------
 // The district sits on a plate, and a plate has a rim.
@@ -990,8 +1275,82 @@ const RIM_H = 8;
 const rimX = (EXTENT.x1 - EXTENT.x0) / 2 + PAVE - 1;
 const rimZ = (EXTENT.z1 - EXTENT.z0) / 2 + PAVE - 1;
 for (const s of [-1, 1]) {
-  box([s * rimX, (RIM_H - BASE) / 2, 0], [2, RIM_H + BASE, rimZ * 2 + 2], MASS_LOW);
-  box([0, (RIM_H - BASE) / 2, s * rimZ], [rimX * 2 + 2, RIM_H + BASE, 2], MASS_LOW);
+  box([s * rimX, (RIM_H - BASE) / 2, 0], [2, RIM_H + BASE, rimZ * 2 + 2], MASS_LOW,
+    undefined, S_PLINTH);
+  box([0, (RIM_H - BASE) / 2, s * rimZ], [rimX * 2 + 2, RIM_H + BASE, 2], MASS_LOW,
+    undefined, S_PLINTH);
+}
+
+// --- the rest of the city -----------------------------------------------------
+//
+// Ashgate is a district, and a district is part of something. Without this the
+// rim is the end of the world: you stand on a 76 m tower, look out, and the
+// city stops at a wall with nothing behind it, which is the moment a place
+// turns back into a level.
+//
+// So: a ring of masses beyond the rim, out where the fog is already taking
+// them. They are three brushes each and carry no props, no decals and no
+// gameplay — you cannot reach them and there is nothing on them to reach. All
+// they do is stand between the rim and the sky, which is a job that only needs
+// a silhouette and a few lit floors.
+{
+  const RING_IN = 250;
+  const RING_OUT = 380;
+  /** The rectangle nothing out here may stand inside: the district and its rim. */
+  const CLEAR_X = (EXTENT.x1 - EXTENT.x0) / 2 + PAVE + 30;
+  const CLEAR_Z = (EXTENT.z1 - EXTENT.z0) / 2 + PAVE + 30;
+  for (let i = 0; i < 54; i++) {
+    const h = hash(i * 7919);
+    // Spread round the compass with a jitter, so the ring is not a polygon.
+    const ang = (i / 54) * Math.PI * 2 + ((h % 100) / 100 - 0.5) * 0.09;
+    let rad = RING_IN + ((h >>> 7) % 100) / 100 * (RING_OUT - RING_IN);
+    // Taller further out, which is how a skyline behind a skyline reads: the
+    // near ring cannot hide the far one, so the depth stays legible.
+    const top = 26 + ((h >>> 13) % 70) + (rad - RING_IN) * 0.35;
+    const w = 22 + ((h >>> 19) % 34);
+    const d = 22 + ((h >>> 23) % 34);
+    // A ring is a circle and the district is a rectangle, so a radius that
+    // clears the map along one bearing plants a tower on a corner roof along
+    // another: the district's corners are 256 m out, past the inner radius, and
+    // that is exactly where two of these landed the first time. Push each one
+    // out until its FOOTPRINT is clear of the whole rectangle — whichever axis
+    // it escapes by — rather than trusting the radius alone.
+    const ca = Math.abs(Math.cos(ang));
+    const sa = Math.abs(Math.sin(ang));
+    rad = Math.max(rad, Math.min(
+      ca > 1e-3 ? (CLEAR_X + w / 2) / ca : Infinity,
+      sa > 1e-3 ? (CLEAR_Z + d / 2) / sa : Infinity,
+    ));
+    const x = Math.cos(ang) * rad;
+    const z = Math.sin(ang) * rad;
+    const tint = shade(pick(FACADE_TINTS, i * 13), 0.9);
+    // Down to well below the street: the base is never seen, and a backdrop
+    // tower standing on its own visible bottom edge is a card, not a building.
+    box([x, (top - 60) / 2, z], [w, top + 60, d], tint, undefined, S_MASS);
+    box([x, top - 0.7, z], [w + 1.2, 1.4, d + 1.2], TRIM, undefined, S_TRIM);
+    // Two lit floors, at heights that do not line up with their neighbours'.
+    const lit = h % 4 === 0 ? LIT_COLD : LIT_WARM;
+    for (let b = 1; b <= 2; b++) {
+      const y = top * (b === 1 ? 0.42 : 0.72);
+      box([x, y, z], [w + 0.5, 0.7, d + 0.5], lit, undefined, S_LAMP);
+    }
+    // Half of them get a crown — a smaller mass stepped back on top. Flat-topped
+    // boxes all the way round the horizon is the one thing that gives a backdrop
+    // away, because a real skyline is mostly things standing on other things.
+    if (h % 2 === 0) {
+      const cw = w * 0.55;
+      const cd = d * 0.55;
+      const ch = 8 + ((h >>> 3) % 22);
+      box([x, top + ch / 2, z], [cw, ch, cd], tint, undefined, S_MASS);
+      box([x, top + ch - 0.6, z], [cw + 1, 1.2, cd + 1], TRIM, undefined, S_TRIM);
+      // A beacon on top of whatever ends up highest.
+      if (top + ch > 90) {
+        box([x, top + ch + 1.2, z], [3, 1.4, 3], 0xff5a4a, undefined, S_LAMP);
+      }
+    } else if (top > 88) {
+      box([x, top + 1.2, z], [3, 1.4, 3], 0xff5a4a, undefined, S_LAMP);
+    }
+  }
 }
 
 /**
@@ -1008,7 +1367,7 @@ function crates(x: number, z: number, along: 'x' | 'z', n: number, step: number,
     const d = [4, 5, 4, 4, 6][t];
     const px = along === 'x' ? x + i * step : x + ((i % 2) - 0.5) * 3;
     const pz = along === 'z' ? z + i * step : z + ((i % 2) - 0.5) * 3;
-    box([px, h / 2, pz], [w, h, d], CRATE);
+    box([px, h / 2, pz], [w, h, d], CRATE, undefined, S_CRATE);
     // A drum or a crate at true size on top of each stack. The container is a
     // volume; the thing standing on it is what tells you how big the volume is.
     prop(pick(UNITS, seed * 13 + i), px + w * 0.2, h, pz, (hash(seed + i) % 4) * HALF_PI);
@@ -1029,7 +1388,7 @@ crates(YARD_X - 22, YARD_Z - 17, 'x', 3, 10, 3);
 // A low deck at the north side with a ramp onto it: the first thing to slide off.
 const yardDeck = mass(YARD_X - 6, YARD_Z - 19, 22, 12, 4.5);
 ramp({ x: YARD_X - 24, y: 0, z: YARD_Z - 19 }, { x: YARD_X - 17, y: 4.5, z: YARD_Z - 19 },
-  10, 1.2, TIER, 3);
+  10, 1.2, TIER, 3, undefined, S_ROAD);
 
 // This is the first place the player ever stands, and the only place they see
 // the district from the ground before the roofs take over — so it carries more
@@ -1052,6 +1411,43 @@ for (let i = 0; i < 4; i++) {
   prop('Prop_Computer', yardDeck.cx + 7, yardDeck.top, yardDeck.cz + 2);
   prop('Prop_Barrel_Large', yardDeck.cx + 4.5, yardDeck.top, yardDeck.cz + 2);
   prop('Prop_Crate4', yardDeck.cx - 8, yardDeck.top, yardDeck.cz);
+  // A working bench along the back of the deck, lit from over it. The Yard is
+  // the only room in the district that gets looked at from standing height for
+  // more than a second, so it is the one that has to survive being looked at.
+  prop('Prop_Shelves_WideTall', yardDeck.cx - 2, yardDeck.top, yardDeck.cz - 3.4);
+  prop('Prop_Locker', yardDeck.cx + 0.6, yardDeck.top, yardDeck.cz - 3.4);
+  prop('Prop_Desk_Medium', yardDeck.cx + 4, yardDeck.top, yardDeck.cz - 3.2, HALF_PI);
+  // Lit along the FLOOR of the bench rather than over it. A strip hung in the
+  // air above a workbench is the one thing this level does not do — there is
+  // nothing holding it up — and a lit floor throws the silhouettes of what is
+  // standing on it towards you, which was the point of the light anyway.
+  box([yardDeck.cx, yardDeck.top + 0.09, yardDeck.cz - 4.2], [13, 0.18, 0.7],
+    LIT_WARM, undefined, S_LAMP);
+}
+
+// The rest of the Yard: the wall the Ladder is cut into gets a service bay, the
+// west end gets the loading it is shaped like, and both get lit. Everything is
+// kept out of the middle lane — the run-up to the Ladder mouth is the reason
+// this room is the shape it is, and it stays swept.
+{
+  const bayZ = YARD_Z + 22;
+  for (let i = 0; i < 5; i++) {
+    const x = YARD_X - 24 + i * 11;
+    prop(pick(BULK, i * 5 + 3), x, 0, bayZ - 1.6, (hash(i * 17) % 2) * HALF_PI);
+    if (i % 2 === 0) prop('Prop_Barrel1', x + 2.6, 0, bayZ - 3.2);
+    if (i % 2 === 1) prop('Prop_Locker', x + 2.2, 0, bayZ - 0.9, Math.PI);
+  }
+  // Pallets and drums against the south deck, out of the lane.
+  for (let i = 0; i < 4; i++) {
+    prop(pick(UNITS, i * 23 + 7), YARD_X - 20 + i * 7, 0, YARD_Z - 23.5,
+      (hash(i * 5) % 4) * HALF_PI);
+  }
+  // Bay numbers on the floor under the lamps: this is bay 4, and bay 4 is
+  // somewhere, where an unnumbered slab of concrete is not.
+  for (let i = 0; i < 3; i++) {
+    decal(pick(DIGITS, i + 4), YARD_X - 18 + i * 12, 0, bayZ - 7, 0, 2.4);
+  }
+  decal('Decal_Dashes', YARD_X - 2, 0, YARD_Z + 18, HALF_PI, 3);
 }
 // The finish line, painted where the run actually ends.
 decal('Decal_Logo', YARD_X + 8, 0, YARD_Z + 12, 0, 5);
@@ -1071,7 +1467,7 @@ const ladderX = LADDER_X;
 // texture that costs you the rule.
 for (const s of [-1, 1]) {
   box([ladderX, (LADDER_TOP - BASE) / 2, YARD_Z + s * (SLOT / 2 + 0.7)],
-    [LADDER_LEN, LADDER_TOP + BASE, 1.4], WALLRUN);
+    [LADDER_LEN, LADDER_TOP + BASE, 1.4], PADDING, undefined, S_PADDED);
 }
 export const LADDER_LANDINGS = shaftLedges('x', ladderX, YARD_Z, LADDER_LEN, 0, LADDER_TOP);
 export const LADDER_STAGES = LADDER_LANDINGS.length + 1;
@@ -1080,6 +1476,9 @@ export const LADDER_STAGES = LADDER_LANDINGS.length + 1;
 for (const l of LADDER_LANDINGS) {
   prop('Prop_Light_Floor', l.x, l.y, YARD_Z + (SLOT / 2 - 0.8) * (l.x > ladderX ? 1 : -1));
 }
+// A hazard line painted across the mouth, where the floor stops being a room and
+// starts being a route.
+decal('Decal_Line_Straight', ladderX - LADDER_LEN / 2 - 3, 0, YARD_Z, 0, 3);
 // Signed just inside the mouth, so it reads as a way up rather than an alley.
 // On the INNER faces: the end of a wall is a 1.4 m strip of nothing to hang a
 // sign on, and a sign hung there is a sign standing in mid-air.
@@ -1087,7 +1486,8 @@ wallProp('Prop_AccessPoint', 0, -1, ladderX - LADDER_LEN / 2 + 4, 3.2, YARD_Z + 
 wallProp('Prop_Light_Wide', 0, 1, ladderX - LADDER_LEN / 2 + 9, 4.4, YARD_Z - SLOT / 2, 1.6);
 // A lintel over the mouth: something to grapple, and it stops the corridor
 // reading as a dead end from the far side of the Yard.
-box([ladderX - LADDER_LEN / 2 + 0.6, LADDER_TOP + 1.2, YARD_Z], [1.2, 2.4, SLOT + 4], GANTRY);
+box([ladderX - LADDER_LEN / 2 + 0.6, LADDER_TOP + 1.2, YARD_Z], [1.2, 2.4, SLOT + 4],
+  GANTRY, undefined, S_STEEL);
 
 // --- the Overpass ------------------------------------------------------------
 // 300 m of elevated deck straight down the widest avenue, falling 20 m from
@@ -1128,7 +1528,7 @@ export const OP_SEGS: [number, number][] = (() => {
 
 for (const [z0, z1] of OP_SEGS) {
   const seg = ramp({ x: OP_X, y: opY(z0), z: z0 }, { x: OP_X, y: opY(z1), z: z1 },
-    OP_W, OP_T, ROAD, 0);
+    OP_W, OP_T, ROAD, 0, undefined, S_ROAD);
   // Railings down both edges, stopped 6 m short of each end. A rail across the
   // lip of a jump reads as a wall, and every one of these ends is a jump.
   {
@@ -1158,7 +1558,7 @@ for (const [z0, z1] of OP_SEGS) {
   for (const f of [0.25, 0.75]) {
     const z = z0 + (z1 - z0) * f;
     const top = opY(z) - OP_T;
-    box([OP_X, (top - BASE) / 2, z], [4.5, top + BASE, 4.5], MAST);
+    box([OP_X, (top - BASE) / 2, z], [4.5, top + BASE, 4.5], MAST, undefined, S_STEEL);
   }
 }
 
@@ -1174,10 +1574,14 @@ for (const [z0, z1] of [
   // Cross-arm first: without it the beam hangs between its legs touching
   // neither, which is exactly the floating-scenery look this level is trying
   // not to have.
-  box([OP_X, y + 15, zc], [legOff * 2 + 2.4, 1.4, 2.4], GANTRY);
-  box([OP_X, y + 15, zc], [3, 1.6, z1 - z0 + 26], GANTRY);
+  box([OP_X, y + 15, zc], [legOff * 2 + 2.4, 1.4, 2.4], GANTRY, undefined, S_STEEL);
+  box([OP_X, y + 15, zc], [3, 1.6, z1 - z0 + 26], GANTRY, undefined, S_STEEL);
   for (const s of [-1, 1]) {
-    box([OP_X + s * legOff, (y + 15 - BASE) / 2, zc], [2.4, y + 15 + BASE, 2.4], MAST);
+    box([OP_X + s * legOff, (y + 15 - BASE) / 2, zc], [2.4, y + 15 + BASE, 2.4], MAST,
+      undefined, S_STEEL);
+    // A beacon on each leg. The two widest gaps on the road are the two you have
+    // to see coming, and a lit post either side is how you read one at speed.
+    box([OP_X + s * legOff, y + 15.9, zc], [2.0, 0.5, 2.0], LIT_WARM, undefined, S_LAMP);
   }
 }
 
@@ -1186,15 +1590,15 @@ for (const [z0, z1] of [
 {
   // North, up from the Spire's terrace.
   ramp({ x: COLS[3].hi - 9, y: 30, z: -74 },
-    { x: OP_X - OP_W / 2 - 1, y: opY(-74), z: -74 }, 10, 1.2, ROAD, 3);
+    { x: OP_X - OP_W / 2 - 1, y: opY(-74), z: -74 }, 10, 1.2, ROAD, 3, undefined, S_ROAD);
   // Middle. This is the route's own on-ramp, so it is the long shallow one —
   // shallow enough that a slide carries up it instead of dying on it.
   ramp({ x: COLS[3].c, y: HEIGHT[2][3], z: 10 },
-    { x: OP_X - OP_W / 2 - 1, y: opY(10), z: 10 }, 10, 1.2, ROAD, 3);
+    { x: OP_X - OP_W / 2 - 1, y: opY(10), z: 10 }, 10, 1.2, ROAD, 3, undefined, S_ROAD);
   // South: the deck has fallen to roof height by here, so it is only a bridge.
   const z = 138;
   box([(COLS[3].hi + OP_X - OP_W / 2) / 2, opY(z) - OP_T / 2, z],
-    [OP_X - OP_W / 2 - COLS[3].hi + 2, OP_T, 12], ROAD);
+    [OP_X - OP_W / 2 - COLS[3].hi + 2, OP_T, 12], ROAD, undefined, S_ROAD);
 }
 
 // --- the Spire ---------------------------------------------------------------
@@ -1203,8 +1607,15 @@ for (const [z0, z1] of [
 // terrace, tower to 76, and three separate ways up — a single-solution climb in
 // a movement game is a lock, not a challenge.
 
-mass(COLS[3].c, ROWS[1].c, COLS[3].size, ROWS[1].size, TERRACE);
-mass(TOWER_X, TOWER_Z, TOWER_W, TOWER_D, SPIRE_TOP);
+// Banded like everything else, and it was the last thing on the map that was
+// not. The landmark went up as a bare slab while every ordinary block around it
+// had a foot, a cornice and lit floors — which read exactly backwards: the one
+// building you are meant to pick out of the skyline was the one with nothing on
+// it to pick out. The tower's bands start at the terrace, because everything
+// below that is inside the base mass and would only fight it for the same
+// millimetre.
+facade(mass(COLS[3].c, ROWS[1].c, COLS[3].size, ROWS[1].size, TERRACE));
+facade(mass(TOWER_X, TOWER_Z, TOWER_W, TOWER_D, SPIRE_TOP), TERRACE);
 
 // Route 1 — the balconies. One thruster tank is TANK metres of climb, so the
 // steps are 65% of that: enough slack to arrive, land, and refuel before the
@@ -1228,7 +1639,7 @@ for (let i = 0; i < BALCONIES; i++) {
   const pz = ew ? TOWER_Z + along * TOWER_D : TOWER_Z + sign * (TOWER_D / 2 + out / 2);
   const sw = ew ? out + 5 : 11;
   const sd = ew ? 11 : out + 5;
-  box([px, y - 0.7, pz], [sw, 1.4, sd], PAD);
+  box([px, y - 0.7, pz], [sw, 1.4, sd], PAD, undefined, S_MARKED);
   BALCONY_AT.push({ x: px, y, z: pz });
   // A lamp and a cabinet on each: something to aim at on the way up, and the
   // reason the tower reads as serviced rather than sculpted.
@@ -1239,7 +1650,7 @@ for (let i = 0; i < BALCONIES; i++) {
   // A corbel under the inner half, overlapping the tower, so a balcony is held
   // up by the building rather than by nothing.
   box([px - (ew ? sign * out * 0.3 : 0), y - 3.6, pz - (ew ? 0 : sign * out * 0.3)],
-    [sw * 0.62, 4.4, sd * 0.62], TIER);
+    [sw * 0.62, 4.4, sd * 0.62], TIER, undefined, S_STEEL);
 }
 
 // Route 2 — the shaft, which is the gap between the tower and its service core.
@@ -1258,6 +1669,7 @@ export const CORE_TOP = 58;
 const coreX0 = COLS[3].lo;
 const coreX1 = TOWER_X - TOWER_W / 2 - SLOT;
 const core = mass((coreX0 + coreX1) / 2, TOWER_Z, coreX1 - coreX0, TOWER_D, CORE_TOP);
+facade(core, TERRACE);
 furnish(core, 3);
 export const SHAFT_X = (coreX1 + TOWER_X - TOWER_W / 2) / 2;
 export const SPIRE_LANDINGS =
@@ -1269,10 +1681,14 @@ export const SPIRE_SHAFT_STAGES = SPIRE_LANDINGS.length + 1;
 for (const sx of [-1, 1]) {
   for (const sz of [-1, 1]) {
     box([TOWER_X + sx * (TOWER_W / 2 - 3), SPIRE_TOP + 11, TOWER_Z + sz * (TOWER_D / 2 - 3)],
-      [1.4, 22, 1.4], MAST);
+      [1.4, 22, 1.4], MAST, undefined, S_STEEL);
+    // Aircraft warning lights on the four masts: the highest thing on the map,
+    // and from anywhere in the district they are how you find it.
+    box([TOWER_X + sx * (TOWER_W / 2 - 3), SPIRE_TOP + 22.4, TOWER_Z + sz * (TOWER_D / 2 - 3)],
+      [2, 1.2, 2], 0xff5a4a, undefined, S_LAMP);
   }
 }
-box([TOWER_X, SPIRE_TOP + 4, TOWER_Z], [7, 8, 7], GANTRY);
+box([TOWER_X, SPIRE_TOP + 4, TOWER_Z], [7, 8, 7], GANTRY, undefined, S_STEEL);
 prop('Column_Pipes', TOWER_X, SPIRE_TOP + 8, TOWER_Z);
 for (const sx of [-1, 1]) prop('Prop_Light_Floor', TOWER_X + sx * 5, SPIRE_TOP, TOWER_Z);
 // The top of the map, marked as the top of the map.
@@ -1285,7 +1701,7 @@ decal('Decal_Logo', TOWER_X, SPIRE_TOP, TOWER_Z + 11, 0, 6);
 // cross the last roof and leave its west edge into the Yard.
 
 const CHUTE_W = 16;
-const chute = ramp(CHUTE_FROM, CHUTE_TO, CHUTE_W, 1.6, CHUTE_C, 12);
+const chute = ramp(CHUTE_FROM, CHUTE_TO, CHUTE_W, 1.6, CHUTE_C, 12, undefined, S_MARKED);
 
 // Rails, so a slide that drifts does not simply leave. Trimmed at both ends: one
 // across the entry is a wall you hit at the top, and one carried all the way
@@ -1307,7 +1723,7 @@ const chute = ramp(CHUTE_FROM, CHUTE_TO, CHUTE_W, 1.6, CHUTE_C, 12);
   for (const s of [-1, 1]) {
     const wx = mid.x + Math.cos(chute.yaw) * s * (CHUTE_W / 2 + 0.6);
     const wz = mid.z - Math.sin(chute.yaw) * s * (CHUTE_W / 2 + 0.6);
-    box([wx, mid.y + 2.2, wz], [1.2, 5, len], WALLRUN, chute.q);
+    box([wx, mid.y + 2.2, wz], [1.2, 5, len], PADDING, chute.q, S_PADDED);
     // A handrail along the top of each wall — the one piece of kit that makes
     // 145 m of violet slab read as a structure somebody built. The chute runs
     // along its own local Z, same as a rail does, so it takes the ramp's
@@ -1324,7 +1740,7 @@ for (const f of CHUTE_PYLONS) {
   const x = CHUTE_FROM.x + (CHUTE_TO.x - CHUTE_FROM.x) * f;
   const y = CHUTE_FROM.y + (CHUTE_TO.y - CHUTE_FROM.y) * f;
   const z = CHUTE_FROM.z + (CHUTE_TO.z - CHUTE_FROM.z) * f;
-  box([x, (y - 2 - BASE) / 2, z], [4.5, y - 2 + BASE, 4.5], MAST);
+  box([x, (y - 2 - BASE) / 2, z], [4.5, y - 2 + BASE, 4.5], MAST, undefined, S_STEEL);
 }
 
 // --- the plazas --------------------------------------------------------------
@@ -1339,17 +1755,18 @@ for (let ri = 0; ri < ROWS.length; ri++) {
     const C = COLS[ci], R = ROWS[ri];
     const k = ri * COLS.length + ci;
     const pw = 26, pd = 22, ph = 8;
-    box([C.c, ph - DECK_T / 2, R.c], [pw, DECK_T, pd], DECK);
+    box([C.c, ph - DECK_T / 2, R.c], [pw, DECK_T, pd], DECK, undefined, S_DECK);
     roofs.push({ cx: C.c, cz: R.c, w: pw, d: pd, top: ph });
     for (const sx of [-1, 1]) {
       for (const sz of [-1, 1]) {
         box([C.c + sx * (pw / 2 - 2), (ph - DECK_T - BASE) / 2, R.c + sz * (pd / 2 - 2)],
-          [2.4, ph - DECK_T + BASE, 2.4], TIER);
+          [2.4, ph - DECK_T + BASE, 2.4], TIER, undefined, S_STEEL);
       }
     }
     for (const s of [-1, 1]) {
       box([C.c + (k % 2 ? 1 : -1) * (C.size / 2 - 12), (16 - BASE) / 2,
-        R.c + R.size * 0.28 + s * (SLOT / 2 + 0.7)], [14, 16 + BASE, 1.4], WALLRUN);
+        R.c + R.size * 0.28 + s * (SLOT / 2 + 0.7)], [14, 16 + BASE, 1.4], PADDING,
+      undefined, S_PADDED);
     }
     crates(C.c - 18, R.c - R.size * 0.3, 'x', 4, 9, k);
     for (const sx of [-1, 1]) {
@@ -1361,6 +1778,33 @@ for (let ri = 0; ri < ROWS.length; ri++) {
     prop('Prop_Barrel_Large', C.c + 1.5, ph, R.c);
     decal(pick(MARKS, k), C.c, 0, R.c + R.size * 0.34, 0, 4);
   }
+}
+
+// --- the road surface ---------------------------------------------------------
+// A centre line down each of the two avenues the route runs along.
+//
+// Paint is the cheapest thing in this file and close to the most valuable: a
+// 22 m strip of ground with a dashed line down it is a ROAD, and the same strip
+// without one is a gap between two buildings. It also does a job for the
+// player, because a line running away from you down a street is a direction,
+// and this is a map you are meant to cross at forty metres a second.
+{
+  const AVE_X = (COLS[1].hi + COLS[2].lo) / 2;
+  const AVE_Z = (ROWS[1].hi + ROWS[2].lo) / 2;
+  const STRIDE = 17;
+  // North–south. Skipped where the two avenues cross, so the junction is clear
+  // rather than paved through with a line nobody would paint there.
+  for (let z = EXTENT.z0 + 8; z < EXTENT.z1 - 8; z += STRIDE) {
+    if (Math.abs(z - AVE_Z) < 16) continue;
+    decal('Decal_Line_Straight', AVE_X, 0, z, 0, 2);
+  }
+  // East–west, turned a quarter so the model's long axis lies along the street.
+  for (let x = EXTENT.x0 + 8; x < EXTENT.x1 - 8; x += STRIDE) {
+    if (Math.abs(x - AVE_X) < 16) continue;
+    decal('Decal_Line_Straight', x, 0, AVE_Z, HALF_PI, 2);
+  }
+  // And the junction itself marked as one.
+  decal('Decal_Line_90_Round_Large', AVE_X, 0, AVE_Z, 0, 1.6);
 }
 
 // --- street lines ------------------------------------------------------------
