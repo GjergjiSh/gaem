@@ -2454,13 +2454,11 @@ for (const leg of LINE_LEGS) {
       box([kx, mid.y + 0.45, kz], [0.7, 0.9, seg.len], TIER, seg.q, S_STEEL);
     }
 
-    // The overhead rail: two beams the length of the segment, seven metres up.
-    // Same slope as the deck, same offsets as the portal legs holding them, so
-    // the whole thing is one frame rather than a road with a roof over it.
-    for (const sgn of [-1, 1]) {
-      const [bx, bz] = side(mid, sgn * LINE_PY);
-      box([bx, mid.y + LINE_OVER, bz], [1.2, 0.9, seg.len], GANTRY, seg.q, S_STEEL);
-    }
+    // The overhead rail: ONE beam down the centreline, seven metres up, the
+    // length of the segment and on the deck's own slope. One, not one under
+    // each edge — a single rail is what a gantry crane runs on and what the
+    // frames below are shaped to carry.
+    box([mid.x, mid.y + LINE_OVER, mid.z], [1.6, 0.9, seg.len], GANTRY, seg.q, S_STEEL);
 
     // Portal frames: a leg under each edge of the deck down to the avenue floor,
     // a beam across under the deck, and the same posts carried on up to the rail
@@ -2490,7 +2488,11 @@ for (const leg of LINE_LEGS) {
       box([p.x, top - 1.2, p.z],
         leg.axis === 'z' ? [across, 1.6, 2.4] : [2.4, 1.6, across],
         GANTRY, undefined, S_STEEL);
-      box([p.x, y + LINE_OVER + 0.95, p.z],
+      // The cross beam the rail sits ON. Under it rather than over it, and
+      // overlapping by 15 cm rather than touching: a beam whose top plane
+      // exactly meets the rail's bottom plane is a beam holding it up by a
+      // hairline, which reads as unsupported to `verify:level` and to the eye.
+      box([p.x, y + LINE_OVER - 0.8, p.z],
         leg.axis === 'z' ? [across, 1.0, 1.6] : [1.6, 1.0, across],
         GANTRY, undefined, S_STEEL);
     }
@@ -2517,18 +2519,17 @@ for (const j of JUNCTIONS) {
     }
   }
   const across = LINE_PY * 2 + 2.4;
+  // The rail carried straight through on both axes — a single beam each way,
+  // crossing in the middle. This is the piece that lets whatever runs along the
+  // top of the Line turn a corner.
+  box([j.x, j.y + LINE_OVER, j.z], [1.6, 0.9, LINE_W], GANTRY, undefined, S_STEEL);
+  box([j.x, j.y + LINE_OVER, j.z], [LINE_W, 0.9, 1.6], GANTRY, undefined, S_STEEL);
   for (const sgn of [-1, 1]) {
     // Under the deck, a beam each way, so the square is a frame and not a slab
     // resting on four posts.
     box([j.x, top - 1.2, j.z + sgn * LINE_PY], [across, 1.6, 2.4], GANTRY, undefined, S_STEEL);
     box([j.x + sgn * LINE_PY, top - 1.2, j.z], [2.4, 1.6, across], GANTRY, undefined, S_STEEL);
-    // And the rail overhead, carried straight through on both axes — this is
-    // the piece that lets whatever runs along the top of the Line turn a corner.
-    box([j.x, j.y + LINE_OVER, j.z + sgn * LINE_PY], [LINE_W, 0.9, 1.2],
-      GANTRY, undefined, S_STEEL);
-    box([j.x + sgn * LINE_PY, j.y + LINE_OVER, j.z], [1.2, 0.9, LINE_W],
-      GANTRY, undefined, S_STEEL);
-    box([j.x, j.y + LINE_OVER + 0.95, j.z + sgn * LINE_PY], [across, 1.0, 1.6],
+    box([j.x, j.y + LINE_OVER - 0.8, j.z + sgn * LINE_PY], [across, 1.0, 1.6],
       GANTRY, undefined, S_STEEL);
   }
 }
