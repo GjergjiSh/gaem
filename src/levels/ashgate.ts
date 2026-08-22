@@ -1030,10 +1030,10 @@ const PLINTH = 5.5;
 const FOOT_H = 1.0, FOOT_OUT = 1.0;
 const SHOP_H = 4.6, SHOP_OUT = 0.5;
 const CANOPY_OUT = 1.1;
-function groundStorey(r: Roof, k: number) {
+function groundStorey(r: Roof, k: number, o = 1) {
   // The foot. Wide, low, and the same material as the pavement it stands on, so
   // the building looks like it was poured onto the footway rather than dropped.
-  box([r.cx, FOOT_H / 2, r.cz], [r.w + FOOT_OUT * 2, FOOT_H, r.d + FOOT_OUT * 2],
+  box([r.cx, FOOT_H / 2, r.cz], [r.w + FOOT_OUT * 2 * o, FOOT_H, r.d + FOOT_OUT * 2 * o],
     PLINTH_C, undefined, S_PAVING);
   // The ground storey: darker, glazed, and its own thing. This is the band your
   // eye uses to judge how tall everything above it is.
@@ -1042,24 +1042,45 @@ function groundStorey(r: Roof, k: number) {
   // shopfront lands at nearly black and every building on the map ends up
   // standing in its own shadow. The tint has to be picked against the map, not
   // against the intention.
-  box([r.cx, (FOOT_H + SHOP_H) / 2, r.cz],
-    [r.w + SHOP_OUT * 2, SHOP_H - FOOT_H, r.d + SHOP_OUT * 2],
-    0xa8b0bd, undefined, S_ROAD);
+  if (o === 1) {
+    box([r.cx, (FOOT_H + SHOP_H) / 2, r.cz],
+      [r.w + SHOP_OUT * 2, SHOP_H - FOOT_H, r.d + SHOP_OUT * 2],
+      0xa8b0bd, undefined, S_ROAD);
+  }
   // And the canopy over it, in paint. One brush, and it is the single most
   // visible thing at street level in the whole district — a line of colour at
   // head height running the length of every block, with a shadow under it.
   const c = pick(ACCENT, k * 3 + 1);
   box([r.cx, SHOP_H + 0.3, r.cz],
-    [r.w + CANOPY_OUT * 2, 0.6, r.d + CANOPY_OUT * 2], c, undefined, S_PAINT);
+    [r.w + CANOPY_OUT * 2 * o, 0.6, r.d + CANOPY_OUT * 2 * o], c, undefined, S_PAINT);
   // A lit strip tucked under the canopy's lip, which is what a shopfront is
   // after dark: not a bright wall, a bright soffit and a dark pavement.
-  box([r.cx, SHOP_H - 0.15, r.cz],
-    [r.w + (CANOPY_OUT - 0.35) * 2, 0.3, r.d + (CANOPY_OUT - 0.35) * 2],
-    LIT_WARM, undefined, S_LAMP);
+  if (o === 1) {
+    box([r.cx, SHOP_H - 0.15, r.cz],
+      [r.w + (CANOPY_OUT - 0.35) * 2, 0.3, r.d + (CANOPY_OUT - 0.35) * 2],
+      LIT_WARM, undefined, S_LAMP);
+  }
 }
 
+/**
+ * Masses still waiting to be told whether they get a ground storey.
+ *
+ * The plinth, the dark shopfront band and the painted canopy over it are the
+ * right base for a mass with a texture on it, and exactly the wrong one for a
+ * mass with a building standing against it: they wrap all four sides and cannot
+ * be switched off on one, so the canopy sails out a metre in front of the brick
+ * and cuts the building in half at the first floor.
+ *
+ * Which masses those are is not known until the frontages have been built —
+ * whether a building fits depends on the height of the wall behind it — so the
+ * decision is deferred and taken in one pass at the end.
+ */
+const PENDING_BASE: { r: Roof; k: number }[] = [];
+/** Where a real building ended up standing, so a mass can ask if it has one. */
+const STOOD: { x: number; z: number }[] = [];
+
 function facade(r: Roof, from = 0) {
-  if (from === 0) groundStorey(r, Math.round(r.cx) * 31 + Math.round(r.cz));
+  if (from === 0) PENDING_BASE.push({ r, k: Math.round(r.cx) * 31 + Math.round(r.cz) });
   // Whether this building's lights are on, and what colour they are. By
   // position, so a building is consistent with itself and different from the one
   // next to it — a street where every window is the same warm strip is a
@@ -1222,9 +1243,9 @@ function signboard(
 }
 
 /** A poster: pack art straight on the wall, no board. Cheap, and there can be many. */
-function poster(f: Face, along: number, y: number, art: string, scale: number) {
-  const x = f.along === 'x' ? f.x + along : f.x;
-  const z = f.along === 'z' ? f.z + along : f.z;
+function poster(f: Face, along: number, y: number, art: string, scale: number, out = 0) {
+  const x = (f.along === 'x' ? f.x + along : f.x) + f.nx * out;
+  const z = (f.along === 'z' ? f.z + along : f.z) + f.nz * out;
   wallProp(art, f.nx, f.nz, x, y, z, scale);
 }
 
@@ -1366,72 +1387,212 @@ function decalAt(f: Face, at: number, out: number, art: string, scale: number) {
 }
 
 
-function frontage(f: Face, k: number) {
-  // The ground storey, built out of the city kit rather than painted on.
-  //
-  // This is a BUILDING kit — 2 m panels, 4 m insets, 3 m storeys, corner
-  // columns, shopfronts with glass in them and a fake interior behind the glass
-  // — and it is the only one of the three packs that has ever had anything to
-  // say about the part of a building a person walks past. The sci-fi wall
-  // panels that used to be here were service cladding pretending to be a
-  // frontage.
-  //
-  // Only the ground storey, and only on the streets the route runs down. A
-  // window module is five draw calls; cladding all forty masses to the roof is
-  // twenty thousand of them, and the eye is not up there anyway. Above 3 m the
-  // mass keeps its textured facade, which is doing that job well.
+/** The pack's finished buildings — the only three models on this map that are a
+ *  whole building rather than a piece of one. */
+const BLOCKS = ['Building_Small_1', 'Building_Medium_2_001', 'Building_Large_2'];
+
+/**
+ * How far a building's WALL stands proud of the mass behind it — a hand's
+ * width, enough that the two planes never fight over the same pixels.
+ *
+ * Which is not the same as how far its BRUSH stands proud, and the difference
+ * caught me out. A model is fitted to its brush by its bounding box, and these
+ * three do not end at their wall: `Building_Small_1` carries 2.3 m of cornice
+ * and stoop in front of its brickwork. Line the BOXES up on the street and the
+ * brick sits two metres back inside the mass, with the block's own painted
+ * canopy sailing out in front of it and cutting the building in half at the
+ * first floor. So each one is pushed out by its own overhang as well, and what
+ * lands on the line is the wall.
+ */
+const WALL_OUT = 0.3;
+/** How far each of them reaches in front of its wall, in the model's own metres. */
+const BUILD_FRONT: Record<string, number> = {
+  Building_Small_1: 2.31, Building_Medium_2_001: 0.57, Building_Large_2: 0.32,
+};
+/** Widest first — see `run`, where that ordering is the whole budget. */
+const ORDER = ['Building_Large_2', 'Building_Medium_2_001', 'Building_Small_1'];
+
+/** The tallest mass standing at a point — whatever kind of block put it there. */
+function massTopAt(x: number, z: number): number {
+  let t = 0;
+  for (const r of roofs) {
+    if (Math.abs(x - r.cx) <= r.w / 2 - 0.01 && Math.abs(z - r.cz) <= r.d / 2 - 0.01
+      && r.top > t) t = r.top;
+  }
+  return t;
+}
+
+/**
+ * A street face, built out of the kit's FINISHED buildings.
+ *
+ * This is the part of the map you are actually in. A block is one solid mass
+ * with a facade texture on it, which is the right way to build something you
+ * run along the roof of and wallrun the side of — it is one collider and one
+ * draw call, and the gameplay is a box because a box is what the movement was
+ * tuned against. But the SURFACE of that box, on the two avenues the route runs
+ * down, has no business being a texture: those walls are two metres from your
+ * shoulder at 40 u/s and they are what the district looks like.
+ *
+ * So the street faces are lined with real buildings, sunk into the mass until
+ * only the building line is proud of it. The collider is unchanged in every way
+ * that matters — a box 1.6 m further out, which is less than the canopy it
+ * replaces — and what you run past is brick, shopfronts, doorways with steps,
+ * sash windows with a lit room behind them, and a cornice at the top.
+ *
+ * Each one is scaled to stand its stretch of wall up to the parapet, within
+ * reason: `s` is capped at 1.6 because a building stops being a building once
+ * its windows are three metres tall, and floored at 0.8 for the same reason
+ * downward. The height available is measured off the masses themselves rather
+ * than read from the plan, because a `step` block's face is only as tall as its
+ * base and a `wing` changes height halfway along — and asking the geometry is
+ * the only way to get both right without a special case for each kind.
+ *
+ * Returns the stretches it covered, so the wall-mounted dressing knows whether
+ * it is hanging on brick 1.6 m out or on the bare mass behind it.
+ */
+function frontage(f: Face, k: number, clear: number): [number, number][] {
+  const covered: [number, number][] = [];
+  const place = (c: number, m: string, s: number) => {
+    const dep = CITY[m][2] * s;
+    const out = WALL_OUT + BUILD_FRONT[m] * s - dep / 2;
+    const x = (f.along === 'x' ? f.x + c : f.x) + f.nx * out;
+    const z = (f.along === 'z' ? f.z + c : f.z) + f.nz * out;
+    cityProp(m, x, APRON, z, yawOf(f), s);
+    STOOD.push({ x, z });
+  };
+  /**
+   * The face cut into stretches of equal wall height, measured off the masses
+   * themselves rather than read from the plan — a `step` block's face is only
+   * as tall as its base, and a `wing` changes height halfway along.
+   *
+   * It has to be done BEFORE anything is sized, and that is the whole reason
+   * this exists. The first version measured the wall over the next 24 m, sized
+   * a row against it, and then centred the row in the stretch — which moves it
+   * off the ground it was measured over. On the one face where that mattered it
+   * put a thirty-metre building half onto a fourteen-metre wing, standing eight
+   * metres over a roof the route launches from, and `verify:level` was the only
+   * thing that noticed.
+   */
+  const stretches = () => {
+    const out: { lo: number; hi: number; room: number }[] = [];
+    const half = f.len / 2;
+    for (let t = -half + 0.6; t < half - 0.6; t += 2) {
+      const x = (f.along === 'x' ? f.x + t : f.x) - f.nx * 2;
+      const z = (f.along === 'z' ? f.z + t : f.z) - f.nz * 2;
+      const room = massTopAt(x, z) - DECK_T - 0.3;
+      const last = out[out.length - 1];
+      if (last && Math.abs(last.room - room) < 0.5) last.hi = Math.min(half, t + 2);
+      else out.push({ lo: out.length ? t : -half, hi: Math.min(half, t + 2), room });
+    }
+    if (out.length) out[out.length - 1].hi = half;
+    return out;
+  };
+  /** Fill one stretch of constant height, and centre what fits in it. */
+  const run = (lo: number, hi: number, room: number, salt: number) => {
+    const picked: { m: string; s: number; w: number }[] = [];
+    let used = 0;
+    for (let i = 0; i < 6; i++) {
+      // Every model that fits what is left, widest first. Three buildings over
+      // four avenues is not much variety and the temptation is to shuffle them
+      // freely — but a wider building is fewer buildings for the same wall, and
+      // on this map that is the difference between lining every wide street and
+      // lining half of them. So the hash picks between the two widest that fit,
+      // and never reaches for the smallest while a bigger one would do.
+      const fit = ORDER.map((m) => {
+        const nat = CITY[m];
+        return { m, s: Math.min(1.6, room / nat[1], (hi - lo - used) / nat[0]) };
+      }).filter((o) => o.s >= 0.8);
+      if (!fit.length) break;
+      const o = fit[hash(k * 53 + salt * 131 + i * 17) % Math.min(2, fit.length)];
+      const w = CITY[o.m][0] * o.s;
+      picked.push({ m: o.m, s: o.s, w });
+      used += w;
+    }
+    // Nothing stands here — a wing too low for a building, or a stub of face
+    // beside a bay. That is what the modular shopfront is still for.
+    if (!picked.length) {
+      if (hi - lo >= 8) shopfront(f, k, lo, hi);
+      return;
+    }
+    // Centre the row in its stretch: a leftover metre at each end reads as the
+    // block's corner returning, where the same metre all at one end reads as a
+    // building missing.
+    const start = lo + (hi - lo - used) / 2;
+    let t = start;
+    for (const p of picked) {
+      place(t + p.w / 2, p.m, p.s);
+      t += p.w;
+    }
+    covered.push([start, t]);
+    if (start - lo >= 8) shopfront(f, k, lo, start);
+    if (hi - t >= 8) shopfront(f, k, t, hi);
+  };
+  let salt = 0;
+  for (const g of stretches()) {
+    // A themed bay is a hole in the row: a loading dock behind a building is a
+    // loading dock nobody will ever see.
+    if (clear > 0) {
+      if (g.lo < -clear / 2 - 1) run(g.lo, Math.min(g.hi, -clear / 2 - 1), g.room, ++salt);
+      if (g.hi > clear / 2 + 1) run(Math.max(g.lo, clear / 2 + 1), g.hi, g.room, ++salt);
+    } else {
+      run(g.lo, g.hi, g.room, ++salt);
+    }
+  }
+  return covered;
+}
+
+/**
+ * The older ground storey: 4 m wall modules, a cornice brush, corner columns and
+ * a way in. Still the right tool for a stretch too low or too short to stand a
+ * whole building on, and it is only ever three metres tall so it fits anywhere.
+ */
+function shopfront(f: Face, k: number, lo: number, hi: number) {
   const PANEL = 4;
-  const tiles = Math.floor(f.len / PANEL);
-  const pad = (f.len - tiles * PANEL) / 2;
+  const len = hi - lo;
+  const tiles = Math.floor(len / PANEL);
+  const pad = (len - tiles * PANEL) / 2;
   // One material per building, so a frontage is a frontage and not a sample
   // book: brick, brick-with-trim, or the metal-and-concrete of a newer block.
   const kind = hash(k * 13) % 3;
   const wide = ['Brick_Inset_Window', 'Brick_Inset_Window', 'Metal_Window'][kind];
   const blank = ['Brick_Inset', 'Brick_Inset', 'Metal_Plain_3'][kind];
   for (let i = 0; i < tiles; i++) {
-    const t = -f.len / 2 + pad + PANEL * (i + 0.5);
+    const t = lo + pad + PANEL * (i + 0.5);
     const cx = f.along === 'x' ? f.x + t : f.x;
     const cz = f.along === 'z' ? f.z + t : f.z;
     // Roughly every other bay is glazed and the rest is blank wall. Not only
     // because an unbroken run of identical windows is a texture rather than a
-    // building: a glazed module is five draw calls and a blank one is three, and
-    // over twenty-two frontages that ratio is worth several hundred of them.
-    const m = hash(k * 31 + i) % 2 === 0 ? blank : wide;
+    // building: a glazed module is five draw calls and a blank one is three.
+    const m = hash(k * 31 + i) % 3 === 0 ? wide : blank;
     cityPanel(m, f.nx, f.nz, cx, APRON, cz);
   }
   // The band that closes the shopfront off from the mass above it. A brush and
-  // not a run of `Cornice_*` modules, and the arithmetic is the whole reason: a
-  // 2 m cornice piece over 22 frontages is six hundred draw calls for a line
-  // you read as a line. One brush per face wearing the ornament material is two
-  // dozen, and at street level you cannot tell them apart.
+  // not a run of `Cornice_*` modules: a 2 m cornice piece over a long frontage
+  // is hundreds of draw calls for a line you read as a line.
   {
-    const th = 0.5;
-    const w = f.along === 'x' ? f.len : th + SHOP_OUT * 2;
-    const d = f.along === 'x' ? th + SHOP_OUT * 2 : f.len;
-    box([f.x + f.nx * (SHOP_OUT + 0.1), APRON + 3.1, f.z + f.nz * (SHOP_OUT + 0.1)],
-      [w, 0.55, d], TRIM, undefined, S_TRIM);
+    const th = 0.5 + SHOP_OUT * 2;
+    const mid = (lo + hi) / 2;
+    box([(f.along === 'x' ? f.x + mid : f.x) + f.nx * (SHOP_OUT + 0.1), APRON + 3.1,
+      (f.along === 'z' ? f.z + mid : f.z) + f.nz * (SHOP_OUT + 0.1)],
+    f.along === 'x' ? [len, 0.55, th] : [th, 0.55, len], TRIM, undefined, S_TRIM);
   }
   // A corner column at each end, which is the piece that stops a facade being a
   // flat card stuck to the front of a box.
-  for (const sgn of [-1, 1]) {
-    const t = sgn * (f.len / 2 - 0.7);
+  for (const t of [lo + 0.7, hi - 0.7]) {
     cityPanel('Brick_CornerColumn_Bottom', f.nx, f.nz,
       f.along === 'x' ? f.x + t : f.x, APRON, f.along === 'z' ? f.z + t : f.z);
   }
-
-  // Then the things that give it scale, and a way in. A 30 m mass has no size at
-  // all until there is a 2 m door on it; after that your eye reads the street.
-  const n = Math.max(2, Math.round(f.len / 26));
+  // Then the things that give it scale, and a way in.
+  const n = Math.max(1, Math.round(len / 26));
   for (let i = 0; i < n; i++) {
-    const t = ((i + 0.5) / n - 0.5) * f.len;
+    const t = lo + ((i + 0.5) / n) * len;
     const ax = f.along === 'x' ? f.x + t : f.x;
     const az = f.along === 'z' ? f.z + t : f.z;
     switch (hash(k * 17 + i) % 3) {
       case 0: {
         // A doorway with its own steps out onto the pavement.
         cityPanel('DoorFrame_Trim', f.nx, f.nz, ax, APRON, az);
-        cityProp('Entrance_Concrete_2x2', ax + f.nx * 1.2, 0, az + f.nz * 1.2,
-          Math.atan2(f.nx, f.nz));
+        cityProp('Entrance_Concrete_2x2', ax + f.nx * 1.2, 0, az + f.nz * 1.2, yawOf(f));
         break;
       }
       case 1:
@@ -1440,8 +1601,7 @@ function frontage(f: Face, k: number) {
         break;
       default:
         cityPanel('DoorFrame_Metal_Single', f.nx, f.nz, ax, APRON, az);
-        cityProp('Stairs_Entrance_Concrete', ax + f.nx * 1.1, 0, az + f.nz * 1.1,
-          Math.atan2(f.nx, f.nz));
+        cityProp('Stairs_Entrance_Concrete', ax + f.nx * 1.1, 0, az + f.nz * 1.1, yawOf(f));
         break;
     }
   }
@@ -1476,16 +1636,25 @@ const BAY_PLAN: Record<number, Bay> = {
 
 /** Dress one street-facing wall: generic kit, a theme if it has one, posters. */
 function street(f: Face, k: number) {
-  frontage(f, k);
   const kind = BAY_PLAN[k];
   const span = Math.min(19, f.len * 0.4);
+  const cover = frontage(f, k, kind ? span : 0);
+  /**
+   * Where the wall IS at a point along this face — on the building line, or on
+   * the mass behind it. Everything hung on a wall has to ask: a poster pinned
+   * to the mass is a poster inside a building, and one pinned to the building
+   * line where no building stands is a poster floating over the street.
+   */
+  const wallAt = (t: number) =>
+    cover.some(([a, b]) => t > a + 1.5 && t < b - 1.5) ? WALL_OUT : 0;
   if (kind) bay(f, kind, 0, span, k);
-  streetKit(f, k, kind ? span : 0);
+  streetKit(f, k, kind ? span : 0, wallAt);
   // A poster or two on the blank stretches either side, whatever the wall does
   // for a living. Paper on a wall is the cheapest life there is.
   for (const sgn of [-1, 1]) {
-    poster(f, sgn * f.len * 0.36, 4.2 + (hash(k + sgn) % 3) * 1.2,
-      pick(POSTER_ART, k * 7 + sgn), 1.5 + (hash(k * 5 + sgn) % 3) * 0.35);
+    const t = sgn * f.len * 0.36;
+    poster(f, t, 4.2 + (hash(k + sgn) % 3) * 1.2,
+      pick(POSTER_ART, k * 7 + sgn), 1.5 + (hash(k * 5 + sgn) % 3) * 0.35, wallAt(t));
   }
 }
 
@@ -1508,6 +1677,44 @@ for (let ri = 0; ri < ROWS.length; ri++) {
   }
 }
 
+// The other two wide streets. There are four gaps in this grid a street could
+// be called a street in — 22, 22, 24 and 22 metres — and until the frontages
+// were whole buildings rather than a course of wall modules, dressing more than
+// two of them was not affordable. A building is now CHEAPER than the modules it
+// replaced, so the rest of the district gets the same treatment: every wide
+// street on the map is lined, and the 8 m alleys between them stay bare, which
+// is what an alley looks like anyway.
+for (let ci = 0; ci < COLS.length; ci++) {
+  const C = COLS[ci];
+  if (solidFace(3, ci, 'x')) {
+    street({ x: C.c, z: ROWS[3].hi, nx: 0, nz: 1, along: 'x', len: C.size }, 500 + ci);
+  }
+  if (solidFace(4, ci, 'x')) {
+    street({ x: C.c, z: ROWS[4].lo, nx: 0, nz: -1, along: 'x', len: C.size }, 600 + ci);
+  }
+}
+for (let ri = 0; ri < ROWS.length; ri++) {
+  const R = ROWS[ri];
+  if (solidFace(ri, 3, 'z')) {
+    street({ x: COLS[3].hi, z: R.c, nx: 1, nz: 0, along: 'z', len: R.size }, 700 + ri);
+  }
+  if (solidFace(ri, 4, 'z')) {
+    street({ x: COLS[4].lo, z: R.c, nx: -1, nz: 0, along: 'z', len: R.size }, 800 + ri);
+  }
+}
+
+// And now the bases, for every mass no building ended up standing on.
+{
+  const clad = (r: Roof) => STOOD.some((c) =>
+    Math.abs(c.x - r.cx) < r.w / 2 + 1 && Math.abs(c.z - r.cz) < r.d / 2 + 1);
+  // A mass with a building against it still needs a base on its OTHER three
+  // sides — a block that is brick on the avenue and a bare box down the alley
+  // is worse than either. But the base wraps all four, so on these it is pulled
+  // in to a fifth of its depth: still a plinth and still a painted line, and
+  // 20 cm is comfortably behind the 30 the building line stands at.
+  for (const b of PENDING_BASE) groundStorey(b.r, b.k, clad(b.r) ? 0.18 : 1);
+}
+
 /**
  * Street furniture down a frontage: lamps on columns, and clutter against the
  * wall behind them.
@@ -1518,7 +1725,8 @@ for (let ri = 0; ri < ROWS.length; ri++) {
  *
  * `(nx, nz)` points AWAY from the wall, so `out` is measured into the street.
  */
-function streetKit(f: Face, k: number, clear = 0) {
+function streetKit(f: Face, k: number, clear = 0,
+  wallAt: (t: number) => number = () => 0) {
   const SPACING = 24;
   const n = Math.max(2, Math.floor(f.len / SPACING));
   for (let i = 0; i < n; i++) {
@@ -1535,8 +1743,10 @@ function streetKit(f: Face, k: number, clear = 0) {
     // The head: a lit box on top of the column, which is the whole trick to a
     // street lamp that is a model of a post and nothing else.
     box([lx, 4.9 + APRON, lz], [1.5, 0.45, 1.5], LIT_WARM, undefined, S_LAMP);
-    prop('Prop_Light_Floor', lx + f.nx * 0.9, APRON, lz + f.nz * 0.9,
-      Math.atan2(f.nx, f.nz));
+    if (i % 2 === 0) {
+      prop('Prop_Light_Floor', lx + f.nx * 0.9, APRON, lz + f.nz * 0.9,
+        Math.atan2(f.nx, f.nz));
+    }
 
     // City furniture on the kerb: the small things a street has and nobody
     // notices until they are missing. All of them are one draw call.
@@ -1560,16 +1770,21 @@ function streetKit(f: Face, k: number, clear = 0) {
     // A condenser unit hung on the wall above head height, which is what the
     // back of a building actually looks like.
     if (hash(k * 7 + i) % 3 === 0) {
-      cityPanel('Prop_ACUnit', f.nx, f.nz, ax + (f.along === 'x' ? 3 : 0),
-        4.2 + (hash(k + i) % 3) * 1.4, az + (f.along === 'z' ? 3 : 0));
+      const w = wallAt(t + 3);
+      cityPanel('Prop_ACUnit', f.nx, f.nz, ax + (f.along === 'x' ? 3 : 0) + f.nx * w,
+        4.2 + (hash(k + i) % 3) * 1.4, az + (f.along === 'z' ? 3 : 0) + f.nz * w);
     }
 
-    // And something to walk past between the lamps, hard against the wall.
+    // And something to walk past between the lamps, hard against the wall — on
+    // the lamps the floodlight skipped, so the kerb alternates instead of
+    // carrying one of everything at every post.
+    if (i % 2 === 0) continue;
     const cm = pick(i % 2 ? BULK : UNITS, k * 29 + i);
     const cs = sciBox(cm);
     const off = ((i * 37) % 11) - 5;
-    const gx = f.along === 'x' ? ax + off : ax + f.nx * (cs[2] / 2 + 0.5);
-    const gz = f.along === 'z' ? az + off : az + f.nz * (cs[2] / 2 + 0.5);
+    const back = wallAt(t + off) + cs[2] / 2 + 0.5;
+    const gx = (f.along === 'x' ? ax + off : ax) + f.nx * back;
+    const gz = (f.along === 'z' ? az + off : az) + f.nz * back;
     prop(cm, gx, APRON, gz, (hash(k + i * 3) % 4) * HALF_PI);
   }
 }
@@ -1702,9 +1917,6 @@ for (const s of [-1, 1]) {
 // them and there is nothing on them to reach. All they do is stand between the
 // near layer and the sky, and that is a job for a silhouette.
 
-/** The pack's finished buildings. */
-const BLOCKS = ['Building_Small_1', 'Building_Medium_2_001', 'Building_Large_2'];
-
 // The ground the rest of the city stands on. The district's floor stops at the
 // rim, so without this every building past it is a model hanging over nothing —
 // and it is the gaps BETWEEN them, seen from the crown, where you would notice.
@@ -1723,110 +1935,52 @@ function outerBlock(m: string, x: number, z: number, inx: number, inz: number, k
   cityProp(m, x, 0, z, Math.atan2(inx, inz), k);
 }
 
-// Where they stand is not "spaced out along the rim" — it is AT THE END OF
-// EVERY STREET. A district's streets are its sightlines: run one and its far
-// end is a fixed part of the view for the whole length of it, and on this map
-// that far end was eight metres of rim and then sky. So the streets get read
-// off the block grid and every mouth is filled — one building square on the
-// centreline of the narrow ones, a pair across the mouth of the avenues, which
-// are three times as wide and would show daylight either side of a single one.
+// Out here they are MASSES, not models. That is a reversal, and the reason for
+// it is the only interesting thing about this block.
 //
-// Then a bigger one at each corner, half again the size and set back, because a
-// row of equal buildings in a line is a fence. Corners are where a real grid
-// puts its tall thing, and corners are what you see from the roofs.
+// The finished buildings were placed here first, filling the street mouths
+// outside the rim — which looked right and was the wrong place for them. The
+// buildings you run past, wallrun, and come down a street towards are the ones
+// INSIDE the map, and once every wide street in the district was lined with
+// them there was no budget left for a second set standing where you can only
+// ever look at them over an eight-metre wall.
 //
-// Everything BETWEEN the mouths is a plain mass with the window facade on it,
-// one draw call and one for its cornice. That split is the whole economy of
-// this ring: a finished model is twelve calls and worth every one of them when
-// it is the thing at the end of the street you are running down, and worth none
-// of them for the fifth building along a row you are seeing edge-on at 200 m.
+// So the outer city is what it should have been: low masses wearing the same
+// window facade the district's own blocks wear, one draw call each and one for
+// the cornice, fourteen to twenty-six metres tall so they read as the city the
+// district stands in rather than competing with the tower ring behind them for
+// the skyline. Broken by gaps, because an unbroken row is a wall with windows
+// painted on it and the gaps are what read as side streets carrying on.
 {
-  /** The middle of each gap between blocks — which is to say, the streets. */
-  const mids = (ss: typeof COLS) => ss.slice(1).map((s, i) => (ss[i].hi + s.lo) / 2);
-  /** And how wide each one is, since an avenue needs more building than a lane. */
-  const widths = (ss: typeof COLS) => ss.slice(1).map((s, i) => s.lo - ss[i].hi);
   const SIDES = [
-    { ox: rimX + 1, oz: 0, inx: -1, inz: 0, at: mids(ROWS), wide: widths(ROWS), half: rimZ, seed: 31 },
-    { ox: -rimX - 1, oz: 0, inx: 1, inz: 0, at: mids(ROWS), wide: widths(ROWS), half: rimZ, seed: 977 },
-    { ox: 0, oz: rimZ + 1, inx: 0, inz: -1, at: mids(COLS), wide: widths(COLS), half: rimX, seed: 4409 },
-    { ox: 0, oz: -rimZ - 1, inx: 0, inz: 1, at: mids(COLS), wide: widths(COLS), half: rimX, seed: 8171 },
+    { ox: rimX + 1, oz: 0, inx: -1, inz: 0, half: rimZ, seed: 31 },
+    { ox: -rimX - 1, oz: 0, inx: 1, inz: 0, half: rimZ, seed: 977 },
+    { ox: 0, oz: rimZ + 1, inx: 0, inz: -1, half: rimX, seed: 4409 },
+    { ox: 0, oz: -rimZ - 1, inx: 0, inz: 1, half: rimX, seed: 8171 },
   ];
   type Side = typeof SIDES[number];
   /**
    * The centre of something standing on a side: `t` along it, `out` away from
-   * the rim.
-   *
-   * `t` runs along the side in the model's own +X once it is yawed to face in,
-   * which is the +Z side's -X and the -Z side's +X. Getting that backwards
-   * mirrors the whole row, which is invisible until you notice that the street
-   * mouth on the north side is filled and the one on the south side is a gap.
+   * the rim. `t` runs along the side in the +Z side's -X and the -Z side's +X,
+   * which only matters for keeping the seeded layout stable between them.
    */
   const spot = (s: Side, t: number, out: number): [number, number] =>
     [s.ox + s.inz * t - s.inx * out, s.oz - s.inx * t - s.inz * out];
-  /** World coordinate along a side, in that side's own `t`. */
-  const tOf = (s: Side, c: number) => c * (s.inz - s.inx);
-  const sized = (h: number, lo: number, hi: number) => lo + ((h >>> 9) % 100) / 100 * (hi - lo);
   for (const s of SIDES) {
-    /** What the row has already used up, so the filler knows where the gaps are. */
-    const taken: [number, number][] = [];
-    const put = (t: number, back: number, m: string, k: number) => {
-      const nat = CITY[m];
-      const [x, z] = spot(s, t, back + nat[2] * k / 2);
-      outerBlock(m, x, z, s.inx, s.inz, k);
-      taken.push([t - nat[0] * k / 2, t + nat[0] * k / 2]);
-      return nat[0] * k;
-    };
-    for (let i = 0; i < s.at.length; i++) {
-      const t = tOf(s, s.at[i]);
-      const h = hash(s.seed + i * 1013);
-      const m = BLOCKS[h % BLOCKS.length];
-      const k = sized(h, 0.95, 1.2);
-      if (s.wide[i] < 14) {
-        // A lane: one building across it, and the run is closed.
-        put(t, 0, m, k);
-        continue;
-      }
-      // An avenue: a pair sharing a party wall over the centreline, so the mouth
-      // is closed by masonry rather than by one building with sky beside it.
-      const m2 = BLOCKS[(h >>> 3) % BLOCKS.length];
-      const k2 = sized(hash(h), 0.95, 1.2);
-      put(t - CITY[m][0] * k / 2 + 0.3, 0, m, k);
-      put(t + CITY[m2][0] * k2 / 2 - 0.3, 0, m2, k2);
-    }
-    // The corners, set back behind the row and half again as tall.
-    for (const end of [-1, 1]) {
-      const h = hash(s.seed * 7 + end * 5099);
-      const m = BLOCKS[h % BLOCKS.length];
-      const k = sized(h, 1.4, 1.9);
-      put(end * (s.half - CITY[m][0] * k / 2 - 4), 22, m, k);
-    }
-    // And the rest of the row: masses in whatever the models left over. Low —
-    // 14 to 26 m, against the district's own 24 to 76 — because the job here is
-    // to be the city the finished buildings stand in, not to compete with the
-    // tower ring behind it for the skyline.
-    taken.sort((a, b) => a[0] - b[0]);
-    let cur = -s.half;
-    for (let i = 0; i <= taken.length; i++) {
-      const end = i < taken.length ? taken[i][0] : s.half;
-      let free = end - cur;
-      let at = cur;
-      // Split anything longer than a building into buildings, rather than
-      // stretching one mass over sixty metres of frontage.
-      for (let n = 0; free > 16 && n < 3; n++) {
-        const h = hash(s.seed * 3 + i * 809 + n * 97);
-        const bw = Math.min(free - 2, 16 + (h % 18));
-        const bd = 14 + ((h >>> 5) % 12);
-        const th = 14 + ((h >>> 9) % 13);
-        const [x, z] = spot(s, at + bw / 2 + 1, bd / 2 + ((h >>> 15) % 7));
-        const tint = shade(pick(FACADE_TINTS, s.seed + i * 5 + n), 0.95);
-        const sx = Math.abs(s.inz) > 0.5 ? bw : bd;
-        const sz = Math.abs(s.inz) > 0.5 ? bd : bw;
-        box([x, (th - 10) / 2, z], [sx, th + 10, sz], tint, undefined, S_MASS);
-        box([x, th - 0.6, z], [sx + 1, 1.2, sz + 1], TRIM, undefined, S_TRIM);
-        at += bw + 2;
-        free -= bw + 2;
-      }
-      if (i < taken.length) cur = Math.max(cur, taken[i][1]);
+    let t = -s.half;
+    for (let i = 0; t < s.half - 12; i++) {
+      const h = hash(s.seed * 3 + i * 809);
+      // A gap every few, and the walk carries on past it.
+      if (h % 5 === 0) { t += 12 + (h >>> 4) % 14; continue; }
+      const bw = Math.min(s.half - t - 2, 16 + (h % 18));
+      const bd = 14 + ((h >>> 5) % 12);
+      const th = 14 + ((h >>> 9) % 13);
+      const [x, z] = spot(s, t + bw / 2, bd / 2 + ((h >>> 15) % 7));
+      const tint = shade(pick(FACADE_TINTS, s.seed + i * 5), 0.95);
+      const sx = Math.abs(s.inz) > 0.5 ? bw : bd;
+      const sz = Math.abs(s.inz) > 0.5 ? bd : bw;
+      box([x, (th - 10) / 2, z], [sx, th + 10, sz], tint, undefined, S_MASS);
+      t += bw + 2;
     }
   }
 }
@@ -1843,13 +1997,13 @@ function outerBlock(m: string, x: number, z: number, inx: number, inz: number, k
    */
   const CLEAR_X = (EXTENT.x1 - EXTENT.x0) / 2 + PAVE + 75;
   const CLEAR_Z = (EXTENT.z1 - EXTENT.z0) / 2 + PAVE + 75;
-  // Thirty-two, down from fifty-four. The near silhouette is buildings now, and
-  // twenty towers' worth of draw calls buys a great deal more standing where
-  // you can see the brick on them than it ever did out here.
-  for (let i = 0; i < 32; i++) {
+  // Eighteen, down from fifty-four. The near silhouette is carried by the
+  // outer city's own masses now, and thirty towers' worth of draw calls buys a
+  // great deal more standing on a street inside the map than it ever did here.
+  for (let i = 0; i < 18; i++) {
     const h = hash(i * 7919);
     // Spread round the compass with a jitter, so the ring is not a polygon.
-    const ang = (i / 32) * Math.PI * 2 + ((h % 100) / 100 - 0.5) * 0.09;
+    const ang = (i / 18) * Math.PI * 2 + ((h % 100) / 100 - 0.5) * 0.09;
     let rad = RING_IN + ((h >>> 7) % 100) / 100 * (RING_OUT - RING_IN);
     // Taller further out, which is how a skyline behind a skyline reads: the
     // near ring cannot hide the far one, so the depth stays legible.
@@ -2377,7 +2531,11 @@ for (let ri = 0; ri < ROWS.length; ri++) {
   for (let z = EXTENT.z0 + 8; z < EXTENT.z1 - 8; z += STRIDE) {
     if (Math.abs(z - AVE_Z) < 18) continue;
     road('Decal_DoubleYellow_Straight', AVE_X, 0, z, HALF_PI);
-    // A lane line either side of the centre, so it reads as four lanes.
+    // A lane line either side of the centre, so it reads as four lanes. Every
+    // other stride: the model is itself a run of dashes, so laying one end to
+    // end down the avenue paints a dashed line at twice the price of a dashed
+    // line.
+    if (Math.round(z / STRIDE) % 2) continue;
     for (const sgn of [-1, 1]) {
       road('Decal_BrokenLine_Straight', AVE_X + sgn * 5.5, 0, z, HALF_PI);
     }
@@ -2385,6 +2543,7 @@ for (let ri = 0; ri < ROWS.length; ri++) {
   for (let x = EXTENT.x0 + 8; x < EXTENT.x1 - 8; x += STRIDE) {
     if (Math.abs(x - AVE_X) < 18) continue;
     road('Decal_DoubleYellow_Straight', x, 0, AVE_Z);
+    if (Math.round(x / STRIDE) % 2) continue;
     for (const sgn of [-1, 1]) {
       road('Decal_BrokenLine_Straight', x, 0, AVE_Z + sgn * 5.5);
     }

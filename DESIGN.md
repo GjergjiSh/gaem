@@ -3196,80 +3196,99 @@ estimated calls against a 3800 ceiling, and 70 checks passing. Measured in a
 throttled tab: 1390 real calls and ~13 ms at street level, 2979 and ~22 ms on
 the widest possible view of the entire city.
 
-## 39. Using the buildings, since the pack has buildings in it
+## 39. Using the buildings, in the place you can reach them
 
 The city kit ships three finished buildings -- `Building_Small_1`,
-`Building_Medium_2_001` and `Building_Large_2` -- and the first pass through the
-kit ignored them in favour of assembling frontages out of its 4 m wall modules.
-That was the wrong call, and it was wrong on the pack's own terms: the modules
-exist so you can build a facade at a *specific* size against gameplay geometry,
-and nothing about that argument applies to the city outside the map, where
-nothing is a specific size and nothing is gameplay.
+`Building_Medium_2_001` and `Building_Large_2`. The first pass through the kit
+ignored them and assembled ground storeys out of its 4 m wall modules instead.
+The second pass used them, and used them outside the rim, where they lined the
+street mouths of a city you could look at over an 8 m wall and never touch.
+Both were wrong in the same direction, and the second was wrong in a way worth
+recording: it is very easy to spend an afternoon making the part of the map
+nobody can reach look like the part they can.
 
-The arithmetic makes it embarrassing. A finished building is twelve primitives
--- brick and concrete, a cornice, a glazed ground floor with a lit interior
-behind it, window bays up the front, a flat asphalt roof, twelve draw calls for
-all of it. Cladding a single storey of a single face out of glazed modules costs
-more than that. The kit was being used at roughly five times the price for a
-worse result everywhere it did not have to fit.
+The buildings belong on the streets you run down. They are there now.
 
-### Where a finished building earns twelve calls
+### The arithmetic, which was not what it looked like
 
-At the end of a street. A district's streets are its sightlines: run one and its
-far end is a fixed part of the view for the whole length of it, and on this map
-that end was eight metres of rim wall and then sky. So the street mouths are
-read off the block grid rather than guessed -- the gaps between `COLS` and
-`ROWS`, with their widths -- and every one of the eighteen gets filled from
-outside: one building square on the centreline of a lane, a pair sharing a party
-wall across an avenue, which is three times as wide and would show daylight
-either side of a single one. A bigger one at each corner, set back and half
-again the size, because a row of equal buildings in a line is a fence.
+A finished building is twelve or thirteen primitives -- brick and concrete, a
+cornice, a glazed ground floor with a lit interior behind it, sash windows with
+stone lintels up the front, entrance steps with a railing, a flat roof. Twelve
+draw calls for all of that. The modular ground storey it replaced was around
+sixty per face: a glazed 4 m inset is five calls, a blank one three, and a 54 m
+frontage is thirteen of them plus a cornice, two corner columns and a doorway.
 
-They stand at their own size, which is the only size they read at. The windows
-and doors in them are modelled at human scale and stop being windows and doors
-the moment they are stretched, and `verify:level`'s distortion rule is what
-keeps that honest -- it compares a prop's three axes against each other, so the
-only way to place one of these is uniformly.
+So the finished building is not the expensive option. It is a QUARTER of the
+price of the thing that was there, and it stands seventeen to thirty metres
+instead of three. Once that was clear the district went from two dressed streets
+to all four of its wide ones -- every 22 m and 24 m gap in the block grid, both
+sides -- and the count went DOWN.
 
-The rim is 8 m and these are 17 to 28, so they clear it from anywhere on the
-ground. That is the whole point: the view down every street on the map now ends
-in a building instead of in a wall.
+### How a model becomes the front of a collider
 
-### Where it does not, and what goes there instead
+A block is one solid mass with a facade texture on it, and that is the right way
+to build something you run along the roof of and wallrun the side of: one
+collider, one draw call, and a box is what the movement was tuned against.
+Nothing about that changed. What changed is the surface.
 
-Everything between the mouths is a plain brush with the window facade on it: one
-call, and one more for its cornice band. Fourteen to twenty-six metres tall,
-against the district's own twenty-four to seventy-six, so it reads as the city
-the finished buildings stand in rather than competing with the tower ring behind
-for the skyline.
+Each street face is lined with buildings sunk into the mass until only the
+building line is proud of it. `cityProp` sizes the brush from the measured box,
+so the scale is uniform by construction and `verify:level`'s distortion rule
+holds. Each is scaled to stand its stretch of wall up to the parapet, capped at
+1.6 and floored at 0.8 -- a building stops being a building once its windows are
+three metres tall, and stops being one going the other way too.
 
-That split -- models at the sightlines, masses in between -- is the same
-principle as the ground-floor cladding one level down, and it paid for itself
-twice. The far ring of backdrop towers came down from fifty-four to thirty-two,
-because the near silhouette is buildings now and twenty towers' worth of calls
-buys a great deal more standing where you can see the brick on them. The stepped
-towers lost the cornice band on each setback: at 300 m a 1.2 m band is a pixel
-and a half, and forty of them is a building's worth of calls spent on something
-nobody can resolve.
+Three things had to be got right, and each one was wrong first.
 
-### Two things that had to be true first
+**The wall is not the bounding box.** A model is fitted to its brush by its
+bounds, and these do not end at their brickwork: `Building_Small_1` carries 2.3 m
+of cornice and stoop in front of its wall. Line the BOXES up on the street and
+the brick sits two metres back inside the mass, with the block's own painted
+canopy sailing out in front of it, cutting the building in half at the first
+floor. Each model is pushed out by its own overhang, and what lands on the line
+is the wall.
 
-The buildings are glazed on their own +Z face, the same convention as the kit's
-wall panels and the opposite of the sci-fi kit's `_Straight` pieces, so turning
-one to face the district is a yaw and nothing else. Getting the along-side axis
-backwards mirrors an entire row, which is invisible until you notice that the
-street mouth on the north side is filled and the one on the south side is a gap.
+**The height has to be measured, not looked up.** A `step` block's face is only
+as tall as its base; a `wing` changes height halfway along. So the room is read
+off the masses themselves, sampled along the face -- and sampled INSIDE it,
+because a sample taken exactly on a block corner is not on the mass at all and
+reports no wall, which is enough to condemn the whole face to the fallback.
+That bug put buildings on seven faces out of twenty-two with nothing anywhere to
+say so.
 
-And they needed ground. The district's floor stops at the rim, so the first
-attempt was thirty-four models standing on nothing -- which you do not notice
-looking at a building, and do notice looking *between* two of them from the
-crown. There is a plate under the whole outer city now, dark, and wide enough
-that its edge is past where the fog has finished.
+**Measure where you build.** The first version measured the wall over the next
+24 m, sized a row against it, then centred the row in the stretch -- which moves
+it off the ground it was measured over. On one face that put a thirty-metre
+building half onto a fourteen-metre wing, standing eight metres over a roof the
+route launches from. The face is now cut into stretches of constant height
+first, and each is filled and centred within itself. `verify:level` was the only
+thing that caught it.
+
+### What had to give
+
+The plinth, the dark shopfront band and the painted canopy over it are the right
+base for a mass with a texture on it and exactly the wrong one for a mass with a
+building against it -- and they wrap all four sides, so they cannot be switched
+off on one. On a clad mass they are pulled in to a fifth of their depth: still a
+plinth and still a painted line down the alley, and comfortably behind the
+building line on the street. Which mass is which is not known until the
+frontages are built, so the bases are deferred and decided in one pass at the
+end.
+
+The outer city gave up its finished buildings and went back to being masses
+wearing the window facade -- one call each, low, broken by gaps. The far ring is
+down to eighteen towers from the fifty-four it started at. The avenue lane lines
+are laid every other stride, since the model is already a run of dashes and
+laying them end to end paints a dashed line at twice the price of a dashed line.
+The kerbside floodlight and the clutter alternate between lamp posts instead of
+every post carrying one of each.
 
 ### Where it ended up
 
-1990 brushes, 1106 wearing a model, ~3709 estimated calls against the same 3800
-ceiling, all 70 checks passing. The thirty-four buildings cost 439 calls and
-about 6 ms in the widest aerial view of the entire city -- and nothing
-measurable at street level, where you are looking down one street at a time and
-the frustum throws away all but a handful of them.
+1870 brushes, 79 finished buildings, all of them inside the map, ~3780 estimated
+calls against the same 3800 ceiling that was there before, and 70 checks
+passing. Measured in a throttled tab at 978x918: 13.8 ms on the avenue, 17.7 ms
+down the new one, 21.5 ms in the worst view a player gets -- the whole map end
+to end from the spawn -- and 8.9 ms from the crown. All of them at or below what
+the same views cost before any of this, because what came out paid for what
+went in.
