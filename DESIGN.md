@@ -3402,3 +3402,39 @@ that came down to 2600, 70 checks passing. Measured in a throttled tab at
 978x918: 13.2 ms on the avenue, 14.1 ms in an alley, 11.6 ms from the crown,
 16.1 ms in the worst view a player gets. Every one of those is faster than the
 same view was before this pass, with twice the buildings in it.
+
+## 41. One grey, and two lights
+
+`ashgate-raw` is the level being worked on now, so it stopped being a control
+group and started being a place. The first thing it needed was a palette, and
+the palette it had was the clad level's with the textures pulled off it: six
+facade tints so neighbouring buildings read apart, a roof taking some of its
+building's colour, a plinth matching the pavement, twelve accents on the
+canopies. Sixty flat colours with nothing underneath to justify any of them,
+which reads as noise rather than as a scheme.
+
+It is one grey now. Every solid brush in the district — masses, decks, trims,
+plinths, streets, the outer city, the tower ring — is `#99a2b0`, and nothing
+else. Faces still separate perfectly well: a box under a warm key and a blue
+fill has four different values on it before colour is involved, and a district
+of them is legible in a way sixty hues never were.
+
+What is left carrying meaning is the light, and there are two.
+
+**White** is illumination and nothing more — the window strips, the cornice
+lights, the soffits under a canopy, the head of a lamp. Anything that was
+`LIT_WARM` or `LIT_COLD`, which are the two colours in this level that were only
+ever "there is a light here".
+
+**Red** is everything else that glows: every marking, canopy, beacon, painted
+accent, padded wall and the Chute. On the clad level those are four different
+colours teaching four different rules — amber is something to wallrun, violet is
+something to slide, cyan is a pad. Here they are one, which is a real loss of
+information and a deliberate one: the request was consistency, and there is now
+exactly one thing to learn instead of six. Splitting red back out into the rule
+colours is one set in `rawColour` when that trade stops being worth it.
+
+1024 grey brushes, 219 white lights, 83 red. All of it is derived at the bottom
+of `ashgate.ts` from the clad level's brushes, so none of this touches the
+district's own generator — which is what keeps the two levels the same level.
+
