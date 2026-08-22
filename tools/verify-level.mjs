@@ -41,7 +41,16 @@ for (const f of walk(OUT).filter((f) => f.endsWith('.js'))) {
 }
 const load = (rel) => import(pathToFileURL(path.join(OUT, rel)).href);
 
-const A = await load('levels/ashgate.js');
+// `LEVEL=raw` runs the whole suite against `ashgate-raw` instead — the same
+// district with every kit model taken off it. The two share their colliders, so
+// this is mostly a check that they still do: anything that passes on one and
+// fails on the other is a place where the art is load-bearing, which is the one
+// thing it is never allowed to be.
+const NS = await load('levels/ashgate.js');
+const A = process.env.LEVEL === 'raw'
+  ? { ...NS, brushes: NS.brushesRaw, RAMP_BRUSHES: NS.RAMP_BRUSHES_RAW }
+  : NS;
+if (process.env.LEVEL === 'raw') console.log('  (ashgate-raw: no models)');
 const P = await load('engine/physics.js');
 const S = await load('core/solver.js');
 const TUNE = await load('core/tuning.js');

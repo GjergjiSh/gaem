@@ -3367,6 +3367,25 @@ building — are all emitted at the very end of the file and spliced off the tai
 Anything else shifts an index something else is holding, and `RAMP_BRUSHES` is
 holding several.
 
+`ashgate-raw` means it literally: not one brush in it wears a model. Everything
+that did stands as the box it always was, with its collider untouched — which is
+the property that makes the pair worth having, since the two levels play
+identically and anything that feels different between them is the art. A prop's
+box is white, because a prop's box is never seen, so they go grey here.
+
+Two exceptions, both forced by measurement. The flat ones are DROPPED rather
+than unwrapped: a poster, a road marking, a wall panel and a vent grille are a
+few centimetres of nothing with a picture on them, and as a box they are a grey
+wafer resting on a hairline — 46 of them, which `verify:level` correctly called
+floating. Nothing under `character.stepHeight` was holding anything up, so the
+level plays the same without them. And ramps are never dropped for being thin,
+because some of them are and a ramp is a floor.
+
+`RAMP_BRUSHES` is a list of indices, so the raw level carries its own,
+renumbered as it is built. The suite runs twice now — `verify:level` on the clad
+district and `verify:level:raw` on this one — and both pass all seventy checks,
+which is the check that the art is not load-bearing.
+
 ### Where it ended up
 
 2967 brushes, 177 finished buildings, ~2161 estimated calls against a ceiling

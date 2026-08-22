@@ -12,10 +12,11 @@
     "verify:enemies": "node tools/verify-enemies.mjs",
     "verify:slam": "node tools/verify-slam.mjs",
     "verify:collision": "node tools/verify-collision.mjs",
-    "verify": "npm run verify:slam && npm run verify:collision && npm run verify:enemies && npm run verify:boxselect && npm run verify:level",
+    "verify": "npm run verify:slam && npm run verify:collision && npm run verify:enemies && npm run verify:boxselect && npm run verify:level && npm run verify:level:raw",
     "verify:boxselect": "node tools/verify-boxselect.mjs",
     "deploy": "node tools/publish.mjs",
-    "verify:level": "node tools/verify-level.mjs"
+    "verify:level": "node tools/verify-level.mjs",
+    "verify:level:raw": "node -e \"process.env.LEVEL='raw';import('./tools/verify-level.mjs')\""
   },
   "keywords": [],
   "author": "",
