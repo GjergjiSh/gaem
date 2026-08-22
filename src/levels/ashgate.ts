@@ -2293,40 +2293,41 @@ box([ladderX - LADDER_LEN / 2 + 0.6, LADDER_TOP + 1.2, YARD_Z], [1.2, 2.4, SLOT 
   GANTRY, undefined, S_STEEL);
 
 // --- the Line ----------------------------------------------------------------
-// An elevated deck over every wide avenue in the district: two legs north–south
-// over x = -72 and x = 71, two east–west over z = -35 and z = 101, meeting at
-// four junctions. About 1200 m of road in the air, and all of it connected.
+// A conveyor over every wide avenue in the district: two legs north–south over
+// x = -72 and x = 71, two east–west over z = -35 and z = 101, meeting at four
+// junctions. About 1200 m of deck, and it is ONE PIECE — no gaps, no jumps to
+// clear, no segment that ends in air. You can walk from the far end of any leg
+// to the far end of any other without ever leaving it.
 //
-// It replaces two things at once, and it is worth saying why both went.
+// That continuity is the whole design and it cost the Overpass's five gaps to
+// get. A hole in a conveyor is a broken conveyor; the thing that is going to
+// run along the top of this has to be able to run along all of it.
 //
-// The Overpass was one leg of this and nothing else — 300 m down the widest
-// avenue, which made it the fast lane and also made it a corridor with two ends.
-// You got on it, you rode it south, and then you were somewhere. Four legs and
-// four junctions is a NETWORK: every ride down it is a choice about which way to
-// turn, and the roofs either side are on-ramps rather than the only alternative.
+// Above the deck, carried on the same portal frames that hold it up, a pair of
+// beams runs the entire length at seven metres — the rail for whatever ends up
+// travelling on it. Those cross at the junctions the same way the decks do, so
+// the structure overhead is as connected as the road underneath.
 //
-// The Chute was 142 m of 25° slab from the crown to the far side of the city,
-// and it was the whole descent in one object — a single line, taken the same way
-// every time, that you were on for eight seconds with nothing to do. What
-// replaces it is not one slide but the SHAPE of this thing: the Line falls from
-// 38 m at its north-east end to 5 m at the south-west, and the fall is not
-// spread evenly. Long shallow runs at 2.5–3° hold the speed you arrive with, and
-// three PITCHES at 8°, 12° and 17.5° are where it is found. Slide friction (3)
-// loses to slope acceleration (95) from about two degrees, so a run keeps you
-// and a pitch pays you, and which of them you are on is legible from the shape
-// of the road ahead — the pitches are the marked ones.
+// It falls from 46 m at the north-east end to 18 m at the south-west, and the
+// fall is not spread evenly: long runs at 2.5–3° hold the speed you arrive
+// with, three pitches at 7.7°, 12° and 17.5° are where it is found. Slide
+// friction (3) loses to slope acceleration (95) from about two degrees, so a run
+// keeps you and a pitch pays you. Nothing on it drops below 18 m — a conveyor
+// that comes down to head height over a street is a low ceiling, not a road.
 
-const LINE_W = 16;
+export const LINE_W = 16;
 const LINE_T = 1.6;
-/** Anything past this reads as a pitch rather than a run, and is marked. */
-const PITCH_DEG = 7;
+/** How far the overhead rail rides above the deck. */
+export const LINE_OVER = 7;
+/** Portal legs and overhead beams stand this far either side of the centreline. */
+export const LINE_PY = LINE_W / 2 - 1.2;
 
 /**
  * A leg of the Line: a straight run down one avenue, with a height profile.
  *
  * `nodes` are the profile as [along, deck height] in increasing `along`, and
  * every one of them is a bend in the road. Junctions appear as a PAIR of nodes
- * at the same height, sixteen metres apart — the flat square where the two legs
+ * at the same height, sixteen metres apart — the flat square where two legs
  * cross — because a 17° pitch arriving at a flat crossing is a step you catch a
  * slide on, and the only way to not have one is for the profile itself to level
  * out before it gets there.
@@ -2337,16 +2338,14 @@ export interface Leg {
   /** The avenue this leg runs down, on the other axis. */
   at: number;
   nodes: [number, number][];
-  /** Holes in the deck: [centre, width]. Every one is a jump. */
-  gaps: [number, number][];
 }
 
 /** Where the legs cross, and how high the deck is there. */
 export const JUNCTIONS: { x: number; z: number; y: number }[] = [
-  { x: -72, z: -35, y: 16 },
-  { x: 71, z: -35, y: 32 },
-  { x: -72, z: 101, y: 10 },
-  { x: 71, z: 101, y: 22 },
+  { x: -72, z: -35, y: 24 },
+  { x: 71, z: -35, y: 40 },
+  { x: -72, z: 101, y: 18 },
+  { x: 71, z: 101, y: 30 },
 ];
 const JUNCT_HALF = LINE_W / 2;
 
@@ -2355,29 +2354,25 @@ export const LINE_LEGS: Leg[] = [
     name: 'east',
     axis: 'z',
     at: 71,
-    nodes: [[-155, 38], [-43, 32], [-27, 32], [41, 29], [93, 22], [109, 22], [160, 17]],
-    gaps: [[-100, GAP.hop], [8, GAP.hop * 0.8], [136, GAP.super * 0.95]],
+    nodes: [[-155, 46], [-43, 40], [-27, 40], [41, 37], [93, 30], [109, 30], [160, 30]],
   },
   {
     name: 'west',
     axis: 'z',
     at: -72,
-    nodes: [[-155, 26], [-43, 16], [-27, 16], [93, 10], [109, 10], [160, 6]],
-    gaps: [[-100, GAP.hop * 0.8], [30, GAP.span]],
+    nodes: [[-155, 34], [-43, 24], [-27, 24], [93, 18], [109, 18], [160, 18]],
   },
   {
     name: 'north',
     axis: 'x',
     at: -35,
-    nodes: [[-190, 8], [-80, 16], [-64, 16], [25, 20], [63, 32], [79, 32], [190, 24]],
-    gaps: [[-140, GAP.hop], [-16, GAP.span], [132, GAP.hop]],
+    nodes: [[-190, 24], [-80, 24], [-64, 24], [25, 28], [63, 40], [79, 40], [190, 40]],
   },
   {
     name: 'south',
     axis: 'x',
     at: 101,
-    nodes: [[-190, 5], [-80, 10], [-64, 10], [30, 15], [63, 22], [79, 22], [190, 16]],
-    gaps: [[-140, GAP.hop * 0.8], [-14, GAP.hop], [132, GAP.span]],
+    nodes: [[-190, 18], [-80, 18], [-64, 18], [30, 23], [63, 30], [79, 30], [190, 30]],
   },
 ];
 
@@ -2395,28 +2390,33 @@ export function lineY(leg: Leg, at: number): number {
 }
 
 /**
- * Every stretch of deck the Line actually builds, per leg, as [from, to].
- * Measured rather than declared — the verifier walks this and rays the world at
- * each end, so a table that disagreed with the geometry would be caught by the
- * thing it was lying to.
+ * Every stretch of deck the Line builds, per leg, as [from, to].
+ *
+ * These are BENDS, not breaks. A leg is cut into spans at each node because a
+ * ramp is straight and the profile is not; consecutive spans share an endpoint
+ * exactly, so the surface is continuous across every one of them. The only
+ * stretch a leg does not build is the junction square, and that is because the
+ * crossing leg builds it — two decks at the same height in the same place is a
+ * z-fight and a seam to catch a slide on, so the crossing has to be one surface
+ * and the north–south legs own it.
  */
 export const LINE_SEGS: Record<string, [number, number][]> = {};
 
 for (const leg of LINE_LEGS) {
   const a0 = leg.nodes[0][0];
   const a1 = leg.nodes[leg.nodes.length - 1][0];
-  // The junction squares belong to the north–south legs. An east–west leg stops
-  // at the edge of one and starts again on the far side: two flat decks at the
-  // same height in the same place is a z-fight, and the crossing has to be one
-  // surface or a slide crossing it catches on the seam.
-  const owned = leg.axis === 'z';
-  const skip: [number, number][] = owned ? [] : JUNCTIONS
-    .filter((j) => Math.abs(j.z - leg.at) < 1)
-    .map((j) => [j.x - JUNCT_HALF, j.x + JUNCT_HALF] as [number, number]);
-  for (const [c, w] of leg.gaps) skip.push([c - w / 2, c + w / 2]);
-  skip.sort((p, q) => p[0] - q[0]);
+  // No leg builds its own crossing. Both of them stop at the edge of the square
+  // and the junction is built once, below, as its own thing — with its posts at
+  // the CORNERS. Letting a leg carry its portal frame through put a 1.6 m post
+  // in the middle of the crossing leg's roadway, which is a bollard in the
+  // middle of a road that only one of the two legs could see coming.
+  const skip: [number, number][] = JUNCTIONS
+    .filter((j) => Math.abs((leg.axis === 'z' ? j.x : j.z) - leg.at) < 1)
+    .map((j) => {
+      const c = leg.axis === 'z' ? j.z : j.x;
+      return [c - JUNCT_HALF, c + JUNCT_HALF] as [number, number];
+    });
 
-  // Cut the leg at every bend and every hole, then build what is left.
   const cuts = new Set<number>([a0, a1]);
   for (const [n] of leg.nodes) if (n > a0 && n < a1) cuts.add(n);
   for (const [lo, hi] of skip) { cuts.add(lo); cuts.add(hi); }
@@ -2434,121 +2434,142 @@ for (const leg of LINE_LEGS) {
   const pos = (at: number, y: number): P3 => (leg.axis === 'z'
     ? { x: leg.at, y, z: at }
     : { x: at, y, z: leg.at });
+  /** Offset across the leg — the other world axis, whichever that is. */
+  const side = (p: P3, off: number): [number, number] => [
+    p.x + (leg.axis === 'z' ? off : 0),
+    p.z + (leg.axis === 'x' ? off : 0),
+  ];
 
   for (const [lo, hi] of segs) {
     const yLo = lineY(leg, lo);
     const yHi = lineY(leg, hi);
-    const deg = (Math.atan2(Math.abs(yHi - yLo), hi - lo) * 180) / Math.PI;
-    const pitch = deg >= PITCH_DEG;
-    const seg = ramp(pos(lo, yLo), pos(hi, yHi), LINE_W, LINE_T,
-      pitch ? PAD : ROAD, 0, undefined, pitch ? S_MARKED : S_ROAD);
-    // Railings down both edges, stopped short of each end. A rail across the
-    // lip of a jump reads as a wall, and every one of these ends is a jump.
-    const rl = seg.len - 12;
-    if (rl > 8) {
-      const mx = leg.axis === 'z' ? leg.at : (lo + hi) / 2;
-      const mz = leg.axis === 'z' ? (lo + hi) / 2 : leg.at;
-      for (const sgn of [-1, 1]) {
-        // Offset ACROSS the leg, which is the other world axis — the same
-        // quarter turn the deck itself took, applied to where the rail stands
-        // rather than to how it lies.
-        railAlong('z',
-          mx + (leg.axis === 'z' ? sgn * (LINE_W / 2 - 0.4) : 0),
-          (yLo + yHi) / 2,
-          mz + (leg.axis === 'x' ? sgn * (LINE_W / 2 - 0.4) : 0),
-          rl, seg.q);
-      }
-      // Centre line, so a kilometre of deck reads as a road. It takes the
-      // segment's own rotation: laid flat at the midpoint height instead, a
-      // marking on a road that falls three metres over its length is buried at
-      // one end and a metre in the air at the other.
-      const ds = sciBrush('Decal_Line_Straight');
-      skinned([mx, (yLo + yHi) / 2 + 0.05, mz], [ds[0], ds[1], seg.len - 4],
-        PROP_C, 'Decal_Line_Straight', seg.q);
+    const seg = ramp(pos(lo, yLo), pos(hi, yHi), LINE_W, LINE_T, ROAD, 0, undefined, S_ROAD);
+    const mid = pos((lo + hi) / 2, (yLo + yHi) / 2);
+
+    // A kerb down each edge, so a slide that drifts does not simply leave. Low
+    // enough to step over and solid, unlike the handrail it replaces — that was
+    // a kit model, and this level has a variant with no models in it.
+    for (const sgn of [-1, 1]) {
+      const [kx, kz] = side(mid, sgn * (LINE_W / 2 - 0.35));
+      box([kx, mid.y + 0.45, kz], [0.7, 0.9, seg.len], TIER, seg.q, S_STEEL);
     }
-    // Portal frames down to the avenue floor: a leg under each edge of the deck
-    // and a beam across between them.
+
+    // The overhead rail: two beams the length of the segment, seven metres up.
+    // Same slope as the deck, same offsets as the portal legs holding them, so
+    // the whole thing is one frame rather than a road with a roof over it.
+    for (const sgn of [-1, 1]) {
+      const [bx, bz] = side(mid, sgn * LINE_PY);
+      box([bx, mid.y + LINE_OVER, bz], [1.2, 0.9, seg.len], GANTRY, seg.q, S_STEEL);
+    }
+
+    // Portal frames: a leg under each edge of the deck down to the avenue floor,
+    // a beam across under the deck, and the same posts carried on up to the rail
+    // overhead.
     //
-    // The Overpass stood on a single 4.5 m column down the centreline and that
-    // was fine, because it ran down a 24 m avenue nothing else used. Four legs
-    // over four avenues is a different question: two of these run down the 22 m
+    // The Overpass stood on a single 4.5 m column down the centreline, which was
+    // fine because it ran down a 24 m avenue nothing else used. Four legs over
+    // four avenues is a different question: two of these run down the 22 m
     // straights that are the only run-up on the map long enough to reach the
-    // hard cap, and a column in the middle of one leaves 7 m of lane either
-    // side of it — which `verify:level` measures and refused. Standing the
-    // supports at the kerb instead leaves eleven metres of clear road straight
-    // down the middle, which is more than there was before the Line existed.
-    const PY = LINE_W / 2 - 1.2;
-    for (const f of hi - lo > 26 ? [0.25, 0.75] : [0.5]) {
-      const at = lo + (hi - lo) * f;
-      const top = lineY(leg, at) - LINE_T;
+    // hard cap, and a column in the middle of one leaves 7 m of lane either side
+    // — which `verify:level` measures and refused. At the kerb instead they
+    // leave eleven metres of clear road straight down the middle.
+    const step = 34;
+    const n = Math.max(1, Math.round((hi - lo) / step));
+    for (let i = 0; i < n; i++) {
+      const at = lo + ((i + 0.5) / n) * (hi - lo);
+      const y = lineY(leg, at);
+      const top = y - LINE_T;
       const p = pos(at, 0);
       for (const sgn of [-1, 1]) {
-        const px = p.x + (leg.axis === 'z' ? sgn * PY : 0);
-        const pz = p.z + (leg.axis === 'x' ? sgn * PY : 0);
+        const [px, pz] = side(p, sgn * LINE_PY);
         box([px, (top - BASE) / 2, pz], [2.4, top + BASE, 2.4], MAST, undefined, S_STEEL);
+        // Up the other side of the deck to carry the rail.
+        box([px, y + LINE_OVER / 2, pz], [1.6, LINE_OVER, 1.6], MAST, undefined, S_STEEL);
       }
-      // The beam. Without it the two legs are two posts that happen to be near
-      // a road, which is the floating-scenery look this level does not have.
+      const across = LINE_PY * 2 + 2.4;
       box([p.x, top - 1.2, p.z],
-        leg.axis === 'z' ? [PY * 2 + 2.4, 1.6, 2.4] : [2.4, 1.6, PY * 2 + 2.4],
+        leg.axis === 'z' ? [across, 1.6, 2.4] : [2.4, 1.6, across],
+        GANTRY, undefined, S_STEEL);
+      box([p.x, y + LINE_OVER + 0.95, p.z],
+        leg.axis === 'z' ? [across, 1.0, 1.6] : [1.6, 1.0, across],
         GANTRY, undefined, S_STEEL);
     }
   }
 }
 
-// A gantry over the widest gap on the east leg: a beam high enough that hooking
-// it drops you into a swing rather than a climb, with a leg either side of the
-// deck. That gap is priced at 95% of a full slide-jump-plus-double, which is
-// inside the budget arriving downhill and outside it coming back up — so the
-// grapple is the way across it in one direction and not the other, which is the
-// point of building a road on a tilt.
-{
-  const leg = LINE_LEGS[0];
-  const [zc] = leg.gaps[2];
-  const y = lineY(leg, zc);
-  const legOff = LINE_W / 2 + 3.4;
-  // Cross-arm first: without it the beam hangs between its legs touching
-  // neither, which is exactly the floating-scenery look this level avoids.
-  box([leg.at, y + 15, zc], [legOff * 2 + 2.4, 1.4, 2.4], GANTRY, undefined, S_STEEL);
-  box([leg.at, y + 15, zc], [3, 1.6, leg.gaps[2][1] + 26], GANTRY, undefined, S_STEEL);
-  for (const s of [-1, 1]) {
-    box([leg.at + s * legOff, (y + 15 - BASE) / 2, zc], [2.4, y + 15 + BASE, 2.4], MAST,
-      undefined, S_STEEL);
-    box([leg.at + s * legOff, y + 15.9, zc], [2.0, 0.5, 2.0], LIT_WARM, undefined, S_LAMP);
+// The crossings. One flat square each, and the only part of the Line that is
+// built once for two legs rather than twice — the deck, the frame under it and
+// the rail over it all have to be single surfaces here or the conveyor has a
+// seam across it in one direction and a post standing in it in the other.
+//
+// No kerbs: a kerb across a crossing is a kerb across the road you are turning
+// onto. The posts go to the four corners, which is the one place on a crossroads
+// nothing runs through.
+for (const j of JUNCTIONS) {
+  const top = j.y - LINE_T;
+  box([j.x, j.y - LINE_T / 2, j.z], [LINE_W, LINE_T, LINE_W], ROAD, undefined, S_ROAD);
+  for (const sx of [-1, 1]) {
+    for (const sz of [-1, 1]) {
+      const px = j.x + sx * LINE_PY;
+      const pz = j.z + sz * LINE_PY;
+      box([px, (top - BASE) / 2, pz], [2.4, top + BASE, 2.4], MAST, undefined, S_STEEL);
+      box([px, j.y + LINE_OVER / 2, pz], [1.6, LINE_OVER, 1.6], MAST, undefined, S_STEEL);
+    }
+  }
+  const across = LINE_PY * 2 + 2.4;
+  for (const sgn of [-1, 1]) {
+    // Under the deck, a beam each way, so the square is a frame and not a slab
+    // resting on four posts.
+    box([j.x, top - 1.2, j.z + sgn * LINE_PY], [across, 1.6, 2.4], GANTRY, undefined, S_STEEL);
+    box([j.x + sgn * LINE_PY, top - 1.2, j.z], [2.4, 1.6, across], GANTRY, undefined, S_STEEL);
+    // And the rail overhead, carried straight through on both axes — this is
+    // the piece that lets whatever runs along the top of the Line turn a corner.
+    box([j.x, j.y + LINE_OVER, j.z + sgn * LINE_PY], [LINE_W, 0.9, 1.2],
+      GANTRY, undefined, S_STEEL);
+    box([j.x + sgn * LINE_PY, j.y + LINE_OVER, j.z], [1.2, 0.9, LINE_W],
+      GANTRY, undefined, S_STEEL);
+    box([j.x, j.y + LINE_OVER + 0.95, j.z + sgn * LINE_PY], [across, 1.0, 1.6],
+      GANTRY, undefined, S_STEEL);
   }
 }
 
-// Slip roads. An elevated road with no on-ramps is a road you can only fall off,
-// so it is tied into the roofscape wherever a roof comes near it.
+// Slip roads. A conveyor with no way on is scenery, so it is tied into the
+// roofscape wherever a roof comes near it — which, now that nothing on it drops
+// below 18 m, means the tall blocks and the Spire rather than the street.
 {
   const east = LINE_LEGS[0];
   const west = LINE_LEGS[1];
   const south = LINE_LEGS[3];
   // North: up off the Spire's terrace, running ALONG the avenue rather than
-  // across it. Across is thirteen metres of horizontal for eight of climb,
-  // which is a wall; along it there is as much room as the ramp needs.
-  ramp({ x: COLS[3].hi, y: TERRACE, z: -95 },
+  // across it. Across is four metres of horizontal for eleven of climb, which is
+  // a wall; along it there is as much room as the ramp needs.
+  ramp({ x: COLS[3].hi, y: TERRACE, z: -102 },
     { x: east.at - LINE_W / 2, y: lineY(east, -60), z: -60 }, 10, 1.2, ROAD, 3,
     undefined, S_ROAD);
-  // Middle: the route's own on-ramp off the spine roof.
-  ramp({ x: COLS[3].c, y: HEIGHT[2][3], z: 10 },
-    { x: east.at - LINE_W / 2 - 1, y: lineY(east, 10), z: 10 }, 10, 1.2, ROAD, 3,
+  // East leg, off the tall block south of the junction, on the same diagonal.
+  ramp({ x: COLS[4].lo, y: HEIGHT[3][4], z: 63 },
+    { x: east.at + LINE_W / 2, y: lineY(east, 104), z: 104 }, 10, 1.2, ROAD, 3,
     undefined, S_ROAD);
-  // West leg, off the roof of the block the Ladder tops out on — which is where
-  // the Chute used to land, so the lap still closes in the same place. A bridge
-  // rather than a ramp: the deck passes a metre BELOW that roof and three
-  // metres off its edge, so what this needs is a floor over the gap. Built as a
-  // ramp it would be a 1° slope, which is the one grade a slide dies on.
-  {
-    const y = lineY(west, -8);
+  // West leg meets the roof the Ladder tops out on almost dead level, so what
+  // that gap needs is a floor and not a slope. Built as a ramp it would be a 1°
+  // grade, which is the one shape a slide dies on.
+  for (const [zc, roofTop, ci] of [[63, HEIGHT[3][1], 1], [-8, HEIGHT[2][1], 1]] as const) {
+    void ci;
+    const y = Math.min(lineY(west, zc), roofTop);
     const x0 = COLS[1].hi;
     const x1 = west.at - LINE_W / 2;
-    box([(x0 + x1) / 2, y - LINE_T / 2, -8], [x1 - x0 + 1, LINE_T, 10], ROAD,
+    box([(x0 + x1) / 2, y - LINE_T / 2, zc], [x1 - x0 + 1, LINE_T, 10], ROAD,
       undefined, S_ROAD);
   }
-  // South leg, down to the street at its low western end: the way off.
-  ramp({ x: -150, y: lineY(south, -150), z: south.at },
-    { x: -150, y: 0, z: south.at + 26 }, 10, 1.2, ROAD, 3, undefined, S_ROAD);
+  // South leg, level with the roofs along it at its western end.
+  {
+    const x = COLS[1].c;
+    const y = Math.min(lineY(south, x), HEIGHT[3][1]);
+    const z0 = ROWS[3].hi;
+    const z1 = south.at - LINE_W / 2;
+    box([x, y - LINE_T / 2, (z0 + z1) / 2], [10, LINE_T, z1 - z0 + 1], ROAD,
+      undefined, S_ROAD);
+  }
 }
 
 // --- the Spire ---------------------------------------------------------------

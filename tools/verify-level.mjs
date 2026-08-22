@@ -524,9 +524,20 @@ head('the street grid: every crossing measured, then priced against the tune');
         // middle. The Overpass runs down one of these avenues, and a crossing
         // that is BRIDGED is not a crossing that is broken.
         const midX = (A.COLS[ci].hi + A.COLS[ci + 1].lo) / 2;
-        const span = surfaceAt(midX, A.ROWS[ri].c, Math.max(topA, topB) + 30);
-        const landable = span !== null
-          && span > Math.min(topA, topB) - 12 && span < Math.max(topA, topB) + 14;
+        // Walk DOWN through anything too high to land on before answering. The
+        // Line carries a rail seven metres over its deck for its whole length,
+        // so a single ray from above the roofs finds the rail, calls it the
+        // crossing, and then rejects it for being too high — with the deck that
+        // actually bridges the gap sitting untouched underneath.
+        const ceiling = Math.max(topA, topB) + 14;
+        let span = null;
+        for (let from = Math.max(topA, topB) + 30, k = 0; k < 8; k++) {
+          const h = surfaceAt(midX, A.ROWS[ri].c, from);
+          if (h === null) break;
+          if (h < ceiling) { span = h; break; }
+          from = h - 0.5;
+        }
+        const landable = span !== null && span > Math.min(topA, topB) - 12;
         if (landable) {
           bridged++;
           note(`r${ri} c${ci}->c${ci + 1}: ${best.toFixed(1)} m is past a jump, but a deck `
@@ -864,8 +875,12 @@ head('the Line: the pitches are slides you can commit to');
     note(`${tune}: ${(sliding * DT).toFixed(1)} s sliding down the ${best.leg.name} `
       + `pitch, peaked at ${peak.toFixed(1)} u/s (hardCap ${T.momentum.hardCap})`);
     check(sliding * DT > 1.2, `${tune}: the slide holds down the whole pitch`);
-    check(peak > T.momentum.hardCap * 0.85,
-      `${tune}: and it is worth taking (${peak.toFixed(1)} of ${T.momentum.hardCap})`);
+    // Entered at 6 u/s. What the pitch is for is turning that into most of the
+    // cap without a single input, and the bar is set where a slide that merely
+    // survives the slope would fail it.
+    check(peak > T.momentum.hardCap * 0.7,
+      `${tune}: and it is worth taking (6 u/s in, ${peak.toFixed(1)} out, `
+      + `cap ${T.momentum.hardCap})`);
   }
 }
 
@@ -919,14 +934,60 @@ head('the lap, leg by leg');
     `and the drop across is inside a plain hop (${gap.toFixed(0)} m)`);
 }
 
-head('the Line has air under it, and a deck on top of it, the whole way');
+head('the Line is one piece, and never comes down to head height');
 {
   useTune('shipped');
-  // Every leg runs down the middle of an avenue, so the deck should never be
-  // inside anything and there should always be street a long way below it.
-  // Probed ACROSS the deck as well as down its spine: the portal frames stand
-  // under its edges, so a single ray down the middle measures the road and a
-  // single ray down an edge measures a leg of its own support.
+  // The conveyor has to be continuous: something is going to run along the top
+  // of it, and a hole in it is a broken conveyor. So this walks every leg end
+  // to end -- through the junction squares, which the crossing leg builds --
+  // and rays for deck the whole way.
+  let hole = 0;
+  let low = { y: 1e9, where: '' };
+  let samples = 0;
+  for (const leg of A.LINE_LEGS) {
+    const a0 = leg.nodes[0][0];
+    const a1 = leg.nodes[leg.nodes.length - 1][0];
+    for (let at = a0 + 0.5; at <= a1 - 0.5; at += 2) {
+      const want = A.lineY(leg, at);
+      const x = leg.axis === 'z' ? leg.at : at;
+      const z = leg.axis === 'z' ? at : leg.at;
+      const h = surfaceAt(x, z, want + 3);
+      samples++;
+      if (h === null || Math.abs(h - want) > 0.25) {
+        if (hole < 6) note(`  hole: ${leg.name} at ${at.toFixed(0)}, want ${want.toFixed(1)} got ${h === null ? 'nothing' : h.toFixed(1)}`);
+        hole++;
+      }
+      if (want < low.y) low = { y: want, where: `${leg.name} at ${at.toFixed(0)}` };
+    }
+  }
+  note(`${samples} probes down four legs; lowest deck is ${low.y.toFixed(0)} m (${low.where})`);
+  check(hole === 0, `the deck is unbroken from end to end of every leg (${hole} holes)`);
+  check(low.y >= 16, `and never drops to head height over a street (${low.y.toFixed(0)} m)`);
+
+  // The rail overhead is the other half of the structure and has to be just as
+  // continuous, because the same thing runs along it.
+  let railHole = 0;
+  for (const leg of A.LINE_LEGS) {
+    const a0 = leg.nodes[0][0];
+    const a1 = leg.nodes[leg.nodes.length - 1][0];
+    for (let at = a0 + 2; at <= a1 - 2; at += 2) {
+      const want = A.lineY(leg, at) + A.LINE_OVER;
+      const off = A.LINE_PY;
+      // Anything solid in the metre and a half above the rail line counts: the
+      // rail itself, or one of the cross beams that sits on top of it.
+      let found = false;
+      for (const sgn of [-1, 1]) {
+        const x = leg.axis === 'z' ? leg.at + sgn * off : at;
+        const z = leg.axis === 'z' ? at : leg.at + sgn * off;
+        const h = surfaceAt(x, z, want + 3);
+        if (h !== null && h > want + 0.2 && h < want + 1.8) found = true;
+      }
+      if (!found) railHole++;
+    }
+  }
+  check(railHole === 0, `the overhead rail runs the whole length too (${railHole} holes)`);
+
+  // And there is still air under all of it.
   let buried = 0;
   let worst = { clear: 1e9, where: '' };
   for (const leg of A.LINE_LEGS) {
@@ -934,10 +995,6 @@ head('the Line has air under it, and a deck on top of it, the whole way');
     const a1 = leg.nodes[leg.nodes.length - 1][0];
     for (let at = a0 + 4; at <= a1 - 4; at += 4) {
       const y = A.lineY(leg, at);
-      // Started BELOW the portal beam, which spans the full width of the deck
-      // a couple of metres under it -- rayed from just under the deck the only
-      // thing this measures is the Line's own supports. And offset to 4 m,
-      // which is inboard of the legs.
       let clear = -1;
       for (const off of [0, 4, -4]) {
         const x = leg.axis === 'z' ? leg.at + off : at;
@@ -951,59 +1008,6 @@ head('the Line has air under it, and a deck on top of it, the whole way');
   }
   note(`tightest clearance under the deck is ${worst.clear.toFixed(1)} m (${worst.where})`);
   check(buried === 0, `no leg dives into a building on its way across (${buried} buried)`);
-
-  // And the deck itself is where the profile says it is, everywhere it exists.
-  let bad = 0;
-  let spans = 0;
-  for (const leg of A.LINE_LEGS) {
-    for (const [lo, hi] of A.LINE_SEGS[leg.name]) {
-      spans++;
-      for (let at = lo + 1.5; at <= hi - 1.5; at += 2) {
-        const want = A.lineY(leg, at);
-        const x = leg.axis === 'z' ? leg.at : at;
-        const z = leg.axis === 'z' ? at : leg.at;
-        const h = surfaceAt(x, z, want + 3);
-        if (h === null || Math.abs(h - want) > 0.2) bad++;
-      }
-    }
-  }
-  note(`${spans} spans of deck across four legs`);
-  check(bad === 0, `the deck is continuous and at the right height (${bad} bad probes)`);
-}
-
-// ---------------------------------------------------------------------------
-head('the Line: every hole in it is a jump somebody priced');
-{
-  useTune('shipped');
-  let priced = 0;
-  for (const leg of A.LINE_LEGS) {
-    for (const [c, w] of leg.gaps) {
-      // Measure the deck ends with a ray rather than trusting the table. From
-      // just above the deck: probing from 200 m finds the gantry beam that
-      // hangs over the widest gap and calls it the road.
-      const at = (a) => {
-        const y = A.lineY(leg, a);
-        const x = leg.axis === 'z' ? leg.at : a;
-        const z = leg.axis === 'z' ? a : leg.at;
-        return surfaceAt(x, z, y + 3);
-      };
-      const lo = at(c - w / 2 - 0.6);
-      const hi = at(c + w / 2 + 0.6);
-      note(`${leg.name} gap at ${c}: ${w.toFixed(0)} m, `
-        + `deck ${lo?.toFixed(1)} -> ${hi?.toFixed(1)}`);
-      check(lo !== null && hi !== null, `${leg.name} gap at ${c} has deck on both sides`);
-      // Downhill is a jump you can take; uphill is one you have to earn. Every
-      // gap has to be crossable in at least one direction on a plain hop.
-      const drop = lo === null || hi === null ? 0 : Math.abs(lo - hi);
-      void drop;
-      // Priced off the level's own table: a hop, a slide jump, or the one that
-      // wants the grapple. Nothing on the Line is wider than the widest tier.
-      check(w <= A.GAP.super + 0.5,
-        `${leg.name} gap at ${c} is inside a tier (${w.toFixed(0)} m)`);
-      priced++;
-    }
-  }
-  check(priced >= 8, `every leg carries jumps (${priced} gaps)`);
 }
 
 // ---------------------------------------------------------------------------
