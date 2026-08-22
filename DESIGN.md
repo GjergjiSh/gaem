@@ -3513,3 +3513,55 @@ called a checkpoint on the Line floating under a roof. Both look under it now.
 And one thing the loop cost: turning east at z = -35 left the top of the x = 71
 avenue with a 31 m roof-to-roof jump that the old Overpass had been carrying for
 free. That crossing gets a footbridge at the lower of the two roofs.
+
+## 43. Cargo on the Line
+
+The circuit exists for these. A carrier is a box hung from the overhead rail on
+a strut, and it goes round the loop forever.
+
+It has no route, no destination and no state machine — it has a DISTANCE along a
+closed path. Wrapping is a modulo, spacing is a division, and there is no case
+where one arrives at the end of the track, because the path has no end. That is
+the whole payoff of making the Line a circuit instead of a grid: the hard part
+of a moving platform is what happens when it runs out of track, and here nothing
+does.
+
+The path is derived from the same profile the deck is built from rather than
+typed out again, so a bend moved in one is a bend moved in both. It is exported
+on the level as `rails` — a closed polyline whose last point joins its first —
+which is a new field on `Level` and the first thing on there that is not
+geometry or a trigger.
+
+### Decoration you can stand on
+
+That is a specific and awkward category. The physics world gets a kinematic
+cuboid per carrier so the character controller collides with one properly. But
+Rapier's controller does not CARRY a character standing on a moving body, so the
+carry is done explicitly, in `carriers.ts`, by adding the frame's motion to
+whoever is riding. Keeping it there rather than in the solver means the movement
+rules never had to learn what a conveyor is.
+
+It tests against the carrier's top with a generous tolerance rather than against
+`player.grounded`. A character standing on a body that is moving under them
+spends some frames a few centimetres off it, and a carry that drops out on those
+frames is a platform that shrugs you off at every seam.
+
+The order in the frame matters and it is the same order the robots use: move the
+cargo, carry the rider, sync the physics — all before the fixed steps, so the
+solver sees a world that is consistent for the whole tick rather than one
+shifting under it.
+
+### Two pieces of geometry that had to move
+
+**The rail went up.** Seven metres over the deck was headroom for a road; it is
+now eleven, which is what the cargo needs — the boxes hang with their tops 4.6 m
+over the deck and 2.6 m of clear air underneath, so the deck stays a road you
+can run down rather than a tunnel with a train in it.
+
+**The cross beams went above the rail.** They were under it, which was the right
+answer when the only question was what holds the rail up. It stopped being the
+right answer the moment something hung off the rail's underside: a beam crossing
+under it is a beam the strut ploughs through at every portal on the circuit. The
+posts now carry past the rail and the beam sits on top, which is how a gantry is
+built anyway.
+

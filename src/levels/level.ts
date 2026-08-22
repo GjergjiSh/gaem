@@ -53,6 +53,7 @@ BUILTINS['ashgate'] = () => ({
   spawnYaw: ashgate.spawnYaw,
   killY: ashgate.killY,
   enemies: clone(ashgate.enemies),
+  rails: clone(ashgate.rails),
 });
 // The same district, generated the same way, with nothing on its walls but its
 // own masses. Kept as a level rather than a flag so the two can be flown one
@@ -66,6 +67,7 @@ BUILTINS['ashgate-raw'] = () => ({
   spawnYaw: ashgate.spawnYaw,
   killY: ashgate.killY,
   enemies: clone(ashgate.enemies),
+  rails: clone(ashgate.rails),
 });
 BUILTINS['figure8'] = () => ({
   name: 'figure8',

@@ -39,6 +39,12 @@ export interface Level {
   brushes: Brush[];
   /** Dummy target spawn points, feet position. */
   enemies?: [number, number, number][];
+  /**
+   * Closed paths that things travel along — the overhead rail of a conveyor,
+   * and whatever else ends up needing one. Each is a polyline whose last point
+   * joins its first, so a rider on it never reaches an end.
+   */
+  rails?: [number, number, number][][];
   triggers: Trigger[];
   spawn: { x: number; y: number; z: number };
   /** Camera yaw at spawn — lets a level face the player down its course. */

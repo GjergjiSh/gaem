@@ -300,6 +300,17 @@ export const T = {
     converge: 60,
   },
 
+  /**
+   * The conveyor. Its cargo is scenery you can stand on, so how fast it goes
+   * and how far apart the boxes are is a movement question, not a dressing one:
+   * too fast and it is a hazard, too sparse and there is never one where you
+   * are.
+   */
+  line: {
+    speed: 9,           // metres a second round the circuit
+    spacing: 90,        // metres between carriers, which sets how many there are
+  },
+
   enemy: {
     shoot: true,        // uncheck to disarm every dummy — they still take hits, just never fire
     scale: 1.6,         // dummy size multiplier — bigger = easier to hit
@@ -667,6 +678,8 @@ export const META: Record<string, { min?: number; max?: number; step?: number; d
   'weapon/projSpeed': { min: 10, max: 300, step: 1, doc: 'Muzzle velocity.' },
   'weapon/projDrop': { min: 0, max: 80, step: 0.5, doc: 'Bullet drop. 0 = laser.' },
   'weapon/projSize': { min: 0.03, max: 0.6, step: 0.01 },
+  'line/speed': { min: 0, max: 30, step: 0.5, doc: 'Conveyor speed, m/s.' },
+  'line/spacing': { min: 30, max: 300, step: 5, doc: 'Metres between carriers.' },
   'enemy/colliderRadius': { min: 0.1, max: 2, step: 0.05, doc: 'Solid radius, x enemy scale.' },
   'enemy/scale': { min: 0.5, max: 4, step: 0.05, doc: 'Dummy size multiplier.' },
   'enemy/fireInterval': { min: 0.2, max: 6, step: 0.1 },
