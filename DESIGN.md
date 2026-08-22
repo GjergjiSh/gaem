@@ -3455,10 +3455,17 @@ walk from the far end of any leg to the far end of any other without leaving it.
 
 That is not a stylistic preference, it is what the thing is for: something is
 going to run along the top of it, and a hole in a conveyor is a broken conveyor.
-Above the deck, carried on the same portal frames that hold it up, a pair of
-beams runs the entire length at seven metres — the rail for whatever ends up
-travelling on it — and those cross at the junctions the same way the decks do,
-so the structure overhead is as connected as the road underneath.
+Above the deck, carried on the same portal frames that hold it up, a SINGLE beam
+runs the entire length down the centreline at seven metres — the rail for
+whatever ends up travelling on it — and it carries straight through the
+junctions on both axes, so the structure overhead is as connected as the road
+underneath. One rail, not one under each edge: that is what a gantry crane runs
+on and what the frames below are shaped to carry.
+
+It sits ON its cross beams rather than under them, and overlapping by 15 cm
+rather than touching. A beam whose bottom plane exactly meets the top of the one
+holding it up is a beam supported by a hairline, which is what `verify:level`
+calls floating and it is right to.
 
 Two things follow from "continuous" that were not obvious until the verifier
 said so:

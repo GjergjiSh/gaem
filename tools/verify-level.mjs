@@ -972,17 +972,13 @@ head('the Line is one piece, and never comes down to head height');
     const a1 = leg.nodes[leg.nodes.length - 1][0];
     for (let at = a0 + 2; at <= a1 - 2; at += 2) {
       const want = A.lineY(leg, at) + A.LINE_OVER;
-      const off = A.LINE_PY;
-      // Anything solid in the metre and a half above the rail line counts: the
-      // rail itself, or one of the cross beams that sits on top of it.
-      let found = false;
-      for (const sgn of [-1, 1]) {
-        const x = leg.axis === 'z' ? leg.at + sgn * off : at;
-        const z = leg.axis === 'z' ? at : leg.at + sgn * off;
-        const h = surfaceAt(x, z, want + 3);
-        if (h !== null && h > want + 0.2 && h < want + 1.8) found = true;
-      }
-      if (!found) railHole++;
+      // One rail, down the centreline. Anything solid in the metre and a half
+      // above the rail line counts: the rail itself, or the cross beam at the
+      // head of a portal that sits on top of it.
+      const x = leg.axis === 'z' ? leg.at : at;
+      const z = leg.axis === 'z' ? at : leg.at;
+      const h = surfaceAt(x, z, want + 3);
+      if (!(h !== null && h > want + 0.2 && h < want + 1.8)) railHole++;
     }
   }
   check(railHole === 0, `the overhead rail runs the whole length too (${railHole} holes)`);
@@ -1086,7 +1082,10 @@ head('the lap: every checkpoint sits on something you can stand on');
 {
   useTune('shipped');
   for (const t of A.triggers) {
-    const h = surfaceAt(t.p[0], t.p[2], t.p[1] + 30);
+    // From the ring itself, not from above it. A checkpoint on the Line has the
+    // conveyor's rail seven metres over its head, and a ray dropped from 30 m
+    // up finds that and reports the checkpoint as floating under a roof.
+    const h = surfaceAt(t.p[0], t.p[2], t.p[1] + 0.2);
     const above = h === null ? null : t.p[1] - h;
     note(`${t.kind.padEnd(10)} ${t.name.padEnd(9)} ring at y=${t.p[1].toFixed(1)}, `
       + `surface ${h === null ? 'NONE' : h.toFixed(1)} (${above?.toFixed(1)} m under it)`);
