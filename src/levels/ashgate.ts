@@ -2678,7 +2678,33 @@ export { brushes };
  * A prop's box is white, because a prop's box is never seen; unwrapped, a
  * district of white boxes is a snowstorm. They go grey here instead.
  */
+/**
+ * One colour for every solid thing in the district, and two for the lights.
+ *
+ * The clad level's palette is doing a job that only makes sense with textures
+ * under it: six facade tints so neighbouring buildings read apart, a roof that
+ * takes some of its building's colour, a plinth that matches the pavement. Strip
+ * the maps and all of that becomes sixty flat colours with nothing to justify
+ * them, which reads as noise rather than as a scheme.
+ *
+ * So this level is one grey. Faces still separate — a box lit by a key and a
+ * fill has four different values on it before any colour is involved — and what
+ * is left carrying meaning is the LIGHT, which is the point of a greybox.
+ */
+const RAW_MASS = 0x99a2b0;
+/** Lighting: the strips and lamps that are just illumination. */
+const RAW_WHITE = 0xffffff;
+/**
+ * And the ones that mean something. Every marking, canopy, beacon, padded wall
+ * and painted accent lands here — so on this level red is not a colour choice,
+ * it is the whole of what the map is telling you, and there is exactly one
+ * thing to learn instead of six.
+ */
+const RAW_RED = 0xff4436;
+/** The two that are only ever illumination — window strips, soffits, lamp heads. */
+const RAW_WHITE_FROM = new Set([LIT_WARM, LIT_COLD]);
 const RAW_PROP = 0x8f97a6;
+void RAW_PROP;
 /**
  * Except the flat ones. A poster, a road marking, a wall panel and a vent grille
  * are all a few centimetres of nothing with a picture on them — as a box they
@@ -2697,12 +2723,15 @@ const PAINT_THIN = 0.35;
  */
 const LIT_SURFACES = new Set([S_LAMP, S_PAINT, S_MARKED, S_PADDED]);
 const rawSurface = (t?: string) => (t && LIT_SURFACES.has(t) ? 'flatLit' : 'flat');
+const rawColour = (b: Brush) => {
+  if (!b.t || !LIT_SURFACES.has(b.t)) return RAW_MASS;
+  return b.c !== undefined && RAW_WHITE_FROM.has(b.c) ? RAW_WHITE : RAW_RED;
+};
 const bare = (b: Brush): Brush | null => {
-  if (!b.m) return { ...b, t: rawSurface(b.t) };
-  if (Math.min(b.s[0], b.s[1], b.s[2]) < PAINT_THIN) return null;
+  if (b.m && Math.min(b.s[0], b.s[1], b.s[2]) < PAINT_THIN) return null;
   const { m, ...rest } = b;
   void m;
-  return { ...rest, t: rawSurface(b.t), c: b.c === PROP_C ? RAW_PROP : b.c };
+  return { ...rest, t: rawSurface(b.t), c: rawColour(b) };
 };
 /**
  * And the ramps, renumbered. `RAMP_BRUSHES` is a list of INDICES, and this level
