@@ -2991,8 +2991,30 @@ const CYBER_MASS = 0xf4f2ee;
  * value range, and the district keeps every band it was drawn with.
  */
 const CYBER_TRIM = 0x1a1d22;
-/** And the accent. It is the only colour in the level and it stays that way. */
+/** And the accents. */
 const CYBER_RED = 0xe2231a;
+/**
+ * Yellow, for everything made of steel.
+ *
+ * The reference paints its metalwork — every railing, catwalk, ladder, pipe
+ * bracket and gantry — a golden ochre, and it is doing more work in those
+ * images than it looks like. It separates the STRUCTURE from the BUILDING at a
+ * glance: white is what the district is made of, yellow is what was bolted to
+ * it afterwards, and the eye sorts a hundred metres of clutter into two
+ * categories without being told to. On a white city it is also the only thing
+ * that reads at distance, which is why the Line keeps its shape across the map
+ * instead of dissolving into the blocks behind it.
+ */
+const CYBER_STEEL = 0xe0a52a;
+/**
+ * And a hair off white for the ground.
+ *
+ * Two per cent, which sounds like nothing and is the difference between a
+ * street and the wall it runs beside. They meet along a line hundreds of metres
+ * long, and at exactly equal value that line disappears and the district reads
+ * as one poured object.
+ */
+const CYBER_GROUND = 0xe9e7e1;
 
 /** Ramp indices carry over untouched: this is a recolour, not a re-cut. */
 /**
@@ -3012,11 +3034,16 @@ const CYBER_SURFACE: Record<string, string> = {
   [S_PAVING]: 'slab',
   [S_DECK]: 'slab',
   [S_STEEL]: 'girder',
+  [S_CRATE]: 'ribbed',
 };
 
 export const RAMP_BRUSHES_CYBER: number[] = RAMP_BRUSHES_RAW.slice();
 export const brushesCyber: Brush[] = brushesRaw.map((b, i) => {
-  const c = b.c === RAW_WHITE ? CYBER_TRIM : b.c === RAW_RED ? CYBER_RED : CYBER_MASS;
+  const src = RAW_SRC[i] ?? '';
+  const surface = CYBER_SURFACE[src] ?? 'plate';
+  const mass = surface === 'girder' ? CYBER_STEEL
+    : surface === 'slab' ? CYBER_GROUND : CYBER_MASS;
+  const c = b.c === RAW_WHITE ? CYBER_TRIM : b.c === RAW_RED ? CYBER_RED : mass;
   return {
     ...b,
     // The accent bands stay bare. They are 30 cm of pure colour doing a job —
@@ -3029,7 +3056,7 @@ export const brushesCyber: Brush[] = brushesRaw.map((b, i) => {
     // Nothing glows either: this is a daylight level, and an emissive surface
     // at noon does not read as a light, it reads as a material with a bug in
     // it.
-    t: c === CYBER_MASS ? (CYBER_SURFACE[RAW_SRC[i] ?? ''] ?? 'plate') : 'flat',
+    t: c === CYBER_TRIM || c === CYBER_RED ? 'flat' : surface,
     c,
   };
 });
