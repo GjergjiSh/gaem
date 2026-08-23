@@ -2933,18 +2933,33 @@ const bare = (b: Brush): Brush | null => {
  * dropped for being thin: some of them are, and a ramp is a floor.
  */
 export const RAMP_BRUSHES_RAW: number[] = [];
+/**
+ * What each raw brush WAS made of, index-aligned with `brushesRaw`.
+ *
+ * Stripping the district to one grey throws away the one piece of information
+ * an art pass needs most: whether a given box was a road, a wall or a beam.
+ * The greybox does not care — that is the point of it — but cyberedge has a
+ * different material for each of the three, and re-deriving them from a
+ * brush's proportions is the same losing game as guessing which slabs are
+ * upright. So the answer is kept as the level is stripped, rather than
+ * reconstructed afterwards.
+ */
+const RAW_SRC: (string | undefined)[] = [];
 export const brushesRaw: Brush[] = (() => {
   const ramps = new Set(RAMP_BRUSHES);
   const out: Brush[] = [];
-  const keep = (b: Brush | null) => { if (b) out.push(b); };
+  const keep = (b: Brush | null, src: string | undefined) => {
+    if (b) { out.push(b); RAW_SRC.push(src); }
+  };
   for (let i = 0; i < brushes.length; i++) {
     if (MODELED.has(i)) continue;
     const b = ramps.has(i) ? bare(brushes[i]) ?? brushes[i] : bare(brushes[i]);
     if (!b) continue;
     if (ramps.has(i)) RAMP_BRUSHES_RAW.push(out.length);
     out.push(b);
+    RAW_SRC.push(brushes[i].t);
   }
-  for (const b of RAW_ONLY) keep(bare(b));
+  for (const b of RAW_ONLY) keep(bare(b), b.t);
   return out;
 })();
 
@@ -2980,21 +2995,44 @@ const CYBER_TRIM = 0x1a1d22;
 const CYBER_RED = 0xe2231a;
 
 /** Ramp indices carry over untouched: this is a recolour, not a re-cut. */
+/**
+ * Three materials, by what the brush used to be.
+ *
+ * A district where the road, the buildings and the conveyor are all the same
+ * white surface is a district where none of them is anything, and no amount of
+ * getting one texture right fixes it — the fix is that there is more than one.
+ * A wall is precast panels bolted to a frame, the ground is poured bays with
+ * sawn joints, and the Line is rolled steel with flanges and splice plates.
+ * Each of the three is recognisable from across the map by its detail alone,
+ * which is what the reference does and what one uniform surface cannot.
+ */
+const CYBER_SURFACE: Record<string, string> = {
+  [S_ROAD]: 'slab',
+  [S_STREET]: 'slab',
+  [S_PAVING]: 'slab',
+  [S_DECK]: 'slab',
+  [S_STEEL]: 'girder',
+};
+
 export const RAMP_BRUSHES_CYBER: number[] = RAMP_BRUSHES_RAW.slice();
-export const brushesCyber: Brush[] = brushesRaw.map((b) => ({
-  ...b,
-  // Cladding courses on the uprights, plain white on anything you walk over.
-  //
-  // Both from the same box: `plate` pins its top and bottom faces to a blank
-  // texel, so a slab's roof stays bare however tall the slab happens to be.
-  // Guessing from a brush's proportions was the first attempt and it cannot
-  // work — a thick block is upright by any height test and a floor in fact.
-  //
-  // Nothing glows either: this is a daylight level, and an emissive surface at
-  // noon does not read as a light, it reads as a material with a bug in it.
-  t: 'plate',
-  c: b.c === RAW_WHITE ? CYBER_TRIM : b.c === RAW_RED ? CYBER_RED : CYBER_MASS,
-}));
+export const brushesCyber: Brush[] = brushesRaw.map((b, i) => {
+  const c = b.c === RAW_WHITE ? CYBER_TRIM : b.c === RAW_RED ? CYBER_RED : CYBER_MASS;
+  return {
+    ...b,
+    // The accent bands stay bare. They are 30 cm of pure colour doing a job —
+    // a joint pattern on one is a joint pattern on a stripe, and it reads as
+    // dirt. Everything else takes the material it was built as, defaulting to
+    // cladding, and cladding puts itself on the uprights only: plate pins its
+    // top and bottom faces to a blank texel, so a slab's roof stays bare
+    // however tall the slab happens to be.
+    //
+    // Nothing glows either: this is a daylight level, and an emissive surface
+    // at noon does not read as a light, it reads as a material with a bug in
+    // it.
+    t: c === CYBER_MASS ? (CYBER_SURFACE[RAW_SRC[i] ?? ''] ?? 'plate') : 'flat',
+    c,
+  };
+});
 
 /**
  * Midday: the key high and nearly white, the dome deep blue, the haze pushed
