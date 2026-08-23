@@ -2983,18 +2983,16 @@ const CYBER_RED = 0xe2231a;
 export const RAMP_BRUSHES_CYBER: number[] = RAMP_BRUSHES_RAW.slice();
 export const brushesCyber: Brush[] = brushesRaw.map((b) => ({
   ...b,
-  // Plain white, for now.
+  // Cladding courses on the uprights, plain white on anything you walk over.
   //
-  // The reference does draw lines on its walls, and `plate` in surfaces.ts
-  // draws them — but a brush is a box with one set of UVs, so the same map
-  // lands on the roof as well, and a thick slab is a wall by the height test
-  // and a floor to walk on in fact. Courses you walk over read as squared
-  // paper, which is worse than bare. This wants per-face surfaces, not a
-  // better guess about which brushes are upright.
+  // Both from the same box: `plate` pins its top and bottom faces to a blank
+  // texel, so a slab's roof stays bare however tall the slab happens to be.
+  // Guessing from a brush's proportions was the first attempt and it cannot
+  // work — a thick block is upright by any height test and a floor in fact.
   //
   // Nothing glows either: this is a daylight level, and an emissive surface at
   // noon does not read as a light, it reads as a material with a bug in it.
-  t: 'flat',
+  t: 'plate',
   c: b.c === RAW_WHITE ? CYBER_TRIM : b.c === RAW_RED ? CYBER_RED : CYBER_MASS,
 }));
 

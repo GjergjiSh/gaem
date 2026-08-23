@@ -101,6 +101,23 @@ interface SurfaceDef {
    */
   orm?: Slot;
   emissiveMap?: Slot;
+  /**
+   * Where the up and down faces sample, as a single UV, when they must not
+   * wear what the sides wear.
+   *
+   * A brush is one box with one material, so the obvious way to put cladding on
+   * a wall and leave the roof bare is six materials in an array — and that is a
+   * second draw call for every brush in the district, which on this level is
+   * about thirteen hundred of them.
+   *
+   * This is the same result for nothing. Collapse all four corners of the top
+   * and bottom faces onto ONE point of the map and the face samples a single
+   * texel across its whole area: pick a texel in a blank part of the sheet and
+   * the roof comes out flat colour while the sides keep their courses. The UV
+   * derivatives are zero there, so it samples the top mip exactly rather than
+   * some average of the whole texture.
+   */
+  capUV?: [number, number];
   /** Metres of world per repeat of the map. The one number that sets scale. */
   tile: number;
   roughness?: number;
@@ -325,12 +342,15 @@ export const SURFACES: Record<string, SurfaceDef> = {
    * the same white are the same wall — and in a style whose whole subject is
    * large white surfaces, that is not a small loss.
    *
-   * Only ever on the UPRIGHTS. The same map on a floor is a grid you walk on,
-   * and the reference's floors are plain — see the cyberedge derivation, which
-   * hands slabs `flat` and walls this.
+   * Only ever on the UPRIGHTS, and `capUV` is what makes that true of the same
+   * box rather than of a different brush: the sides carry courses, the roof and
+   * the soffit come out plain white, and it is still one material and one draw.
    */
   plate: {
     base: { paint: paintPlate, as: 'plate' },
+    // Between the first two courses, where the map is guaranteed blank — see
+    // `courses` in paintPlate. Roofs and soffits come out plain white.
+    capUV: [0.5, 0.16],
     tile: 12, roughness: 0.93, metalness: 0.0,
   },
   /**
@@ -714,6 +734,7 @@ export function boxFor(
 ): THREE.BufferGeometry {
   const name = SURFACES[surface] ? surface : DEFAULT_SURFACE;
   const tile = SURFACES[name].tile;
+  const cap = SURFACES[name].capUV;
   // Quantised, so the hundreds of brushes that share a size share a geometry.
   const q = (v: number) => Math.round(Math.abs(v) * 4) / 4;
   const key = `${name}|${q(sx)}|${q(sy)}|${q(sz)}`;
@@ -729,6 +750,12 @@ export function boxFor(
     [q(sx), q(sy)], [q(sx), q(sy)],
   ];
   for (let f = 0; f < 6; f++) {
+    // Faces 2 and 3 are +Y and -Y. Pinned to one texel when the surface says
+    // its cladding belongs on the uprights only.
+    if (cap && (f === 2 || f === 3)) {
+      for (let i = f * 4; i < f * 4 + 4; i++) uv.setXY(i, cap[0], cap[1]);
+      continue;
+    }
     const [u, v] = spans[f];
     for (let i = f * 4; i < f * 4 + 4; i++) {
       uv.setXY(i, uv.getX(i) * (u / tile), uv.getY(i) * (v / tile));
