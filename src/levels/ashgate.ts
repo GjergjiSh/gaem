@@ -3017,6 +3017,11 @@ export const CYBER_THEME: Theme = {
   fogNear: 260,
   fogFar: 1400,
   exposure: 1.0,
+  // The line. Everything else here is colour; this is the thing that makes a
+  // white wall in front of a white wall read as two walls.
+  ink: 0x0d1014,
+  inkWidth: 1.15,
+  inkFade: [150, 460],
 };
 
 // --- the lap -----------------------------------------------------------------

@@ -3668,3 +3668,59 @@ The palette is three values:
 And nothing glows. `flatLit` at noon does not read as a light, it reads as a
 material with a bug in it, so cyberedge is `flat` throughout and lets the sun do
 the work.
+
+## 46. The line, in screen space
+
+A white city needs a black line round everything in it, or a white wall in front
+of a white wall is one wall. The dusk greybox solves that problem with a low
+raking sun; cyberedge cannot, because at noon nothing is raking anything, and
+the reference does not want it to — it wants ink.
+
+### Why not the wireframe that was already there
+
+`gfx.edges` parents a twelve-edge `LineSegments` to every brush. It is wrong
+three times: it draws a box's interior edges as loudly as its silhouette, it
+cannot weight a line by what is behind it, and being per-mesh it puts every
+brush back in its own draw call and takes the instancing batcher down with it —
+which is why `buildLevel` skips batching entirely when it is on.
+
+So the line is found in screen space instead, from the depth buffer, in one
+fullscreen pass. **It costs the same whether the district has one building or a
+thousand**, which is the property that matters here, because the plan for this
+level is a thousand. Measured on the street view: 2.88 ms a frame with it,
+2.66 ms without.
+
+### Two tests, and one of them is the whole trick
+
+**Curvature, not gradient.** The obvious silhouette test compares a pixel's
+depth with its neighbours', and it lights up the entire floor in front of you —
+a floor at a grazing angle has an enormous depth gradient and no edge in it at
+all. The second derivative (`z(left) + z(right) − 2·z(here)`) is zero on any
+plane no matter how steeply it recedes, and spikes where depth actually jumps.
+That one substitution is the difference between an outline and a mess.
+
+**Creases from reconstructed normals.** Where two faces of one box meet there is
+no depth jump, so curvature says nothing, but the normal turns ninety degrees.
+Normals come from three more depth taps each — forward differences, not central
+ones, because a central difference straddling a silhouette averages two
+unrelated surfaces and draws a second line one pixel inside the first.
+
+Both are scaled by distance and faded out past 150 m. Every mullion and handrail
+in a district is an edge, and all of them together at four hundred metres are a
+grey mush that reads as dirt on the lens.
+
+### The colour-space trap
+
+Three skips tone mapping when the destination is a render target — reasonably,
+since it is an output-referred step and an intermediate buffer is not output.
+The first version of this pass therefore composited a linear, unmapped scene
+straight onto the canvas, and the whole city came out dark and contrasty in a
+way that looks like a lighting bug and is not one. The sky was fine, which was
+the misleading part: the dome's shader carries the tone-mapping include itself,
+so it compiles to nothing under the same rule and lands in the same space as
+everything else.
+
+The fix is to hold the target linear and half-float, and put the two includes at
+the end of the composite shader instead. The line gets drawn in scene-referred
+light, and the frame goes through tone mapping and encoding exactly once, on its
+way to the canvas.
