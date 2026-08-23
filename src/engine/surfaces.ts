@@ -118,6 +118,16 @@ interface SurfaceDef {
    * some average of the whole texture.
    */
   capUV?: [number, number];
+  /**
+   * The same trick the other way up: where the four UPRIGHT faces sample when
+   * the pattern belongs on the top and bottom only.
+   *
+   * A ground slab is jointed across its face and blank down its 20 cm edge, and
+   * a road that carries its bay joints round onto its kerb looks like a road
+   * made of tiles. capUV and sideUV are mutually exclusive by nature — a
+   * surface has a pattern on one pair of faces or the other.
+   */
+  sideUV?: [number, number];
   /** Metres of world per repeat of the map. The one number that sets scale. */
   tile: number;
   roughness?: number;
@@ -305,6 +315,82 @@ function paintPlate(ctx: CanvasRenderingContext2D, w: number, h: number) {
   }
 }
 
+/**
+ * Poured concrete for the ground — see `slab` below.
+ *
+ * The road and the pavements are not cladding and must not be jointed like it.
+ * A wall is panels bolted to a frame; a ground slab is poured in bays and cut,
+ * so its joints are SAWN — a thin dark line with no shadow beside it, because
+ * there is no gap behind a slab lying on the earth. Bays are half again as big
+ * as a wall panel and there are no fixings anywhere, which between them are
+ * most of what tells the eye it is looking down rather than across.
+ *
+ * The speckle is the other half. A perfectly even white ground reads as a
+ * missing texture no matter how good its joints are, and a little tooth in it
+ * at a scale too fine to resolve is the difference between concrete and paper.
+ */
+function paintSlab(ctx: CanvasRenderingContext2D, w: number, h: number) {
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, w, h);
+
+  // Deterministic, so a rebuild gives the same ground twice.
+  let seed = 0x2f6e2b1;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  for (let i = 0; i < 9000; i++) {
+    const a = 0.02 + rnd() * 0.05;
+    ctx.fillStyle = `rgba(0, 0, 0, ${a})`;
+    ctx.fillRect(rnd() * w, rnd() * h, 1 + rnd() * 2, 1 + rnd() * 2);
+  }
+
+  // Sawn joints, no shadow. A cut in a slab is a groove a few millimetres wide
+  // and the light gets into it; a gap behind a hung panel does not.
+  const line = Math.max(2, Math.round(w / 420));
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.13)';
+  for (const t of [0, 0.5, 1]) {
+    ctx.fillRect(Math.round(t * w), 0, line, h);
+    ctx.fillRect(0, Math.round(t * h), w, line);
+  }
+}
+
+/**
+ * Painted structural steel — see `girder` below.
+ *
+ * Everything the Line is built from: masts, portal beams, the rail, the kerbs
+ * down the deck. In the reference this is a different material from the
+ * buildings and reads as one instantly, because a rolled section is not a flat
+ * slab — it has flanges down its edges and it is bolted rather than cast, so
+ * the detail sits in two lines along its length instead of in a field.
+ *
+ * Which is also why it takes no cap: a beam is seen from underneath as often as
+ * from the side, and the underside of a beam has the same flanges on it.
+ */
+function paintGirder(ctx: CanvasRenderingContext2D, w: number, h: number) {
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, w, h);
+
+  const line = Math.max(2, Math.round(w / 380));
+  // Flanges: a line in from each edge, with the web shaded very slightly
+  // between them so the section reads as an I and not as a stripe.
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.035)';
+  ctx.fillRect(w * 0.14, 0, w * 0.72, h);
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.17)';
+  for (const t of [0.14, 0.86]) ctx.fillRect(Math.round(t * w), 0, line, h);
+
+  // Bolt rows down both flanges, and a splice plate every half repeat where two
+  // lengths of section would actually be joined.
+  const bolt = Math.max(1, Math.round(w / 340));
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.30)';
+  for (const t of [0.14, 0.86]) {
+    for (let i = 0; i < 12; i++) {
+      ctx.beginPath();
+      ctx.arc(t * w + line / 2, (i + 0.5) * (h / 12), bolt, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.10)';
+  for (const t of [0, 0.5, 1]) ctx.fillRect(0, Math.round(t * h) - line, w, line * 2);
+}
+
 function paintGlass(ctx: CanvasRenderingContext2D, w: number, h: number) {
   panes(w, h, (x, y, pw, ph, lit, r) => {
     // Dark, and slightly blue: glass reflects the sky even when there is
@@ -390,6 +476,29 @@ export const SURFACES: Record<string, SurfaceDef> = {
     // Two joints each way over eight metres: a four-metre panel, which is what
     // the reference's walls are divided into.
     tile: 8, roughness: 0.93, metalness: 0.0,
+  },
+  /**
+   * The ground: roads, pavements, yards and every deck you run along.
+   *
+   * Jointed on the FACE and blank down the edge, which is `sideUV` doing what
+   * `plate` does in reverse. Bigger bays than a wall panel, sawn joints with no
+   * shadow beside them, no fixings, and a fine speckle — between them the four
+   * things that say "you are looking down at this" rather than across at it.
+   */
+  slab: {
+    base: { paint: paintSlab, as: 'slab' },
+    sideUV: [0.25, 0.25],
+    tile: 6, roughness: 0.96, metalness: 0.0,
+  },
+  /**
+   * Painted structural steel: the Line's masts, portals, rail and kerbs.
+   *
+   * No cap and no side pinning — a beam is seen from underneath as often as
+   * from the side, and the underside of a beam has the same flanges on it.
+   */
+  girder: {
+    base: { paint: paintGirder, as: 'girder' },
+    tile: 2.4, roughness: 0.88, metalness: 0.0,
   },
   /**
    * The same, still glowing. A lamp, a painted canopy, a padded wall and a
@@ -773,6 +882,7 @@ export function boxFor(
   const name = SURFACES[surface] ? surface : DEFAULT_SURFACE;
   const tile = SURFACES[name].tile;
   const cap = SURFACES[name].capUV;
+  const side = SURFACES[name].sideUV;
   // Quantised, so the hundreds of brushes that share a size share a geometry.
   const q = (v: number) => Math.round(Math.abs(v) * 4) / 4;
   const key = `${name}|${q(sx)}|${q(sy)}|${q(sz)}`;
@@ -792,6 +902,10 @@ export function boxFor(
     // its cladding belongs on the uprights only.
     if (cap && (f === 2 || f === 3)) {
       for (let i = f * 4; i < f * 4 + 4; i++) uv.setXY(i, cap[0], cap[1]);
+      continue;
+    }
+    if (side && f !== 2 && f !== 3) {
+      for (let i = f * 4; i < f * 4 + 4; i++) uv.setXY(i, side[0], side[1]);
       continue;
     }
     const [u, v] = spans[f];
