@@ -31,21 +31,25 @@ export interface Carrier {
 }
 
 /** Half-extents of a carrier's body. */
-const HALF_W = 3.2;
+const HALF_W = 2.6;
 const HALF_H = 1.0;
 const HALF_L = 4.5;
 /**
- * How far the carrier's TOP hangs below the rail.
+ * Half the rail's section.
  *
- * The rail is 11 m over the deck and this puts the ridable surface at 4.6, with
- * 2.6 m of clear air under the box — over a standing player's head, so the deck
- * stays a road you can run down rather than a tunnel with a train in it.
+ * The strut stops at the rail's UNDERSIDE rather than reaching its centreline,
+ * because the cross beam at every frame now sits in the rail's own band instead
+ * of above it. Level tops are what the rail needed — a beam standing proud of
+ * it is a bump on the surface the cargo runs along — and the room the strut
+ * used to have above the rail is the room that went away with it.
  */
-const HANG = 6.4;
+const RAIL_HALF = 0.45;
 
 export class Carriers {
   private group = new THREE.Group();
   private meshes: THREE.Mesh[] = [];
+  /** The hangers, kept separately: their length follows the tuning live. */
+  private struts: THREE.Mesh[] = [];
   /** The path, flattened into segments with running distances. */
   private segs: { ax: number; ay: number; az: number; dx: number; dy: number; dz: number; len: number }[] = [];
   private total = 0;
@@ -65,8 +69,10 @@ export class Carriers {
     for (const m of this.meshes) {
       this.group.remove(m);
       m.geometry.dispose();
+      for (const s of m.children) (s as THREE.Mesh).geometry.dispose();
     }
     this.meshes = [];
+    this.struts = [];
     this.segs = [];
     this.at = [];
     this.carriers.length = 0;
@@ -89,7 +95,9 @@ export class Carriers {
     const n = Math.max(1, Math.round(this.total / T.line.spacing));
     const geo = new THREE.BoxGeometry(HALF_W * 2, HALF_H * 2, HALF_L * 2);
     const mat = new THREE.MeshStandardMaterial({ color: 0x99a2b0, roughness: 0.9, metalness: 0.05 });
-    const strut = new THREE.BoxGeometry(0.8, HANG - HALF_H * 2, 0.8);
+    // A unit box: how long a hanger is depends on the tuning, so the length
+    // lives in the scale and not in the geometry.
+    const strut = new THREE.BoxGeometry(0.8, 1, 0.8);
     for (let i = 0; i < n; i++) {
       this.at.push((i / n) * this.total);
       this.carriers.push({ x: 0, y: 0, z: 0, dx: 0, dy: 0, dz: 0 });
@@ -99,8 +107,8 @@ export class Carriers {
       // The hanger, so a box is held up by something rather than floating under
       // a beam it has no connection to.
       const s = new THREE.Mesh(strut, mat);
-      s.position.y = HALF_H + (HANG - HALF_H * 2) / 2;
       m.add(s);
+      this.struts.push(s);
       this.group.add(m);
       this.meshes.push(m);
     }
@@ -122,16 +130,23 @@ export class Carriers {
   }
 
   private place(dt: number) {
+    // Read live rather than at rebuild, so dragging the slider moves the cargo
+    // instead of waiting for the next level load.
+    const hang = T.line.hang;
+    const drop = Math.max(0.2, hang - HALF_H * 2 - RAIL_HALF);
     for (let i = 0; i < this.carriers.length; i++) {
       const p = this.sample(this.at[i]);
       const c = this.carriers[i];
-      const y = p.y - HANG + HALF_H;
+      const y = p.y - hang + HALF_H;
       c.dx = dt ? p.x - c.x : 0;
       c.dy = dt ? y - c.y : 0;
       c.dz = dt ? p.z - c.z : 0;
       c.x = p.x; c.y = y; c.z = p.z;
       const m = this.meshes[i];
       m.position.set(c.x, c.y, c.z);
+      const s = this.struts[i];
+      s.scale.y = drop;
+      s.position.y = HALF_H + drop / 2;
       // Turned to face the way it is going, in quarter turns — the circuit is
       // axis-aligned, so anything smoother than this is a rotation nobody can
       // see costing a trig call per carrier per frame.

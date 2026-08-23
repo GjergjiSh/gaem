@@ -1015,6 +1015,32 @@ head('the Line is a CIRCUIT: no ends, and nothing to fall off');
   check(railHole === 0, `and so is the rail above it (${railHole} holes)`);
   check(low.y >= 16, `nothing on the circuit drops to head height (${low.y.toFixed(0)} m)`);
 
+  // --- and it stands on piers, which is a thing to measure now that a span no
+  // longer carries a frame of its own. A girder that runs past its bend into
+  // the next girder holds the deck up as far as `rule 1` can tell, and it is
+  // right that it does — that is what a girder is — but a chain of them that
+  // never reached a column would satisfy the same test. So the spacing is the
+  // check: pier to pier, all the way round and down every chord, and nothing
+  // over 78 m. That is also the number that keeps the columns SPARSE, which is
+  // the other half of why they are placed rather than fallen out of the profile.
+  {
+    let worst = { gap: 0, where: '' };
+    for (const leg of A.LINE_LEGS) {
+      const on = A.LINE_PIERS
+        .filter((p) => (leg.axis === 'z' ? near(p.x, leg.at) : near(p.z, leg.at)))
+        .map((p) => (leg.axis === 'z' ? p.z : p.x))
+        .sort((a, b) => a - b);
+      const marks = [leg.nodes[0][0], ...on, leg.nodes[leg.nodes.length - 1][0]];
+      for (let i = 1; i < marks.length; i++) {
+        const gap = marks[i] - marks[i - 1];
+        if (gap > worst.gap) worst = { gap, where: `${leg.name} at ${marks[i - 1].toFixed(0)}` };
+      }
+    }
+    note(`${A.LINE_PIERS.length} piers carry the whole Line, junctions included`);
+    check(worst.gap <= 78, `no stretch of it spans more than 78 m between piers `
+      + `(${worst.gap.toFixed(0)} m, ${worst.where})`);
+  }
+
   // --- the chords leave the loop and rejoin it, so they get the same walk.
   let spurHole = 0, spurRail = 0;
   for (const leg of A.LINE_LEGS) {
