@@ -3565,3 +3565,55 @@ under it is a beam the strut ploughs through at every portal on the circuit. The
 posts now carry past the rail and the beam sits on top, which is how a gantry is
 built anyway.
 
+*(Both of those moved again in §44, for the reasons §44 is about.)*
+
+## 44. A hundred columns, and where they came from
+
+The Line's frames were placed by a rule that sounds reasonable and is not: one
+frame per span of deck. Every span got what it needed, nothing floated, and the
+district ended up with **a hundred columns** standing in it — a forest you could
+not see across, in exactly the streets this level is about running down.
+
+The number came from somewhere specific. The deck is cut into a span at every
+node of its height profile, because a ramp is straight and a profile is not, and
+the profile has eleven nodes: two flat shelves, two pitches, and the grades
+between them. So the columns fell out of the *shape of the road* rather than
+being placed. Three of them bunched into forty metres around a pitch — not
+because anything needed holding up there, but because that is where the road
+changed its mind three times.
+
+### The fix is the thing a bridge already is
+
+A girder under the deck, running the length of the span and lapping past the
+bend into the next span's, and the same lap on the rail overhead. Then the road
+between two columns is carried by a beam instead of by more columns, which is
+what a girder is for and what every elevated road does.
+
+With that in place the columns can be *placed*: sixty metres apart, and clear of
+the junctions, which stand on four of their own. **A hundred columns became
+fifty-two**, and the ones left are where a column should go.
+
+### The guardrail had to move with it
+
+`rule 1: nothing floats` asks whether each brush has something under it. A
+girder that laps its neighbour satisfies that by resting on the neighbour — and
+that is *correct*, it genuinely is held — but a chain of them that never reached
+a column would satisfy it too. So the thing "one frame per span" used to imply
+is now stated outright: **pier to pier, all the way round and down every chord,
+and nothing over 78 m**. `LINE_PIERS` is exported for it, so the verifier
+measures where the columns actually went and not where they were meant to.
+
+### And the rail stopped having a step in it
+
+The cross beam sat *above* the rail (§43) so the cargo strut could clear it,
+which left a beam standing proud of the rail at every frame — a bump on the one
+surface the cargo runs along, and the cargo runs along all of it. It now sits in
+the rail's own band: same 0.9 m section, same top plane, so the rail passes
+*through* the beam rather than under it, and the posts stop flush with both. The
+strut gave up the room it had above the rail and ends at the underside instead,
+which is where a hanger should end anyway.
+
+The rail went to fourteen metres over the deck, and the cargo rides higher and
+narrower under it — 5.2 m across, floor 8.2 m above the road. `line/hang` is on
+the tuning panel and reads live, so that height is a slider now and not a commit.
+

@@ -2312,22 +2312,40 @@ box([ladderX - LADDER_LEN / 2 + 0.6, LADDER_TOP + 1.2, YARD_Z], [1.2, 2.4, SLOT 
 // returns you to where you started. Climb eastward along the north, hold 44
 // down the east side, fall westward along the south, hold 20 up the west side.
 //
-// Above the deck, carried on the same portal frames that hold it up, a single
-// beam runs the entire circuit at seven metres — the rail. It goes through
-// every junction on both axes, so it is as closed as the road under it.
+// Above the deck a single beam runs the entire circuit at fourteen metres — the
+// rail. It goes through every junction on both axes, so it is as closed as the
+// road under it.
+//
+// What holds all of that up is PIERS, sixty metres apart, and not a frame under
+// every stretch of road. The difference matters: the profile has eleven nodes
+// in it and the deck is cut into a span at each one, so a frame per span put a
+// hundred columns into a district you are meant to be able to see across. A
+// girder under the deck and a lapped rail over it carry the road from one pier
+// to the next, which is how an elevated road is actually built and why one does
+// not stand in a forest of its own legs.
 
 export const LINE_W = 16;
 const LINE_T = 1.6;
 /**
  * How far the overhead rail rides above the deck.
  *
- * Eleven metres, which is more headroom than a road needs and exactly what this
- * one does: the rail is not a roof, it is the thing the cargo hangs from, and
- * the cargo has to clear the deck with room to run under it.
+ * Fourteen metres, which is far more headroom than a road needs and exactly
+ * what this one does: the rail is not a roof, it is the thing the cargo hangs
+ * from, and the cargo has to clear the deck with room to run under it.
  */
-export const LINE_OVER = 11;
+export const LINE_OVER = 14;
+/** The rail's section. Every beam that meets it shares it, so nothing steps. */
+const RAIL_W = 1.6, RAIL_H = 0.9;
+/** How high a frame's posts reach: the top of the rail, and not past it. */
+const MAST_UP = LINE_OVER + RAIL_H / 2;
+/** How far one span's girder and rail run past a bend into the next one's. */
+const LAP = 1.6;
+/** How far apart the piers stand, and how clear of a junction they keep. */
+const PIER_SPAN = 62, PIER_CLEAR = 26;
 /** Portal legs stand this far either side of the centreline. */
 export const LINE_PY = LINE_W / 2 - 1.2;
+/** Everywhere the Line reaches the ground, so the verifier can measure spans. */
+export const LINE_PIERS: { x: number; z: number }[] = [];
 /** The two long sides run out here, over the pavement between blocks and rim. */
 const LOOP_X = 206;
 /** And the loop's two ends, which are the avenues at z = -35 and z = 101. */
@@ -2465,46 +2483,76 @@ for (const leg of LINE_LEGS) {
       box([kx, mid.y + 0.45, kz], [0.7, 0.9, seg.len], TIER, seg.q, S_STEEL);
     }
 
-    // The rail: ONE beam down the centreline, seven metres up, on the deck's
-    // own slope. One, not one under each edge — a single rail is what a gantry
-    // runs on and what the frames below are shaped to carry.
-    box([mid.x, mid.y + LINE_OVER, mid.z], [1.6, 0.9, seg.len], GANTRY, seg.q, S_STEEL);
-
-    // Portal frames: a leg under each edge of the deck down to the ground, a
-    // beam across under the deck, and the same posts carried up to hold the
-    // rail.
+    // A girder under the deck and the rail over it: both the length of the span
+    // and both running LAP past the bend into the next span's, so the two
+    // overlap rather than meeting on a plane.
     //
-    // The Overpass stood on a single column down the centreline, which was fine
-    // because it ran down a 24 m avenue nothing else used. The chords run down
-    // the 22 m straights that are the only run-up on the map long enough to
-    // reach the hard cap, and a column in the middle of one leaves 7 m of lane
-    // either side — which `verify:level` measures and refused. At the kerb they
-    // leave eleven metres of clear road straight down the middle.
-    const step = 42;
-    const n = Math.max(1, Math.round((hi - lo) / step));
+    // That lap is what lets the piers stand sixty metres apart. A span used to
+    // need a frame of its own because it had nothing else holding it up, and
+    // since the profile bends eleven times a leg, the frames came out wherever
+    // the bends did — three of them bunched into forty metres around a pitch,
+    // and a hundred columns in the district. A girder that runs from pier to
+    // pier carries the road between them instead, which is what a girder is
+    // for, and the columns go where a column should go rather than where the
+    // road happens to change its mind.
+    box([mid.x, mid.y - LINE_T / 2 - 0.8, mid.z], [6, 1.6, seg.len + LAP],
+      GANTRY, seg.q, S_STEEL);
+    // The rail: ONE beam down the centreline, on the deck's own slope. One, not
+    // one under each edge — a single rail is what a gantry runs on and what the
+    // frames below are shaped to carry.
+    box([mid.x, mid.y + LINE_OVER, mid.z], [RAIL_W, RAIL_H, seg.len + LAP],
+      GANTRY, seg.q, S_STEEL);
+  }
+
+  // Piers. A leg under each edge of the deck down to the ground, a cap across
+  // under the deck, and the same posts carried up to the rail.
+  //
+  // The Overpass stood on a single column down the centreline, which was fine
+  // because it ran down a 24 m avenue nothing else used. The chords run down
+  // the 22 m straights that are the only run-up on the map long enough to reach
+  // the hard cap, and a column in the middle of one leaves 7 m of lane either
+  // side — which `verify:level` measures and refused. At the kerb they leave
+  // eleven metres of clear road straight down the middle.
+  //
+  // They keep well clear of the junctions, which stand on four of their own.
+  const blocked = skip
+    .map(([s0, s1]) => [s0 - PIER_CLEAR, s1 + PIER_CLEAR] as [number, number])
+    .sort((p, q) => p[0] - q[0]);
+  const open: [number, number][] = [];
+  let from = a0;
+  for (const [b0, b1] of blocked) {
+    if (b0 > from && from < a1) open.push([from, Math.min(b0, a1)]);
+    from = Math.max(from, b1);
+  }
+  if (from < a1) open.push([from, a1]);
+
+  for (const [o0, o1] of open) {
+    const run = o1 - o0;
+    if (run < 12) continue;
+    const n = Math.max(1, Math.round(run / PIER_SPAN));
     for (let i = 0; i < n; i++) {
-      const at = lo + ((i + 0.5) / n) * (hi - lo);
+      const at = o0 + ((i + 0.5) / n) * run;
       const y = lineY(leg, at);
       const top = y - LINE_T;
       const p = pos(at, 0);
+      LINE_PIERS.push({ x: p.x, z: p.z });
       for (const sgn of [-1, 1]) {
         const [px, pz] = side(p, sgn * LINE_PY);
         box([px, (top - BASE) / 2, pz], [2.4, top + BASE, 2.4], MAST, undefined, S_STEEL);
-        box([px, y + (LINE_OVER + 1.3) / 2, pz], [1.6, LINE_OVER + 1.3, 1.6],
-          MAST, undefined, S_STEEL);
+        box([px, y + MAST_UP / 2, pz], [1.6, MAST_UP, 1.6], MAST, undefined, S_STEEL);
       }
       const across = LINE_PY * 2 + 2.4;
       box([p.x, top - 1.2, p.z],
         leg.axis === 'z' ? [across, 1.6, 2.4] : [2.4, 1.6, across],
         GANTRY, undefined, S_STEEL);
-      // The cross beam the rail hangs FROM, above it rather than under it. That
-      // is not a detail: the cargo hangs off the underside of the rail on a
-      // strut, and a beam crossing under the rail is a beam the strut ploughs
-      // through at every portal on the circuit. Overlapping the rail by 15 cm
-      // rather than touching, because a plane meeting a plane is a hairline and
-      // `verify:level` calls that floating.
-      box([p.x, y + LINE_OVER + 0.8, p.z],
-        leg.axis === 'z' ? [across, 1.0, 1.6] : [1.6, 1.0, across],
+      // The cross beam, in the SAME band as the rail rather than above it.
+      // Above it, it was a step standing proud of the rail at every frame — a
+      // bump on the one surface the cargo runs along, and the cargo runs along
+      // all of it. Level with it, the two tops are one plane, the rail passes
+      // through the beam instead of under it, and the strut hanging off the
+      // rail's underside clears both.
+      box([p.x, y + LINE_OVER, p.z],
+        leg.axis === 'z' ? [across, RAIL_H, RAIL_W] : [RAIL_W, RAIL_H, across],
         GANTRY, undefined, S_STEEL);
     }
   }
@@ -2526,20 +2574,20 @@ for (const j of JUNCTIONS) {
       const px = j.x + sx * LINE_PY;
       const pz = j.z + sz * LINE_PY;
       box([px, (top - BASE) / 2, pz], [2.4, top + BASE, 2.4], MAST, undefined, S_STEEL);
-      box([px, j.y + (LINE_OVER + 1.3) / 2, pz], [1.6, LINE_OVER + 1.3, 1.6],
-        MAST, undefined, S_STEEL);
+      box([px, j.y + MAST_UP / 2, pz], [1.6, MAST_UP, 1.6], MAST, undefined, S_STEEL);
     }
   }
+  LINE_PIERS.push({ x: j.x, z: j.z });
   const across = LINE_PY * 2 + 2.4;
   // The rail carried straight through on both axes — a single beam each way,
   // crossing in the middle. This is the piece that lets whatever runs along the
   // top of the Line turn a corner instead of arriving at one.
-  box([j.x, j.y + LINE_OVER, j.z], [1.6, 0.9, LINE_W], GANTRY, undefined, S_STEEL);
-  box([j.x, j.y + LINE_OVER, j.z], [LINE_W, 0.9, 1.6], GANTRY, undefined, S_STEEL);
+  box([j.x, j.y + LINE_OVER, j.z], [RAIL_W, RAIL_H, LINE_W], GANTRY, undefined, S_STEEL);
+  box([j.x, j.y + LINE_OVER, j.z], [LINE_W, RAIL_H, RAIL_W], GANTRY, undefined, S_STEEL);
   for (const sgn of [-1, 1]) {
     box([j.x, top - 1.2, j.z + sgn * LINE_PY], [across, 1.6, 2.4], GANTRY, undefined, S_STEEL);
     box([j.x + sgn * LINE_PY, top - 1.2, j.z], [2.4, 1.6, across], GANTRY, undefined, S_STEEL);
-    box([j.x, j.y + LINE_OVER + 0.8, j.z + sgn * LINE_PY], [across, 1.0, 1.6],
+    box([j.x, j.y + LINE_OVER, j.z + sgn * LINE_PY], [across, RAIL_H, RAIL_W],
       GANTRY, undefined, S_STEEL);
   }
 }
