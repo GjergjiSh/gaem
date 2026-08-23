@@ -231,41 +231,77 @@ function panes(
 
 /** The glass itself, over whatever the pack put underneath. */
 /**
- * Cladding bands for the white district — see `plate` below.
+ * Precast cladding for the white district — see `plate` below.
  *
- * The first version of this drew a square grid, and a square grid is the one
- * thing it must not be: every wall came out as squared paper, and the floors,
- * which take the same map on their upward face, came out as graph paper you
- * walk on. The reference has nothing like it. What it actually has is
- * ARCHITECTURE — horizontal courses at storey spacing, a heavier line where a
- * band of cladding ends, and long stretches of plain white in between. Lines
- * that run one way and are not evenly spaced.
+ * This map has now been wrong twice, in opposite directions, and both failures
+ * are worth keeping written down because the right answer is not between them.
  *
- * So: horizontals only, at four irregular heights per repeat, and low contrast.
- * Colour multiplies over the base, so anything left at 1.0 comes out exactly
- * the colour the brush asked for and only the courses darken.
+ * First it was a square grid at one metre: graph paper. The reaction to that
+ * was to delete the verticals and keep a stack of horizontals, which was worse
+ * — a wall with only horizontal lines on it is not a building, it is a wall
+ * with lines on it, and having five of them per storey made it busy as well.
+ *
+ * What the reference actually draws is PRECAST PANELS. Large ones: a joint
+ * every four metres or so, running both ways, and almost nothing in between.
+ * The lines are sparse enough to count. What makes them read as construction
+ * rather than as a grid is that the joints are DETAILED where they cross — a
+ * fixing plate and its bolts sit at every intersection, which is exactly where
+ * a real panel is anchored, and it is the one place the eye is given something
+ * to look at.
+ *
+ * So: two joints each way per repeat, a shadow down the low side of each, and
+ * a plate at every crossing. Everything else is left white, because colour
+ * multiplies over this and white means "the colour the brush asked for".
  */
 function paintPlate(ctx: CanvasRenderingContext2D, w: number, h: number) {
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, w, h);
 
-  // Irregular on purpose. Four evenly spaced lines are a grid with the verticals
-  // left off; these are storeys, and storeys are not all the same height.
-  const courses: [number, number][] = [
-    [0.0, 1.0], [0.28, 0.45], [0.5, 0.8], [0.62, 0.35], [0.84, 0.5],
-  ];
-  const thin = Math.max(1, Math.round(h / 512));
+  // Joints at 0, ½ and 1. The wrap is MIRRORED, so the ones on the boundary
+  // meet their own reflection and the panel grid stays square across the seam
+  // instead of doubling up there.
+  const at = [0, 0.5, 1];
+  const line = Math.max(2, Math.round(w / 384));
+  const soffit = line * 3;
 
-  for (const [at, weight] of courses) {
-    const y = Math.round(at * h);
-    // The course itself, and a soffit under it a few texels deep. A line on its
-    // own is a scratch; a line with a shadow beneath it is a panel standing
-    // proud of the one below, which is what the eye is reading when it decides
-    // a wall is made of something.
-    ctx.fillStyle = `rgba(0, 0, 0, ${0.16 * weight})`;
-    ctx.fillRect(0, y, w, thin * 2);
-    ctx.fillStyle = `rgba(0, 0, 0, ${0.05 * weight})`;
-    ctx.fillRect(0, y + thin * 2, w, thin * 5);
+  // The joint itself, then a soft shadow below and to one side of it. A panel
+  // is a slab hung on a frame with a gap behind it, and the gap is the only
+  // reason the joint is visible at all — drawn as a bare line it reads as a
+  // pencil mark, drawn with its shadow it reads as a depth.
+  for (const t of at) {
+    const x = Math.round(t * w);
+    const y = Math.round(t * h);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.055)';
+    ctx.fillRect(x + line, 0, soffit, h);
+    ctx.fillRect(0, y + line, w, soffit);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.20)';
+    ctx.fillRect(x, 0, line, h);
+    ctx.fillRect(0, y, w, line);
+  }
+
+  // And the fixing plate at every crossing: a square of slightly darker panel,
+  // an outline, and four bolts. Small — about a third of a metre at this tile
+  // — so it is a detail you find rather than a pattern you notice.
+  const plate = Math.round(w / 26);
+  const bolt = Math.max(1, Math.round(w / 300));
+  for (const tx of at) {
+    for (const ty of at) {
+      const cx = Math.round(tx * w) + line / 2;
+      const cy = Math.round(ty * h) + line / 2;
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.07)';
+      ctx.fillRect(cx - plate, cy - plate, plate * 2, plate * 2);
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.20)';
+      ctx.lineWidth = Math.max(1, line * 0.5);
+      ctx.strokeRect(cx - plate, cy - plate, plate * 2, plate * 2);
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.32)';
+      for (const bx of [-1, 1]) {
+        for (const by of [-1, 1]) {
+          ctx.beginPath();
+          ctx.arc(cx + bx * plate * 0.58, cy + by * plate * 0.58, bolt, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
   }
 }
 
@@ -335,7 +371,7 @@ export const SURFACES: Record<string, SurfaceDef> = {
    */
   flat: { tile: 1, roughness: 0.9, metalness: 0.05 },
   /**
-   * Clean cladding: white plate with horizontal courses drawn into it.
+   * Clean cladding: white precast panels, jointed and bolted.
    *
    * What `flat` is missing and what the white district needs. An untextured
    * surface gives the eye no scale at all — two walls thirty metres apart in
@@ -348,10 +384,12 @@ export const SURFACES: Record<string, SurfaceDef> = {
    */
   plate: {
     base: { paint: paintPlate, as: 'plate' },
-    // Between the first two courses, where the map is guaranteed blank — see
-    // `courses` in paintPlate. Roofs and soffits come out plain white.
-    capUV: [0.5, 0.16],
-    tile: 12, roughness: 0.93, metalness: 0.0,
+    // The middle of a panel, which paintPlate leaves untouched. Roofs and
+    // soffits come out plain white.
+    capUV: [0.25, 0.25],
+    // Two joints each way over eight metres: a four-metre panel, which is what
+    // the reference's walls are divided into.
+    tile: 8, roughness: 0.93, metalness: 0.0,
   },
   /**
    * The same, still glowing. A lamp, a painted canopy, a padded wall and a
