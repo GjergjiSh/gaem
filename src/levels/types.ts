@@ -80,6 +80,18 @@ export interface Theme {
   fogFar?: number;
   /** Tone-mapping exposure. */
   exposure?: number;
+  /**
+   * The ink line, drawn round everything in screen space — see `engine/ink`.
+   *
+   * `inkWidth` of zero, which is the default, switches the whole pass off and
+   * the level renders straight to the canvas as it always did. Only a level
+   * that asks for a line pays for one.
+   */
+  ink?: number;
+  /** Line width, in drawing-buffer pixels. */
+  inkWidth?: number;
+  /** Metres at which the line begins to fade, and where it is gone. */
+  inkFade?: [number, number];
 }
 
 export interface Level {

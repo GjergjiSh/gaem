@@ -5,6 +5,7 @@ import { currentCap } from '../core/solver';
 import type { CollisionWorld, Intent, Player } from '../core/types';
 import { level } from '../levels';
 import type { Theme } from '../levels/types';
+import { Ink } from './ink';
 import { instance, warm } from './models';
 import { boxFor, DEFAULT_SURFACE, materialFor, useAnisotropy } from './surfaces';
 
@@ -87,6 +88,9 @@ const BASE_THEME: Required<Theme> = {
   fogNear: 130,
   fogFar: 620,
   exposure: 1.15,
+  ink: 0x000000,
+  inkWidth: 0,
+  inkFade: [140, 420],
 };
 
 /**
@@ -188,6 +192,8 @@ export class Renderer {
   edges = false;
   /** The level's theme, filled out. Read every frame by `syncLights`. */
   private theme: Required<Theme> = BASE_THEME;
+  /** The outline pass. Idle unless a theme asks for a line. */
+  private ink = new Ink();
   private levelGroup = new THREE.Group();
   private dome!: THREE.Mesh;
   private sky!: THREE.HemisphereLight;
@@ -361,6 +367,8 @@ export class Renderer {
     fog.near = t.fogNear;
     fog.far = t.fogFar;
     this.renderer.toneMappingExposure = t.exposure;
+    this.ink.configure({ colour: t.ink, width: t.inkWidth, fade: t.inkFade });
+    if (!this.ink.enabled) this.ink.dispose();
     this.syncLights();
   }
 
@@ -563,7 +571,8 @@ export class Renderer {
     // The sky rides with the eye. Position only — turning it with the camera
     // would take the sunset round the sky with you.
     this.dome.position.copy(this.camera.position);
-    this.renderer.render(this.scene, this.camera);
+    if (this.ink.enabled) this.ink.render(this.renderer, this.scene, this.camera);
+    else this.renderer.render(this.scene, this.camera);
   }
 
   resize() {
