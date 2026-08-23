@@ -92,6 +92,7 @@ const BASE_THEME: Required<Theme> = {
   ink: 0x000000,
   inkWidth: 0,
   inkFade: [140, 420],
+  inkCrease: [0.45, 40, 110],
   inkSuper: 2,
   shadowSpan: 320,
   shadowBias: -0.0006,
@@ -377,7 +378,8 @@ export class Renderer {
     this.renderer.toneMapping = t.toneMapping as THREE.ToneMapping;
     this.renderer.toneMappingExposure = t.exposure;
     this.ink.configure({
-      colour: t.ink, width: t.inkWidth, fade: t.inkFade, super: t.inkSuper,
+      colour: t.ink, width: t.inkWidth, fade: t.inkFade,
+      crease: t.inkCrease, super: t.inkSuper,
     });
     if (!this.ink.enabled) this.ink.dispose();
     const shadow = this.sun.shadow;
