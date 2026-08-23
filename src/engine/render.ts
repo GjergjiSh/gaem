@@ -87,10 +87,15 @@ const BASE_THEME: Required<Theme> = {
   fog: SKY.haze,
   fogNear: 130,
   fogFar: 620,
+  toneMapping: THREE.ACESFilmicToneMapping,
   exposure: 1.15,
   ink: 0x000000,
   inkWidth: 0,
   inkFade: [140, 420],
+  inkSuper: 2,
+  shadowSpan: 320,
+  shadowBias: -0.0006,
+  shadowNormalBias: 0.6,
 };
 
 /**
@@ -366,9 +371,24 @@ export class Renderer {
     fog.color.setHex(t.fog);
     fog.near = t.fogNear;
     fog.far = t.fogFar;
+    // Three re-derives a material's program when the renderer's tone mapping
+    // no longer matches the one it was compiled against, so this needs no
+    // invalidation pass of its own.
+    this.renderer.toneMapping = t.toneMapping as THREE.ToneMapping;
     this.renderer.toneMappingExposure = t.exposure;
-    this.ink.configure({ colour: t.ink, width: t.inkWidth, fade: t.inkFade });
+    this.ink.configure({
+      colour: t.ink, width: t.inkWidth, fade: t.inkFade, super: t.inkSuper,
+    });
     if (!this.ink.enabled) this.ink.dispose();
+    const shadow = this.sun.shadow;
+    shadow.camera.left = -t.shadowSpan;
+    shadow.camera.right = t.shadowSpan;
+    shadow.camera.top = t.shadowSpan;
+    shadow.camera.bottom = -t.shadowSpan;
+    shadow.camera.updateProjectionMatrix();
+    shadow.bias = t.shadowBias;
+    shadow.normalBias = t.shadowNormalBias;
+    this.renderer.shadowMap.needsUpdate = true;
     this.syncLights();
   }
 

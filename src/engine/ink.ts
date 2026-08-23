@@ -19,26 +19,26 @@
 // The scene renders into a target that carries a depth texture, and the line is
 // found by looking at that depth alone — no second pass over the geometry, no
 // normal buffer, nothing that scales with how much city there is. What comes
-// out costs the same whether the district has one building or a thousand, which
-// is the property that matters, because the plan for this level is a thousand.
+// out costs the same whether the district has one building or a thousand.
+//
+// ## Supersampling, which is not optional
+//
+// A line found per pixel is a line one pixel wide with nothing in between: it
+// is either on or off, so every diagonal comes out as a staircase, and a
+// staircase is the first thing anyone sees. MSAA cannot help — it antialiases
+// geometry edges inside the scene pass, and the line does not exist yet when
+// that resolves.
+//
+// The fix is to find the line at higher resolution than the screen and average
+// down. The scene renders into a target `SS` times larger on each axis, the
+// edge test runs at every one of those pixels, and each output pixel is the
+// mean of the SS² beneath it. At SS = 2 a diagonal gets four grey levels
+// instead of two, which is the difference between ink and a sawtooth — and the
+// same average antialiases the geometry, so MSAA can come off the target
+// entirely rather than paying for both.
 
 import * as THREE from 'three';
 
-/**
- * How the line is found, in one place because the two tests are easy to
- * confuse and behave nothing like each other.
- *
- * `curvature` is the SECOND derivative of depth across the pixel — z(left) +
- * z(right) - 2·z(here). On any flat surface that is zero no matter how steeply
- * the surface recedes, which is the whole reason to use it: a first-difference
- * test lights up the entire floor in front of you, because a floor seen at a
- * grazing angle has an enormous depth gradient and no edge in it at all. A
- * silhouette, where the depth jumps, spikes.
- *
- * `crease` compares surface normals reconstructed from the same depth, which is
- * what catches the corner where two faces of one box meet — no depth jump
- * there, so curvature says nothing, but the normal turns ninety degrees.
- */
 const FRAG = /* glsl */ `
 precision highp float;
 
@@ -62,11 +62,6 @@ vec3 viewPos(vec2 uv) {
   return v.xyz / v.w;
 }
 
-/** How far away, in metres, along the view axis. */
-float dist(vec2 uv) {
-  return -viewPos(uv).z;
-}
-
 /**
  * The surface normal, from three depth taps.
  *
@@ -81,37 +76,69 @@ vec3 normalAt(vec2 uv) {
   return normalize(cross(dx, dy));
 }
 
-void main() {
-  vec4 col = texture2D(tColor, vUv);
-  vec2 o = texel * width;
-
-  float zc = dist(vUv);
-  float zl = dist(vUv - vec2(o.x, 0.0));
-  float zr = dist(vUv + vec2(o.x, 0.0));
-  float zu = dist(vUv + vec2(0.0, o.y));
-  float zd = dist(vUv - vec2(0.0, o.y));
+/**
+ * How much line belongs at this pixel, from two tests that behave nothing like
+ * each other and are easy to confuse.
+ *
+ * CURVE is the second derivative of depth — z(left) + z(right) - 2·z(here).
+ * On any flat surface that is zero no matter how steeply the surface recedes,
+ * which is the whole reason to use it: a first-difference test lights up the
+ * entire floor in front of you, because a floor at a grazing angle has an
+ * enormous depth gradient and no edge in it at all. A silhouette, where the
+ * depth jumps, spikes.
+ *
+ * CREASE compares surface normals, which is what catches the corner where two
+ * faces of one box meet — no depth jump there, so curvature says nothing, but
+ * the normal turns ninety degrees.
+ */
+float edgeAt(vec2 uv, vec2 o, float z) {
+  float zl = -viewPos(uv - vec2(o.x, 0.0)).z;
+  float zr = -viewPos(uv + vec2(o.x, 0.0)).z;
+  float zu = -viewPos(uv + vec2(0.0, o.y)).z;
+  float zd = -viewPos(uv - vec2(0.0, o.y)).z;
 
   // Scaled by depth, or the line thins out with distance and disappears — a
   // 20 cm step is a strong edge at 5 m and nothing at all at 200 m, and the
   // reference draws both of them.
-  float curve = (abs(zl + zr - 2.0 * zc) + abs(zu + zd - 2.0 * zc)) / max(zc, 1.0);
+  float curve = (abs(zl + zr - 2.0 * z) + abs(zu + zd - 2.0 * z)) / max(z, 1.0);
 
   // Roberts cross on the normals, on the diagonals so one tap set does both
   // axes.
-  vec3 na = normalAt(vUv + vec2(-o.x, -o.y));
-  vec3 nb = normalAt(vUv + vec2(o.x, o.y));
-  vec3 nc = normalAt(vUv + vec2(-o.x, o.y));
-  vec3 nd = normalAt(vUv + vec2(o.x, -o.y));
+  vec3 na = normalAt(uv + vec2(-o.x, -o.y));
+  vec3 nb = normalAt(uv + vec2(o.x, o.y));
+  vec3 nc = normalAt(uv + vec2(-o.x, o.y));
+  vec3 nd = normalAt(uv + vec2(o.x, -o.y));
   float crease = length(nb - na) + length(nd - nc);
 
   float e = max(curve * curveGain, crease * creaseGain);
 
-  // Fade the line out with range. Every window mullion and handrail in a
-  // district is an edge, and at four hundred metres all of them together are a
-  // grey mush that reads as dirt on the screen rather than as a city.
-  e *= 1.0 - smoothstep(fadeNear, fadeFar, zc);
+  // Firm rather than feathered. The reference draws ink, not a soft shadow of
+  // one, so what the edge tests produce is pushed towards on-or-off and left to
+  // the supersample to smooth. Feathering it here instead gives a grey halo
+  // round every object, which reads as blur.
+  e = smoothstep(0.35, 0.95, e);
 
-  gl_FragColor = vec4(mix(col.rgb, lineColor, clamp(e, 0.0, 1.0)), col.a);
+  // Fade with range. Every window mullion and handrail in a district is an
+  // edge, and at four hundred metres all of them together are a grey mush that
+  // reads as dirt on the screen rather than as a city.
+  return e * (1.0 - smoothstep(fadeNear, fadeFar, z));
+}
+
+void main() {
+  vec2 o = texel * width;
+  vec3 sum = vec3(0.0);
+
+  // SS x SS taps across the output pixel, each finding its own line. The
+  // offsets straddle the pixel centre so the mean is unbiased.
+  for (int i = 0; i < SS; i++) {
+    for (int j = 0; j < SS; j++) {
+      vec2 uv = vUv + (vec2(float(i), float(j)) + 0.5 - float(SS) * 0.5) * texel;
+      vec3 col = texture2D(tColor, uv).rgb;
+      float z = -viewPos(uv).z;
+      sum += mix(col, lineColor, clamp(edgeAt(uv, o, z), 0.0, 1.0));
+    }
+  }
+  gl_FragColor = vec4(sum / float(SS * SS), 1.0);
 
   // Tone map and encode HERE, because the scene pass could not.
   //
@@ -137,10 +164,12 @@ void main() {
 
 export interface InkSettings {
   colour: number;
-  /** Line width in pixels. Zero switches the whole pass off. */
+  /** Line width in OUTPUT pixels. Zero switches the whole pass off. */
   width: number;
   /** Metres at which the line starts fading, and where it is gone. */
   fade: [number, number];
+  /** Resolution multiplier on each axis. 1 is off, 2 is four samples a pixel. */
+  super: number;
 }
 
 export class Ink {
@@ -150,12 +179,15 @@ export class Ink {
   private quadCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   private w = 0;
   private h = 0;
+  private ss = 2;
+  private width = 1;
   private on = false;
 
   constructor() {
     this.mat = new THREE.ShaderMaterial({
       vertexShader: VERT,
       fragmentShader: FRAG,
+      defines: { SS: 2 },
       depthTest: false,
       depthWrite: false,
       uniforms: {
@@ -183,47 +215,60 @@ export class Ink {
   /** Take the level's theme. `width` of zero means this level has no line. */
   configure(s: InkSettings) {
     this.on = s.width > 0;
+    const ss = Math.max(1, Math.round(s.super));
+    if (ss !== this.ss) {
+      this.ss = ss;
+      this.mat.defines.SS = ss;
+      this.mat.needsUpdate = true;
+      this.dispose();
+    }
+    this.width = s.width;
     const u = this.mat.uniforms;
     u.lineColor.value.setHex(s.colour);
-    u.width.value = s.width;
     u.fadeNear.value = s.fade[0];
     u.fadeFar.value = s.fade[1];
   }
 
   /**
-   * Match the drawing buffer.
+   * Match the drawing buffer, times the supersample.
    *
    * In drawing-buffer pixels, not CSS ones: the line is a pixel-space effect
-   * and a target at CSS size on a 2× display draws it at half the resolution
+   * and a target at CSS size on a 2x display draws it at half the resolution
    * of everything it is drawn over, which looks like the line is blurry rather
    * than like the target is small.
    */
-  resize(renderer: THREE.WebGLRenderer) {
+  private fit(renderer: THREE.WebGLRenderer) {
     const size = renderer.getDrawingBufferSize(new THREE.Vector2());
-    if (size.x === this.w && size.y === this.h) return;
-    this.w = size.x;
-    this.h = size.y;
-    this.rt?.dispose();
-    const depth = new THREE.DepthTexture(this.w, this.h);
-    depth.type = THREE.UnsignedIntType;
-    depth.format = THREE.DepthFormat;
-    this.rt = new THREE.WebGLRenderTarget(this.w, this.h, {
-      depthTexture: depth,
-      depthBuffer: true,
-      // The scene still wants its multisampling: the line pass antialiases
-      // nothing, it only draws over what it is given.
-      samples: 4,
-      // Linear and half float: this target holds scene-referred light on its
-      // way to a tone mapper, not a picture. Encoding it to sRGB here would
-      // clip the highlights before the mapper ever sees them, which on a white
-      // city is the entire subject matter.
-      type: THREE.HalfFloatType,
-    });
-    this.mat.uniforms.texel.value.set(1 / this.w, 1 / this.h);
+    const w = Math.floor(size.x * this.ss);
+    const h = Math.floor(size.y * this.ss);
+    if (w !== this.w || h !== this.h) {
+      this.w = w;
+      this.h = h;
+      this.rt?.dispose();
+      const depth = new THREE.DepthTexture(w, h);
+      depth.type = THREE.UnsignedIntType;
+      depth.format = THREE.DepthFormat;
+      this.rt = new THREE.WebGLRenderTarget(w, h, {
+        depthTexture: depth,
+        depthBuffer: true,
+        // No MSAA on top of the supersample. Four samples a pixel already
+        // antialias the geometry, and multisampling a target this size is
+        // memory spent twice for the second half of an effect already paid for.
+        samples: this.ss > 1 ? 0 : 4,
+        // Linear and half float: this target holds scene-referred light on its
+        // way to a tone mapper, not a picture. Encoding it to sRGB here would
+        // clip the highlights before the mapper ever sees them, which on a
+        // white city is the entire subject matter.
+        type: THREE.HalfFloatType,
+      });
+      this.mat.uniforms.texel.value.set(1 / w, 1 / h);
+    }
+    // Width is authored in output pixels; the buffer is `ss` times finer.
+    this.mat.uniforms.width.value = this.width * this.ss;
   }
 
   render(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera) {
-    this.resize(renderer);
+    this.fit(renderer);
     if (!this.rt) return;
     renderer.setRenderTarget(this.rt);
     renderer.clear();

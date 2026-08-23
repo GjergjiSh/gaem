@@ -2975,7 +2975,7 @@ const CYBER_MASS = 0xf4f2ee;
  * wall, which is a dark one. Same brushes, same places, opposite end of the
  * value range, and the district keeps every band it was drawn with.
  */
-const CYBER_TRIM = 0x2b2f36;
+const CYBER_TRIM = 0x1a1d22;
 /** And the accent. It is the only colour in the level and it stays that way. */
 const CYBER_RED = 0xe2231a;
 
@@ -3003,25 +3003,48 @@ export const CYBER_THEME: Theme = {
   horizon: 0x9fc4ea,
   ember: 0x9fc4ea,
   sun: 0xfff6e8,
-  sunPos: [180, 300, 140],
-  sunScale: 1.15,
-  // Overhead, so the dome's warm lobe sits around the sun instead of on the
-  // skyline. At noon there is no sunset to put there.
-  glow: [0.5, 0.83, 0.39],
+  // Forty-three degrees up, which is where the reference's sun is: high enough
+  // that every face gets some, low enough that a building throws a shadow about
+  // its own length. Straight overhead was the first try and it was wrong —
+  // shadows hid under the things casting them and the district went flat.
+  sunPos: [200, 230, 150],
+  sunScale: 1.55,
+  // At the sun rather than on the skyline. There is no sunset at noon.
+  glow: [0.59, 0.68, 0.44],
   sky: 0xbcd4f0,
-  ground: 0x6b7280,
-  skyScale: 0.68,
+  ground: 0x8b93a0,
+  // Ambient is kept LOW on purpose, and it is most of what makes this style
+  // work. A white city under a generous sky has no shadow in it: every face
+  // reads within a few percent of every other and the whole district turns into
+  // one bright shape. Starving the fill is what puts a mid-grey on the shaded
+  // side of a white wall, which is exactly what the reference does.
+  skyScale: 0.26,
   fill: 0xa8c0e0,
-  fillScale: 0.4,
+  fillScale: 0.08,
   fog: 0xdfe8f2,
   fogNear: 260,
   fogFar: 1400,
+  // None. See `Theme.toneMapping` — ACES is a photographic curve and this is
+  // not a photograph. Under it the whole district sat at three quarters
+  // contrast, which reads as haze and is actually the roll-off.
+  toneMapping: 0,
   exposure: 1.0,
   // The line. Everything else here is colour; this is the thing that makes a
   // white wall in front of a white wall read as two walls.
   ink: 0x0d1014,
-  inkWidth: 1.15,
-  inkFade: [150, 460],
+  inkWidth: 1.3,
+  inkFade: [180, 520],
+  inkSuper: 2,
+  // The district is 430 x 364, so a 480 m square holds it with room for the
+  // near skyline. Two thirds of the default span over the same 4096 texels is
+  // a shadow edge a third sharper, and this style has nowhere to hide a soft
+  // one.
+  shadowSpan: 240,
+  shadowBias: -0.0004,
+  // Low, because the frustum is tight enough not to need the old one. A large
+  // normal bias is what detaches a shadow from the thing casting it, and a box
+  // floating over its own shadow is worse than a little acne.
+  shadowNormalBias: 0.22,
 };
 
 // --- the lap -----------------------------------------------------------------

@@ -78,6 +78,19 @@ export interface Theme {
   fog?: number;
   fogNear?: number;
   fogFar?: number;
+  /**
+   * Which tone mapping curve, as a `THREE.ToneMapping` constant.
+   *
+   * Dusk wants ACES: it is a photographic curve, it rolls the highlights off
+   * and lifts the blacks, and a district lit by a warm low sun reads as a
+   * photograph of one. A flat white graphic city does not — the same roll-off
+   * takes the top off every lit face and the floor out of every shadow, and
+   * the result is the whole map at three quarters contrast, which looks like
+   * haze and is actually the curve. Zero is `NoToneMapping`: what the lights
+   * computed is what gets drawn, whites clip where they are meant to, and the
+   * shadows keep their floor.
+   */
+  toneMapping?: number;
   /** Tone-mapping exposure. */
   exposure?: number;
   /**
@@ -92,6 +105,23 @@ export interface Theme {
   inkWidth?: number;
   /** Metres at which the line begins to fade, and where it is gone. */
   inkFade?: [number, number];
+  /**
+   * Supersample for the ink pass: the scene renders this many times larger on
+   * each axis and is averaged down. 1 is off; 2 costs four times the fill and
+   * is the difference between a line and a staircase.
+   */
+  inkSuper?: number;
+  /**
+   * Half-width of the sun's shadow frustum, in metres.
+   *
+   * The map is baked once, so this buys sharpness rather than frame time: the
+   * same 4096 texels over a smaller square is a smaller texel. It has to hold
+   * every caster whose shadow lands in the district, so shrinking it past the
+   * skyline trades far shadows for near ones.
+   */
+  shadowSpan?: number;
+  shadowBias?: number;
+  shadowNormalBias?: number;
 }
 
 export interface Level {
