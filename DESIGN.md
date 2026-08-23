@@ -3617,3 +3617,54 @@ The rail went to fourteen metres over the deck, and the cargo rides higher and
 narrower under it — 5.2 m across, floor 8.2 m above the road. `line/hang` is on
 the tuning panel and reads live, so that height is a slider now and not a commit.
 
+## 45. A second art direction, and the machinery to have one
+
+The brief is a reference: white industrial masses, one red accent, deep blue
+sky, black linework. Ashgate is a greybox in dusk. Getting from one to the other
+is mostly *not* geometry — it is palette, key light, sky, and line — and the
+first thing that needed building was somewhere to put that.
+
+### Themes, because a second look must not cost a second generator
+
+A level now carries an optional `Theme`: the dome's three colours, the key's
+colour and bearing, the two ambients, the haze and the exposure. Everything it
+omits falls back to `BASE_THEME`, which is the dusk look with every number that
+used to be a literal in `render.ts` written down in one place. Nothing about
+that look changed in the move, and that is the contract — **a level with no
+theme gets exactly the district it had**, which is what makes adding a style
+safe for the styles already there.
+
+Two details that are load-bearing:
+
+**Intensities are scales, not values.** `light.sun` is a slider and has to keep
+being one. A theme says *this sky is two thirds the strength of the default*; it
+never says what the default is.
+
+**The dome's glow has its own bearing.** It is tempting to point it at the sun,
+and that is wrong: at dusk the warm lobe belongs *on* the horizon while the key
+still has to come from high enough to cast a usable shadow. Deriving one from
+the other lifts the sunset off the skyline. At noon they coincide, so cyberedge
+sets them to the same vector and dusk keeps its own.
+
+### `cyberedge`, which is raw plus a palette and nothing else
+
+A third level, not a flag on the second. `ashgate-raw` is the greybox everything
+is judged against, and an art pass is precisely the thing that must never be
+able to move it — so the two are derived from the same brush list one line
+apart and `verify:level:cyber` runs the whole suite against the new one. The day
+it fails a check raw passes, the art has moved the district.
+
+The palette is three values:
+
+- **Off-white** for every mass. Not white: pure white has nowhere to go when the
+  key lands on it, every sunlit face clips to the same flat maximum, and the
+  building loses the four values that were telling you it was a box.
+- **Charcoal** for the strips that were illumination in the greybox. On a grey
+  district a white band reads as a light; on a white one it is invisible. It
+  becomes the other thing this style uses to break up a white wall — a dark one
+  — in the same places, at the opposite end of the value range.
+- **Red**, unchanged in meaning and now the only colour in the level.
+
+And nothing glows. `flatLit` at noon does not read as a light, it reads as a
+material with a bug in it, so cyberedge is `flat` throughout and lets the sun do
+the work.

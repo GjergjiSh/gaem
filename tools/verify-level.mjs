@@ -47,8 +47,16 @@ const load = (rel) => import(pathToFileURL(path.join(OUT, rel)).href);
 // fails on the other is a place where the art is load-bearing, which is the one
 // thing it is never allowed to be.
 const NS = await load('levels/ashgate.js');
-const A = process.env.LEVEL === 'raw'
-  ? { ...NS, brushes: NS.brushesRaw, RAMP_BRUSHES: NS.RAMP_BRUSHES_RAW }
+// `LEVEL=cyber` is the art-directed one. It is a recolour of raw and nothing
+// else, so it has to pass every check raw passes — the day it does not, the art
+// pass has moved the district, which is the one thing it is not allowed to do.
+const VARIANTS = {
+  raw: { brushes: 'brushesRaw', ramps: 'RAMP_BRUSHES_RAW' },
+  cyber: { brushes: 'brushesCyber', ramps: 'RAMP_BRUSHES_CYBER' },
+};
+const VAR = VARIANTS[process.env.LEVEL];
+const A = VAR
+  ? { ...NS, brushes: NS[VAR.brushes], RAMP_BRUSHES: NS[VAR.ramps] }
   : NS;
 if (process.env.LEVEL === 'raw') console.log('  (ashgate-raw: no models)');
 const P = await load('engine/physics.js');
