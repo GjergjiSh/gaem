@@ -281,10 +281,10 @@ function paintPlate(ctx: CanvasRenderingContext2D, w: number, h: number) {
   for (const t of at) {
     const x = Math.round(t * w);
     const y = Math.round(t * h);
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.055)';
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.14)';
     ctx.fillRect(x + line, 0, soffit, h);
     ctx.fillRect(0, y + line, w, soffit);
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.20)';
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.34)';
     ctx.fillRect(x, 0, line, h);
     ctx.fillRect(0, y, w, line);
   }
@@ -292,18 +292,21 @@ function paintPlate(ctx: CanvasRenderingContext2D, w: number, h: number) {
   // And the fixing plate at every crossing: a square of slightly darker panel,
   // an outline, and four bolts. Small — about a third of a metre at this tile
   // — so it is a detail you find rather than a pattern you notice.
-  const plate = Math.round(w / 26);
-  const bolt = Math.max(1, Math.round(w / 300));
+  // Roughly 60 cm across at this tile, and it has to be reckoned that way: the
+  // plate is a real object of a real size, so when the panel grid got coarser
+  // the plate had to get smaller on the sheet to stay the same thing on a wall.
+  const plate = Math.max(4, Math.round(w / 74));
+  const bolt = Math.max(1, Math.round(w / 420));
   for (const tx of at) {
     for (const ty of at) {
       const cx = Math.round(tx * w) + line / 2;
       const cy = Math.round(ty * h) + line / 2;
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.07)';
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.16)';
       ctx.fillRect(cx - plate, cy - plate, plate * 2, plate * 2);
-      ctx.strokeStyle = 'rgba(0, 0, 0, 0.20)';
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.42)';
       ctx.lineWidth = Math.max(1, line * 0.5);
       ctx.strokeRect(cx - plate, cy - plate, plate * 2, plate * 2);
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.32)';
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
       for (const bx of [-1, 1]) {
         for (const by of [-1, 1]) {
           ctx.beginPath();
@@ -337,7 +340,7 @@ function paintSlab(ctx: CanvasRenderingContext2D, w: number, h: number) {
   let seed = 0x2f6e2b1;
   const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
   for (let i = 0; i < 9000; i++) {
-    const a = 0.02 + rnd() * 0.05;
+    const a = 0.04 + rnd() * 0.10;
     ctx.fillStyle = `rgba(0, 0, 0, ${a})`;
     ctx.fillRect(rnd() * w, rnd() * h, 1 + rnd() * 2, 1 + rnd() * 2);
   }
@@ -345,7 +348,7 @@ function paintSlab(ctx: CanvasRenderingContext2D, w: number, h: number) {
   // Sawn joints, no shadow. A cut in a slab is a groove a few millimetres wide
   // and the light gets into it; a gap behind a hung panel does not.
   const line = Math.max(2, Math.round(w / 420));
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.13)';
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.34)';
   for (const t of [0, 0.5, 1]) {
     ctx.fillRect(Math.round(t * w), 0, line, h);
     ctx.fillRect(0, Math.round(t * h), w, line);
@@ -371,15 +374,15 @@ function paintGirder(ctx: CanvasRenderingContext2D, w: number, h: number) {
   const line = Math.max(2, Math.round(w / 380));
   // Flanges: a line in from each edge, with the web shaded very slightly
   // between them so the section reads as an I and not as a stripe.
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.035)';
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.09)';
   ctx.fillRect(w * 0.14, 0, w * 0.72, h);
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.17)';
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.38)';
   for (const t of [0.14, 0.86]) ctx.fillRect(Math.round(t * w), 0, line, h);
 
   // Bolt rows down both flanges, and a splice plate every half repeat where two
   // lengths of section would actually be joined.
   const bolt = Math.max(1, Math.round(w / 340));
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.30)';
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.52)';
   for (const t of [0.14, 0.86]) {
     for (let i = 0; i < 12; i++) {
       ctx.beginPath();
@@ -387,8 +390,46 @@ function paintGirder(ctx: CanvasRenderingContext2D, w: number, h: number) {
       ctx.fill();
     }
   }
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.10)';
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.24)';
   for (const t of [0, 0.5, 1]) ctx.fillRect(0, Math.round(t * h) - line, w, line * 2);
+}
+
+/**
+ * Corrugated container sides — see `crate` below.
+ *
+ * The clutter has to be its own material or it is a white box on a white roof.
+ * In the reference the boxes standing about the place are the one thing that is
+ * NOT flat: they are pressed steel, ribbed top to bottom at about a third of a
+ * metre, with a rail across the head and the foot. Nothing else in the district
+ * has vertical detail at that pitch, so a container reads as a container from
+ * any distance at which it is more than a few pixels.
+ */
+function paintCrate(ctx: CanvasRenderingContext2D, w: number, h: number) {
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, w, h);
+
+  // Ribs. Each is a dark side and a light side, because a corrugation is a
+  // fold and a fold has one face towards the sun and one away — drawn as plain
+  // stripes it reads as paint rather than as pressed metal.
+  const ribs = 8;
+  const pitch = w / ribs;
+  for (let i = 0; i < ribs; i++) {
+    const x = i * pitch;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.26)';
+    ctx.fillRect(Math.round(x), 0, Math.max(1, pitch * 0.16), h);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.09)';
+    ctx.fillRect(Math.round(x + pitch * 0.16), 0, Math.max(1, pitch * 0.2), h);
+  }
+
+  // Head and foot rails, which are the flat bands a container is picked up by
+  // and the thing that stops the ribs reading as a barcode.
+  const rail = Math.round(h * 0.12);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, w, rail);
+  ctx.fillRect(0, h - rail, w, rail);
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.34)';
+  ctx.fillRect(0, rail, w, Math.max(2, h / 300));
+  ctx.fillRect(0, h - rail - Math.max(2, h / 300), w, Math.max(2, h / 300));
 }
 
 function paintGlass(ctx: CanvasRenderingContext2D, w: number, h: number) {
@@ -473,9 +514,12 @@ export const SURFACES: Record<string, SurfaceDef> = {
     // The middle of a panel, which paintPlate leaves untouched. Roofs and
     // soffits come out plain white.
     capUV: [0.25, 0.25],
-    // Two joints each way over eight metres: a four-metre panel, which is what
-    // the reference's walls are divided into.
-    tile: 8, roughness: 0.93, metalness: 0.0,
+    // Two joints each way over twenty-two metres. Counting them on the
+    // reference is the whole design note: a building face there carries two or
+    // three lines, not a dozen, and every earlier version of this map answered
+    // "it looks like graph paper" by changing what the lines looked like when
+    // the problem was how many of them there were.
+    tile: 22, roughness: 0.93, metalness: 0.0,
   },
   /**
    * The ground: roads, pavements, yards and every deck you run along.
@@ -488,7 +532,7 @@ export const SURFACES: Record<string, SurfaceDef> = {
   slab: {
     base: { paint: paintSlab, as: 'slab' },
     sideUV: [0.25, 0.25],
-    tile: 6, roughness: 0.96, metalness: 0.0,
+    tile: 9, roughness: 0.96, metalness: 0.0,
   },
   /**
    * Painted structural steel: the Line's masts, portals, rail and kerbs.
@@ -499,6 +543,18 @@ export const SURFACES: Record<string, SurfaceDef> = {
   girder: {
     base: { paint: paintGirder, as: 'girder' },
     tile: 2.4, roughness: 0.88, metalness: 0.0,
+  },
+  /**
+   * Containers and the rest of the clutter: pressed steel, ribbed vertically.
+   *
+   * Nothing else in the district has detail at this pitch, so a box standing on
+   * a roof reads as a box rather than as part of the roof — which is the whole
+   * job. Its ribs run top to bottom whichever way it is turned, so it takes no
+   * cap: the lid of a container is ribbed too.
+   */
+  ribbed: {
+    base: { paint: paintCrate, as: 'ribbed' },
+    tile: 2.6, roughness: 0.9, metalness: 0.0,
   },
   /**
    * The same, still glowing. A lamp, a painted canopy, a padded wall and a
