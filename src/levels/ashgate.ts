@@ -123,7 +123,7 @@
 // interesting than a reload, and it is the reason the ground floor is a real
 // floor with real furniture on it.
 
-import type { Brush, Trigger } from './types';
+import type { Brush, Theme, Trigger } from './types';
 import { axisAngle, orient, qmul, type Q } from './geom';
 import { SCIFI, sciBox, sciBrush } from './scifi';
 import { CITY, cityBox, cityBrush } from './city';
@@ -2947,6 +2947,77 @@ export const brushesRaw: Brush[] = (() => {
   for (const b of RAW_ONLY) keep(bare(b));
   return out;
 })();
+
+// --- cyberedge ---------------------------------------------------------------
+// The same district a third time, in the art direction: off-white masses, a
+// single red accent, a hard midday sun and a deep blue sky.
+//
+// A separate level rather than a switch on the raw one, because `ashgate-raw`
+// is the greybox everything else is judged against and an art pass is precisely
+// the thing that must never be able to move it. The two derive from the same
+// brush list one line apart, so the massing cannot drift between them — what
+// cyberedge changes is colour, surface, and later what is bolted onto it.
+
+/**
+ * The base the whole district is made of.
+ *
+ * Off-white, not white. Pure white has nowhere left to go when the key lands on
+ * it: every sunlit face clips to the same flat maximum and the building loses
+ * the four values that were telling you it was a box. A few percent of headroom
+ * is the difference between a white city and a white silhouette.
+ */
+const CYBER_MASS = 0xf4f2ee;
+/**
+ * The strips that were illumination in the greybox.
+ *
+ * On a grey district a white band reads as a light. On a white one it is
+ * invisible — so it becomes the other thing this style uses to break up a white
+ * wall, which is a dark one. Same brushes, same places, opposite end of the
+ * value range, and the district keeps every band it was drawn with.
+ */
+const CYBER_TRIM = 0x2b2f36;
+/** And the accent. It is the only colour in the level and it stays that way. */
+const CYBER_RED = 0xe2231a;
+
+/** Ramp indices carry over untouched: this is a recolour, not a re-cut. */
+export const RAMP_BRUSHES_CYBER: number[] = RAMP_BRUSHES_RAW.slice();
+export const brushesCyber: Brush[] = brushesRaw.map((b) => ({
+  ...b,
+  // Nothing glows. This is a daylight level, and an emissive surface at noon
+  // does not read as a light, it reads as a material with a bug in it.
+  t: 'flat',
+  c: b.c === RAW_WHITE ? CYBER_TRIM : b.c === RAW_RED ? CYBER_RED : CYBER_MASS,
+}));
+
+/**
+ * Midday: the key high and nearly white, the dome deep blue, the haze pushed
+ * most of the way out of the district.
+ *
+ * The dusk theme puts the sun low so it rakes across the volumes, which is the
+ * right call when one grey has to do all the work. Here the surfaces carry the
+ * contrast themselves, so the sun can go up top where it belongs and hand back
+ * hard, short shadows with real black in them.
+ */
+export const CYBER_THEME: Theme = {
+  zenith: 0x0a3a86,
+  horizon: 0x9fc4ea,
+  ember: 0x9fc4ea,
+  sun: 0xfff6e8,
+  sunPos: [180, 300, 140],
+  sunScale: 1.15,
+  // Overhead, so the dome's warm lobe sits around the sun instead of on the
+  // skyline. At noon there is no sunset to put there.
+  glow: [0.5, 0.83, 0.39],
+  sky: 0xbcd4f0,
+  ground: 0x6b7280,
+  skyScale: 0.68,
+  fill: 0xa8c0e0,
+  fillScale: 0.4,
+  fog: 0xdfe8f2,
+  fogNear: 260,
+  fogFar: 1400,
+  exposure: 1.0,
+};
 
 // --- the lap -----------------------------------------------------------------
 // Checkpoints sit on the surface you arrive at, never over a gap: one you have

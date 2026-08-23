@@ -4,6 +4,7 @@ import * as V from '../core/vec';
 import { currentCap } from '../core/solver';
 import type { CollisionWorld, Intent, Player } from '../core/types';
 import { level } from '../levels';
+import type { Theme } from '../levels/types';
 import { instance, warm } from './models';
 import { boxFor, DEFAULT_SURFACE, materialFor, useAnisotropy } from './surfaces';
 
@@ -60,6 +61,33 @@ const SKY = {
    */
   haze: 0x445070,
 } as const;
+
+/**
+ * Dusk, as a theme.
+ *
+ * Every number here was a literal somewhere in this file until a second art
+ * direction needed the first one to stay put. Nothing about it changed in the
+ * move, and that is the whole contract: a level that names no theme gets this,
+ * and gets exactly the district it had.
+ */
+const BASE_THEME: Required<Theme> = {
+  zenith: SKY.zenith,
+  horizon: SKY.horizon,
+  ember: SKY.ember,
+  sun: 0xffd2a1,
+  sunPos: [260, 120, 180],
+  sunScale: 1,
+  glow: [0.62, 0.06, 0.42],
+  sky: 0x8ea6d8,
+  ground: 0x241d20,
+  skyScale: 1,
+  fill: 0x7f9ad6,
+  fillScale: 1,
+  fog: SKY.haze,
+  fogNear: 130,
+  fogFar: 620,
+  exposure: 1.15,
+};
 
 /**
  * A gradient dome, drawn inside everything else.
@@ -158,6 +186,8 @@ export class Renderer {
    * where a collider's corner is.
    */
   edges = false;
+  /** The level's theme, filled out. Read every frame by `syncLights`. */
+  private theme: Required<Theme> = BASE_THEME;
   private levelGroup = new THREE.Group();
   private dome!: THREE.Mesh;
   private sky!: THREE.HemisphereLight;
@@ -294,14 +324,48 @@ export class Renderer {
     }
   }
 
-  /** Lights follow the sliders. Three assignments a frame is not worth an event. */
+  /** Lights follow the sliders, scaled by whatever the level's theme asks for. */
   private syncLights() {
-    this.sky.intensity = T.light.sky;
-    this.sun.intensity = T.light.sun;
-    this.fill.intensity = T.light.fill;
+    const t = this.theme;
+    this.sky.intensity = T.light.sky * t.skyScale;
+    this.sun.intensity = T.light.sun * t.sunScale;
+    this.fill.intensity = T.light.fill * t.fillScale;
+  }
+
+  /**
+   * Put the level's theme on the sky, the lights and the haze.
+   *
+   * Called on every rebuild rather than once at boot, because switching level
+   * is how you compare two art directions and a theme that only applied at
+   * startup would mean a reload to see the other one. Anything the level does
+   * not specify comes from BASE_THEME, so a level with no theme resets the
+   * renderer to exactly the look it had before any of this existed — that is
+   * what makes a second style safe to add to a district that already has one.
+   */
+  private applyTheme() {
+    const t: Required<Theme> = { ...BASE_THEME, ...(level.theme ?? {}) };
+    this.theme = t;
+    const u = (this.dome.material as THREE.ShaderMaterial).uniforms;
+    u.zenith.value.setHex(t.zenith);
+    u.horizon.value.setHex(t.horizon);
+    u.ember.value.setHex(t.ember);
+    this.sun.color.setHex(t.sun);
+    this.sun.position.set(t.sunPos[0], t.sunPos[1], t.sunPos[2]);
+    u.sunDir.value.set(t.glow[0], t.glow[1], t.glow[2]).normalize();
+    this.sky.color.setHex(t.sky);
+    this.sky.groundColor.setHex(t.ground);
+    this.fill.color.setHex(t.fill);
+    (this.scene.background as THREE.Color).setHex(t.fog);
+    const fog = this.scene.fog as THREE.Fog;
+    fog.color.setHex(t.fog);
+    fog.near = t.fogNear;
+    fog.far = t.fogFar;
+    this.renderer.toneMappingExposure = t.exposure;
+    this.syncLights();
   }
 
   buildLevel() {
+    this.applyTheme();
     // Nothing is disposed here any more. Materials and geometries belong to the
     // surface cache and are shared across brushes and across rebuilds — the
     // editor rebuilds the whole level on every edit, and disposing a shared

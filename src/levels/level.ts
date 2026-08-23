@@ -69,6 +69,21 @@ BUILTINS['ashgate-raw'] = () => ({
   enemies: clone(ashgate.enemies),
   rails: clone(ashgate.rails),
 });
+// And once more in the art direction. Same masses, same lap, same collision —
+// the only things that differ from raw are colour, surface and the sky it
+// stands under, which is what makes flying one after the other an honest test
+// of whether the art is doing any work.
+BUILTINS['cyberedge'] = () => ({
+  name: 'cyberedge',
+  brushes: clone(ashgate.brushesCyber),
+  triggers: clone(ashgate.triggers),
+  spawn: { ...ashgate.spawn },
+  spawnYaw: ashgate.spawnYaw,
+  killY: ashgate.killY,
+  enemies: clone(ashgate.enemies),
+  rails: clone(ashgate.rails),
+  theme: clone(ashgate.CYBER_THEME),
+});
 BUILTINS['figure8'] = () => ({
   name: 'figure8',
   brushes: clone(figure8.brushes),
