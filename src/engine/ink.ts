@@ -103,8 +103,27 @@ float edgeAt(vec2 uv, vec2 o, float z) {
   // Scaled by depth, or the line thins out with distance and disappears — a
   // 20 cm step is a strong edge at 5 m and nothing at all at 200 m, and the
   // reference draws both of them.
-  float curve = (abs(zl + zr - 2.0 * z) + abs(zu + zd - 2.0 * z)) / max(z, 1.0);
-  float silhouette = smoothstep(0.4, 1.0, curve * curveGain);
+  // MAX of the two axes, not their sum.
+  //
+  // Summing is the obvious thing and it is why corners came out fat: along a
+  // plain vertical edge only the horizontal term fires, but where two edges
+  // meet both do, the total doubles, and after the threshold the line is twice
+  // as wide for the few pixels around every junction. A district of boxes has
+  // a junction at every corner of every one of them, so the whole map grows
+  // blobs. Taking the larger of the two asks "is there an edge here" instead
+  // of "how many edges", and a corner comes out the same weight as the edges
+  // running into it.
+  float curve = max(abs(zl + zr - 2.0 * z), abs(zu + zd - 2.0 * z)) / max(z, 1.0);
+  // A WIDE band, and this is the thing that decides whether the line looks
+  // drawn or looks like stairs.
+  //
+  // A narrow threshold makes every sub-sample answer yes or no, so a pixel can
+  // only ever be one of SS^2 + 1 shades and a near-horizontal line climbs in
+  // visible steps. Widening it makes each sub-sample return partial coverage
+  // instead, the average comes out continuous, and the same four samples buy a
+  // smooth line rather than a coarse one. Supersampling on its own cannot fix
+  // what the threshold has already quantised.
+  float silhouette = smoothstep(0.2, 1.15, curve * curveGain);
   silhouette *= 1.0 - smoothstep(fadeNear, fadeFar, z);
 
   // Roberts cross on the normals, on the diagonals so one tap set does both
@@ -115,7 +134,7 @@ float edgeAt(vec2 uv, vec2 o, float z) {
   vec3 nb = normalAt(uv + vec2(co.x, co.y));
   vec3 nc = normalAt(uv + vec2(-co.x, co.y));
   vec3 nd = normalAt(uv + vec2(co.x, -co.y));
-  float crease = length(nb - na) + length(nd - nc);
+  float crease = max(length(nb - na), length(nd - nc));
 
   // A crease is NOT ink, and treating it as though it were is what turns a
   // district into a scribble.
@@ -131,7 +150,7 @@ float edgeAt(vec2 uv, vec2 o, float z) {
   // turn across a bevel; a fraction of the weight; and a fade that starts far
   // sooner than the silhouette's. Past that distance a building keeps its
   // outline and loses its panel joints, which is what the eye does anyway.
-  float seam = smoothstep(0.85, 1.5, crease * creaseGain) * creaseWeight;
+  float seam = smoothstep(0.45, 1.6, crease * creaseGain) * creaseWeight;
   seam *= 1.0 - smoothstep(creaseNear, creaseFar, z);
 
   return max(silhouette, seam);
@@ -212,8 +231,11 @@ export class Ink {
         invProjection: { value: new THREE.Matrix4() },
         lineColor: { value: new THREE.Color(0x000000) },
         width: { value: 1 },
-        curveGain: { value: 26 },
-        creaseGain: { value: 0.9 },
+        // Both raised to answer the switch from summing the two axes to taking
+        // the larger: a plain edge is unchanged, but everything that used to
+        // ride on the second term needed the gain back.
+        curveGain: { value: 40 },
+        creaseGain: { value: 1.7 },
         creaseWeight: { value: 0.45 },
         creaseNear: { value: 40 },
         creaseFar: { value: 110 },
