@@ -213,6 +213,70 @@ function panes(
 }
 
 /** The glass itself, over whatever the pack put underneath. */
+/**
+ * Panel seams for the white district — see `plate` below.
+ *
+ * Drawn rather than lifted from a sheet, because there is no sheet: the pack's
+ * trim is grimy industrial metal and this style wants clean plate. It is also
+ * the one map in this file that is almost entirely WHITE, which is the point.
+ * Colour multiplies over the base, so anything left at 1.0 comes out exactly
+ * the colour the brush asked for and only the seams darken — a wall that is
+ * off-white stays off-white and gains joints, instead of being tinted by its
+ * own texture.
+ */
+function paintPlate(ctx: CanvasRenderingContext2D, w: number, h: number) {
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, w, h);
+
+  // Four panels across the repeat. Seams sit ON the tile boundary as well as
+  // inside it, so the line continues across the join instead of a panel coming
+  // out double-width wherever two repeats meet.
+  const n = 4;
+  const px = w / n;
+  const py = h / n;
+  const thin = Math.max(1, Math.round(w / 512));
+
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.13)';
+  ctx.lineWidth = thin;
+  for (let i = 0; i <= n; i++) {
+    const x = Math.round(i * px) + 0.5;
+    const y = Math.round(i * py) + 0.5;
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+  }
+
+  // A second, heavier seam every other panel. Real cladding is not a uniform
+  // grid — it has a bay structure with lighter joints inside it — and one
+  // rhythm at one weight reads as graph paper.
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.22)';
+  ctx.lineWidth = thin * 2;
+  for (let i = 0; i <= n; i += 2) {
+    const x = Math.round(i * px) + 0.5;
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+  }
+
+  // And a shadow under each horizontal joint, a couple of texels deep. A seam
+  // drawn as a single line is a scratch; a seam with a soffit under it is a
+  // panel standing slightly proud of the one below, which is what the eye is
+  // actually reading when it decides a wall is made of something.
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.06)';
+  for (let i = 0; i <= n; i++) {
+    ctx.fillRect(0, Math.round(i * py) + thin, w, thin * 3);
+  }
+
+  // Bolts down the heavy seams. Small enough to vanish by twenty metres, which
+  // is the range at which they stop being detail and start being noise.
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.18)';
+  const r = Math.max(1, w / 400);
+  for (let i = 0; i <= n; i += 2) {
+    for (let j = 0; j < n * 3; j++) {
+      const x = i * px;
+      const y = (j + 0.5) * (h / (n * 3));
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+}
+
 function paintGlass(ctx: CanvasRenderingContext2D, w: number, h: number) {
   panes(w, h, (x, y, pw, ph, lit, r) => {
     // Dark, and slightly blue: glass reflects the sky even when there is
@@ -278,6 +342,21 @@ export const SURFACES: Record<string, SurfaceDef> = {
    * reads it to build UVs for a material that will never sample one.
    */
   flat: { tile: 1, roughness: 0.9, metalness: 0.05 },
+  /**
+   * Clean cladding: white plate with panel joints drawn into it.
+   *
+   * What `flat` is missing and what the white district needs. An untextured
+   * surface gives the eye no scale at all — two walls thirty metres apart in
+   * the same white are the same wall — and in a style whose whole subject is
+   * large white surfaces, that is not a small loss. Four panels to four metres,
+   * a heavier joint every other one, and a soffit shadow under each horizontal
+   * so a panel reads as standing proud of the one below rather than as a line
+   * scratched on a slab.
+   */
+  plate: {
+    base: { paint: paintPlate, as: 'plate' },
+    tile: 4, roughness: 0.93, metalness: 0.0,
+  },
   /**
    * The same, still glowing. A lamp, a painted canopy, a padded wall and a
    * marked floor carry this map's colour language — amber is something to

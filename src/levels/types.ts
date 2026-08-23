@@ -106,6 +106,15 @@ export interface Theme {
   /** Metres at which the line begins to fade, and where it is gone. */
   inkFade?: [number, number];
   /**
+   * The seam a crease draws, as [weight, fade from, fade to] in metres.
+   *
+   * Deliberately not the same line as the silhouette. Weighting them equally
+   * puts full black on all twelve edges of every box in the district, and a
+   * box at fifty metres has the same twelve, so the middle distance fills with
+   * line until the shapes stop reading.
+   */
+  inkCrease?: [number, number, number];
+  /**
    * Supersample for the ink pass: the scene renders this many times larger on
    * each axis and is averaged down. 1 is off; 2 costs four times the fill and
    * is the difference between a line and a staircase.

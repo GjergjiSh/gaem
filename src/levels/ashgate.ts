@@ -2983,9 +2983,10 @@ const CYBER_RED = 0xe2231a;
 export const RAMP_BRUSHES_CYBER: number[] = RAMP_BRUSHES_RAW.slice();
 export const brushesCyber: Brush[] = brushesRaw.map((b) => ({
   ...b,
-  // Nothing glows. This is a daylight level, and an emissive surface at noon
-  // does not read as a light, it reads as a material with a bug in it.
-  t: 'flat',
+  // Panel joints, and nothing that glows: this is a daylight level, and an
+  // emissive surface at noon does not read as a light, it reads as a material
+  // with a bug in it.
+  t: 'plate',
   c: b.c === RAW_WHITE ? CYBER_TRIM : b.c === RAW_RED ? CYBER_RED : CYBER_MASS,
 }));
 
@@ -3032,8 +3033,12 @@ export const CYBER_THEME: Theme = {
   // The line. Everything else here is colour; this is the thing that makes a
   // white wall in front of a white wall read as two walls.
   ink: 0x0d1014,
-  inkWidth: 1.3,
-  inkFade: [180, 520],
+  inkWidth: 0.9,
+  inkFade: [200, 560],
+  // Seams at 40% and gone by ninety metres. A building keeps its outline the
+  // whole way across the district and loses its panel joints at the range the
+  // eye loses them anyway.
+  inkCrease: [0.6, 60, 170],
   inkSuper: 2,
   // The district is 430 x 364, so a 480 m square holds it with room for the
   // near skyline. Two thirds of the default span over the same 4096 texels is

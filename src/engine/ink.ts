@@ -50,6 +50,9 @@ uniform vec3 lineColor;
 uniform float width;
 uniform float curveGain;
 uniform float creaseGain;
+uniform float creaseWeight;
+uniform float creaseNear;
+uniform float creaseFar;
 uniform float fadeNear;
 uniform float fadeFar;
 varying vec2 vUv;
@@ -101,27 +104,37 @@ float edgeAt(vec2 uv, vec2 o, float z) {
   // 20 cm step is a strong edge at 5 m and nothing at all at 200 m, and the
   // reference draws both of them.
   float curve = (abs(zl + zr - 2.0 * z) + abs(zu + zd - 2.0 * z)) / max(z, 1.0);
+  float silhouette = smoothstep(0.4, 1.0, curve * curveGain);
+  silhouette *= 1.0 - smoothstep(fadeNear, fadeFar, z);
 
   // Roberts cross on the normals, on the diagonals so one tap set does both
-  // axes.
-  vec3 na = normalAt(uv + vec2(-o.x, -o.y));
-  vec3 nb = normalAt(uv + vec2(o.x, o.y));
-  vec3 nc = normalAt(uv + vec2(-o.x, o.y));
-  vec3 nd = normalAt(uv + vec2(o.x, -o.y));
+  // axes. Half the offset the silhouette uses: a crease is one line where two
+  // faces meet, and sampling wide turns it into a band.
+  vec2 co = o * 0.5;
+  vec3 na = normalAt(uv + vec2(-co.x, -co.y));
+  vec3 nb = normalAt(uv + vec2(co.x, co.y));
+  vec3 nc = normalAt(uv + vec2(-co.x, co.y));
+  vec3 nd = normalAt(uv + vec2(co.x, -co.y));
   float crease = length(nb - na) + length(nd - nc);
 
-  float e = max(curve * curveGain, crease * creaseGain);
+  // A crease is NOT ink, and treating it as though it were is what turns a
+  // district into a scribble.
+  //
+  // The reference draws the boundary between an object and what is behind it
+  // in full black, and the corner where two faces of that object meet as a
+  // thin grey seam — if it draws it at all. Weighting the two the same puts a
+  // hard line on all twelve edges of every box in the city, and since a box
+  // fifty metres away has the same twelve, the middle distance fills with line
+  // until the shapes stop reading.
+  //
+  // So: a higher threshold, so only a real corner fires and not the gentle
+  // turn across a bevel; a fraction of the weight; and a fade that starts far
+  // sooner than the silhouette's. Past that distance a building keeps its
+  // outline and loses its panel joints, which is what the eye does anyway.
+  float seam = smoothstep(0.85, 1.5, crease * creaseGain) * creaseWeight;
+  seam *= 1.0 - smoothstep(creaseNear, creaseFar, z);
 
-  // Firm rather than feathered. The reference draws ink, not a soft shadow of
-  // one, so what the edge tests produce is pushed towards on-or-off and left to
-  // the supersample to smooth. Feathering it here instead gives a grey halo
-  // round every object, which reads as blur.
-  e = smoothstep(0.35, 0.95, e);
-
-  // Fade with range. Every window mullion and handrail in a district is an
-  // edge, and at four hundred metres all of them together are a grey mush that
-  // reads as dirt on the screen rather than as a city.
-  return e * (1.0 - smoothstep(fadeNear, fadeFar, z));
+  return max(silhouette, seam);
 }
 
 void main() {
@@ -166,8 +179,10 @@ export interface InkSettings {
   colour: number;
   /** Line width in OUTPUT pixels. Zero switches the whole pass off. */
   width: number;
-  /** Metres at which the line starts fading, and where it is gone. */
+  /** Metres at which the silhouette starts fading, and where it is gone. */
   fade: [number, number];
+  /** Crease seams: how black, and the two metre marks they fade between. */
+  crease: [number, number, number];
   /** Resolution multiplier on each axis. 1 is off, 2 is four samples a pixel. */
   super: number;
 }
@@ -199,6 +214,9 @@ export class Ink {
         width: { value: 1 },
         curveGain: { value: 26 },
         creaseGain: { value: 0.9 },
+        creaseWeight: { value: 0.45 },
+        creaseNear: { value: 40 },
+        creaseFar: { value: 110 },
         fadeNear: { value: 140 },
         fadeFar: { value: 420 },
       },
@@ -227,6 +245,9 @@ export class Ink {
     u.lineColor.value.setHex(s.colour);
     u.fadeNear.value = s.fade[0];
     u.fadeFar.value = s.fade[1];
+    u.creaseWeight.value = s.crease[0];
+    u.creaseNear.value = s.crease[1];
+    u.creaseFar.value = s.crease[2];
   }
 
   /**
