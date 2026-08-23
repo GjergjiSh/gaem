@@ -3015,6 +3015,16 @@ const CYBER_STEEL = 0xe0a52a;
  * as one poured object.
  */
 const CYBER_GROUND = 0xe9e7e1;
+/**
+ * And the roadway stays near-white, which looks like a mistake and is not.
+ *
+ * A brush's colour multiplies over its texture. Asphalt painted by DARKENING
+ * THE BRUSH would take its own lane markings down with it — white paint on a
+ * near-black road would come out mid-grey, which is the one thing road
+ * markings must never be. The blacktop is dark in the map instead, and the
+ * brush stays out of its way.
+ */
+const CYBER_TARMAC = 0xf2f0ec;
 
 /** Ramp indices carry over untouched: this is a recolour, not a re-cut. */
 /**
@@ -3029,8 +3039,11 @@ const CYBER_GROUND = 0xe9e7e1;
  * which is what the reference does and what one uniform surface cannot.
  */
 const CYBER_SURFACE: Record<string, string> = {
-  [S_ROAD]: 'slab',
-  [S_STREET]: 'slab',
+  // Roadway is blacktop; pavements, yards and elevated decks stay concrete.
+  // Which of the two blacktops a road gets is decided per brush below, by
+  // which way it is longer.
+  [S_ROAD]: 'blacktop',
+  [S_STREET]: 'blacktop',
   [S_PAVING]: 'slab',
   [S_DECK]: 'slab',
   [S_STEEL]: 'girder',
@@ -3040,9 +3053,17 @@ const CYBER_SURFACE: Record<string, string> = {
 export const RAMP_BRUSHES_CYBER: number[] = RAMP_BRUSHES_RAW.slice();
 export const brushesCyber: Brush[] = brushesRaw.map((b, i) => {
   const src = RAW_SRC[i] ?? '';
-  const surface = CYBER_SURFACE[src] ?? 'plate';
+  let surface = CYBER_SURFACE[src] ?? 'plate';
+  // A texture cannot know which way a road points, so there are two blacktops
+  // and the choice is made from the shape of the brush: a stretch of road is
+  // longer along the road than across it, which is a good enough tell for
+  // something that only decides which way a painted line runs.
+  if (surface === 'blacktop') surface = b.s[0] >= b.s[2] ? 'blacktopX' : 'blacktopZ';
+  // Blacktop keeps a near-white brush: its darkness is painted into the map,
+  // because a dark brush colour would multiply the lane markings down with it.
   const mass = surface === 'girder' ? CYBER_STEEL
-    : surface === 'slab' ? CYBER_GROUND : CYBER_MASS;
+    : surface === 'slab' ? CYBER_GROUND
+      : surface.startsWith('blacktop') ? CYBER_TARMAC : CYBER_MASS;
   const c = b.c === RAW_WHITE ? CYBER_TRIM : b.c === RAW_RED ? CYBER_RED : mass;
   return {
     ...b,

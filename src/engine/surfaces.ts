@@ -289,6 +289,35 @@ function paintPlate(ctx: CanvasRenderingContext2D, w: number, h: number) {
     ctx.fillRect(0, y, w, line);
   }
 
+  // Windows. Two to a repeat, which at this tile is two to twenty-two metres —
+  // sparse on purpose. A white industrial block is mostly blank wall with the
+  // glazing gathered into a few large openings, and spreading small windows
+  // evenly over it is how you get an office block instead. They sit clear of
+  // the panel centre at (0.25, 0.25), because that is the texel the roofs
+  // sample and a roof made of window is not the idea.
+  const winY = h * 0.56;
+  const winH = h * 0.17;
+  for (const u of [0.16, 0.56]) {
+    const x = u * w;
+    const ww = w * 0.28;
+    // Reveal first: an opening is a hole in a thick wall, so its head and jamb
+    // throw a shadow onto the glass before the glass is anything.
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.62)';
+    ctx.fillRect(x, winY, ww, winH);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.10)';
+    ctx.fillRect(x, winY + winH * 0.72, ww, winH * 0.28);
+    // Mullions, four bays across and one transom, which is what makes it read
+    // as industrial glazing rather than as a dark rectangle.
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.34)';
+    const bar = Math.max(1, Math.round(w / 700));
+    for (let i = 1; i < 4; i++) ctx.fillRect(x + (i / 4) * ww, winY, bar, winH);
+    ctx.fillRect(x, winY + winH * 0.5, ww, bar);
+    // And a frame round the whole opening.
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)';
+    ctx.lineWidth = Math.max(1, line * 0.6);
+    ctx.strokeRect(x, winY, ww, winH);
+  }
+
   // And the fixing plate at every crossing: a square of slightly darker panel,
   // an outline, and four bolts. Small — about a third of a metre at this tile
   // — so it is a detail you find rather than a pattern you notice.
@@ -432,6 +461,57 @@ function paintCrate(ctx: CanvasRenderingContext2D, w: number, h: number) {
   ctx.fillRect(0, h - rail - Math.max(2, h / 300), w, Math.max(2, h / 300));
 }
 
+/**
+ * Blacktop with lane markings — see `road` and `roadX` below.
+ *
+ * The darkness lives in the MAP, not in the brush colour, and that is forced
+ * rather than stylistic: a brush's colour multiplies over its texture, so a
+ * dark grey road brush would take its own lane markings down with it and the
+ * white lines would come out mid-grey on a near-black surface. Paint the
+ * asphalt dark here and leave the brush near-white, and the multiply lands
+ * where it should — dark road, bright paint.
+ *
+ * `across` is which way the dashes run. A texture cannot know which way a road
+ * points, so there are two surfaces and the level picks by the shape of the
+ * brush: a road box is longer along the road than across it, which is a
+ * reliable enough tell for something that only decides where a painted line
+ * goes.
+ */
+function paintRoad(ctx: CanvasRenderingContext2D, w: number, h: number, across: boolean) {
+  ctx.fillStyle = '#61646a';
+  ctx.fillRect(0, 0, w, h);
+
+  // Aggregate. Both lighter and darker than the binder, because tarmac is
+  // stones in tar and a one-sided speckle reads as dirt on a flat grey.
+  let seed = 0x51f2a9d;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  for (let i = 0; i < 14000; i++) {
+    const up = rnd() > 0.5;
+    ctx.fillStyle = up
+      ? `rgba(255, 255, 255, ${0.03 + rnd() * 0.07})`
+      : `rgba(0, 0, 0, ${0.04 + rnd() * 0.10})`;
+    ctx.fillRect(rnd() * w, rnd() * h, 1 + rnd() * 2, 1 + rnd() * 2);
+  }
+
+  // A slightly darker band down each wheel track, which is the thing that makes
+  // a road look driven on rather than poured.
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.06)';
+  for (const t of [0.22, 0.78]) {
+    if (across) ctx.fillRect(0, t * h - h * 0.06, w, h * 0.12);
+    else ctx.fillRect(t * w - w * 0.06, 0, w * 0.12, h);
+  }
+
+  // The centre line: dashes down the middle, four on, four off.
+  const paint = Math.max(2, Math.round(w / 150));
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+  for (let i = 0; i < 4; i++) {
+    const a = (i + 0.15) / 4;
+    const b = (i + 0.65) / 4;
+    if (across) ctx.fillRect(a * w, h / 2 - paint / 2, (b - a) * w, paint);
+    else ctx.fillRect(w / 2 - paint / 2, a * h, paint, (b - a) * h);
+  }
+}
+
 function paintGlass(ctx: CanvasRenderingContext2D, w: number, h: number) {
   panes(w, h, (x, y, pw, ph, lit, r) => {
     // Dark, and slightly blue: glass reflects the sky even when there is
@@ -552,6 +632,21 @@ export const SURFACES: Record<string, SurfaceDef> = {
    * job. Its ribs run top to bottom whichever way it is turned, so it takes no
    * cap: the lid of a container is ribbed too.
    */
+  /**
+   * Roadway. Two of them, differing only in which way the lane dashes run —
+   * see paintRoad. The kerb faces are pinned to a blank patch of blacktop, so a
+   * road does not carry its own markings round onto its edge.
+   */
+  blacktopZ: {
+    base: { paint: (c, w, h) => paintRoad(c, w, h, false), as: 'blacktop-z' },
+    sideUV: [0.08, 0.08],
+    tile: 9, roughness: 0.97, metalness: 0.0,
+  },
+  blacktopX: {
+    base: { paint: (c, w, h) => paintRoad(c, w, h, true), as: 'blacktop-x' },
+    sideUV: [0.08, 0.08],
+    tile: 9, roughness: 0.97, metalness: 0.0,
+  },
   ribbed: {
     base: { paint: paintCrate, as: 'ribbed' },
     tile: 2.6, roughness: 0.9, metalness: 0.0,
