@@ -3132,15 +3132,6 @@ export const CYBER_THEME: Theme = {
   // eye loses them anyway.
   inkCrease: [0.6, 60, 170],
   inkSuper: 2,
-  // Three tones and nothing between them: lit, shadow, and the line.
-  //
-  // The floor has to stay UNDER the first band centre or it swallows it and
-  // three tones quietly become two — at three bands the centres sit at 0.17,
-  // 0.5 and 0.83, so anything above about 0.4 erases the darkest one. 0.38
-  // leaves all three standing and still keeps a shadowed white wall at a solid
-  // mid grey rather than letting it fall to near black.
-  posterize: 3,
-  posterizeFloor: 0.38,
   // The district is 430 x 364, so a 480 m square holds it with room for the
   // near skyline. Two thirds of the default span over the same 4096 texels is
   // a shadow edge a third sharper, and this style has nowhere to hide a soft

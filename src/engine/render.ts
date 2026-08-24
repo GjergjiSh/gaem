@@ -94,8 +94,6 @@ const BASE_THEME: Required<Theme> = {
   inkFade: [140, 420],
   inkCrease: [0.45, 40, 110],
   inkSuper: 2,
-  posterize: 0,
-  posterizeFloor: 0.4,
   shadowSpan: 320,
   shadowBias: -0.0006,
   shadowNormalBias: 0.6,
@@ -382,7 +380,6 @@ export class Renderer {
     this.ink.configure({
       colour: t.ink, width: t.inkWidth, fade: t.inkFade,
       crease: t.inkCrease, super: t.inkSuper,
-      bands: t.posterize, shadowFloor: t.posterizeFloor,
     });
     if (!this.ink.enabled) this.ink.dispose();
     const shadow = this.sun.shadow;
