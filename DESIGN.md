@@ -1811,79 +1811,81 @@ Final state, all measured:
 
 ---
 
-## 25. Vaulting — a timed input, and the angle is the score
+## 25. Vaulting — F, a range you set, and the angle is the score
 
 ### What it is
 
-Dash at something head-on, hit **Space** as you arrive, and the lip throws you
+Dash at something head-on, press **F** as you reach it, and the lip throws you
 into an arc on the far side. The button is the move: no press, no vault, and the
 crate stops you like any other wall.
 
-It is still not a jump. It spends no jump charge and it never subtracts speed —
-it only ever adds. What it costs is the timing, and what it pays is set by the
-angle you came in at.
+It is not a jump. It spends no jump charge and it never subtracts speed — it only
+ever adds. What it costs is the timing, and what it pays is set by the angle you
+came in at.
 
-> This replaces the automatic mantle. That version fired off the ledge itself,
-> on the argument that a button you have to notice a ledge to press is a button
-> that arrives after the flow it was protecting. True — but it also meant the
-> most dramatic geometry in the level resolved itself while you held W, and a
-> verb with no input is a verb with no ceiling. `vault.timed: false` puts the old
-> behaviour back untouched, because levels built around the auto-hop still work.
+> This replaced an automatic mantle, which fired off the ledge itself on the
+> argument that a button you have to notice a ledge to press arrives after the
+> flow it was protecting. True — but it also meant the most dramatic geometry in
+> the level resolved itself while you held W, and a verb with no input has no
+> ceiling. `vault.timed: false` puts the old behaviour back untouched.
 
-### One key, two moves
+### Its own key, and why that was the second answer
 
-Space is the vault **and** the jump, told apart by the situation rather than by a
-second binding. The rule is narrow on purpose:
+The first version bound it to Space and told the vault and the jump apart by the
+situation: while a lip was in range, Space was the vault; everywhere else it was
+the jump. That worked, and the machinery to make it work was the largest part of
+the feature — a claim evaluated before the state machine (because `updateGrounded`
+consumes `bufJump` and would spend the keystroke first), a `failToJump` fallback
+so a claimed press that found no lip came back as a jump, and guards to stop the
+claim swallowing the wallrun eject.
 
-**The vault claims the press only when there is a lip in the window.** Everywhere
-else — open ground, mid-air, a wall that is too tall, an approach too glancing —
-the press falls straight through to the jump it has always been. Sharing the key
-therefore costs nothing anywhere that a vault was not already possible.
+All of it existed to answer one question — *whose press was that?* — and the one
+time it guessed wrong was the one time you wanted the other move. **F deletes the
+question.** The claim, the fallback and the guards went with it. A press outside
+the range now does nothing at all, which is the correct amount of nothing.
 
-This forces the ordering. `vaultSense` runs *before* the state machine, because
-`updateGrounded` consumes `bufJump` and would spend the keystroke on a jump before
-the vault ever saw its own button. Sensing early and launching late is the whole
-trick: the claim happens at the top of the tick, the launch happens after the
-state update, for the reasons in "the part that actually took the work" below.
+What stayed is the ordering, for a reason that has nothing to do with the key:
+`vaultSense` still runs before the state machine because the press has to be
+recorded on the tick it arrived, and the launch still runs after it because both
+ground states clamp `vel.y` to zero every tick.
 
-### The window is two numbers
+### The range is the knob
 
 | | |
 |---|---|
-| `vault.windowBefore` | press this long *before* the lip and it still vaults (default 160 ms) |
-| `vault.windowAfter` | press this long *after* touching it and it still vaults (default 120 ms) |
+| `vault.triggerDist` | **metres from the lip that F starts working.** Press further out and nothing happens |
+| `vault.triggerLead` | extra range as seconds of travel. `0` = the same metres at every speed |
+| `vault.inputHold` | how long a registered press keeps looking for its lip before it lapses |
+| `vault.windowAfter` | press this long *after* touching the lip and it still counts |
 
-One combined number would be either unforgiving on the approach or mushy on the
-bounce. They are tuned against different failures, so they are different knobs.
+Arming range is `triggerDist + speed · triggerLead`. Distance is the knob you
+steer by because it is the thing you can *see*: the lip is either inside the range
+or it is not, and that reads the same off every approach.
 
-The early side is a pending press waiting for its lip. The late side is a grace
-period, and it has to remember what you hit — the rise, the face normal, and the
-velocity you arrived with — because by the time it fires the collision has already
-flattened all three. A grace window that hands you a standing-start hop is not a
-window, it is a consolation prize.
+The lead term exists because a fixed distance is a shrinking amount of **time** the
+faster you close on it — 1.5 m is 190 ms at 8 m/s and 44 ms at 34. At `0` the move
+therefore gets stricter the better you are. That is a real cost and it is the
+default anyway, because a range you can see beats a range that silently rescales;
+`triggerLead` is there to buy the time back if fast approaches start feeling
+unfair.
 
-An early press that never finds a lip becomes a jump when it expires
-(`vault.failToJump`). Getting nothing at all for a press is a worse answer than
-getting it two frames late.
+`inputHold` is deliberately independent of the range. The range decides whether a
+press *counts*; this decides how long it *waits*. Tying them together would mean
+widening the range also made every press linger, which is two changes from one
+slider.
 
-### The window is a duration, so the probe is too
-
-The old probe reached a fixed `vault.reach` ahead. As a *timing* window that is
-40 ms of warning at 30 m/s and a fifth of a second at 6 — the better you got, the
-harder the vault became, for no reason anyone could name.
-
-So the probe reaches `max(reach, speed · windowBefore)`, and the window is
-evaluated in seconds-to-contact rather than metres. The press lands at the same
-moment of the approach at every speed. This is the difference between a timing
-that is learnable and one that is a coin flip you get worse at.
+The late side is a grace period, and it has to remember the rise, the face normal
+and the velocity you arrived with — by the time it fires the collision has
+flattened all three, and a grace window that hands you a standing-start hop is a
+consolation prize, not a window.
 
 ### The probe
 
-Two rays, unchanged. Forward from **just above the autostep** — lower and it keeps
-finding ramps the controller already walks up, higher and it misses the short
-ledges that are most of the point — and then, if that face is steep enough to
-actually stop you (the same `wall.maxAngle` test the wallrun uses), a second ray
-**straight down just past the face**, from above the tallest ledge allowed.
+Two rays. Forward from **just above the autostep** — lower and it keeps finding
+ramps the controller already walks up, higher and it misses the short ledges that
+are most of the point — and then, if that face is steep enough to actually stop
+you (the same `wall.maxAngle` test the wallrun uses), a second ray **straight down
+just past the face**, from above the tallest ledge allowed.
 
 | rise above your feet | what happens |
 |---|---|
@@ -1895,13 +1897,14 @@ The tall-wall case needs no special handling and gets none: the down-probe's
 origin is buried inside the wall, which reports a surface at the very top of the
 range and fails the height test on its own.
 
-Distance comes back measured from the capsule **surface**, not its centre, or the
-timing would quietly depend on `character.radius`.
+Distance comes back measured from the capsule **surface**, not its centre, or
+`triggerDist` would quietly mean something different at a different
+`character.radius`.
 
 ### Entry angle is the skill the move is testing
 
-The probe also rejects anything more than `vault.maxEntryAngle` off head-on. Past
-that you are skimming a wall rather than diving into a box, and a wall you are
+The probe rejects anything more than `vault.maxEntryAngle` off head-on. Past that
+you are skimming a wall rather than diving into a box, and a wall you are
 travelling along already belongs to the wallrun.
 
 Inside it, the angle normalises to `q` — 1 dead head-on, 0 at the sloppiest legal
@@ -1913,15 +1916,12 @@ approach — and everything the vault pays out scales by it:
 | `vault.pushBonus` | extra forward speed floor at `q = 1` |
 | `vault.straighten` | how far the launch line turns from your own toward square-over-the-lip. At 0 a diagonal entry throws you diagonally across the top; at 1 every vault comes out square, which is safer to land and much more boring |
 
-Clearing the lip is still derived, not picked:
+Clearing the lip is derived, not picked:
 `v = sqrt(2 · gravityRise · (rise + clearance))`, the same relation the jump height
-is read with. But that is now the **floor**. What makes it an arc on the far side
-instead of a mantle is `launchUp` on top of it, and that part is earned.
+is read with. But that is the **floor**. What makes it an arc on the far side
+instead of a mantle is `launchUp` on top, and that part is earned.
 
 ### The part that actually took the work
-
-Unchanged from the automatic version, and still the reason the launch site is
-where it is:
 
 **Both ground states clamp vertical velocity to zero every tick.** `updateGrounded`
 and `updateSliding` each run `vel.y = min(vel.y, 0)`. A hop applied before the
@@ -1938,33 +1938,37 @@ with, not the base constant, or a head-on launch would lose its `pushBonus` on t
 first tick of the rise.
 
 And the thing you just vaulted must not grab you: a chest-high ledge is a legal
-wallrun surface by angle, so `attachWall` refuses while a vault is live. For the
-same reason the claim refuses to fire while wallrunning — there Space is the eject,
-and a claim that `tryVault` will not honour would swallow it for a whole window.
+wallrun surface by angle, so `attachWall` refuses while a vault is live.
 
 ### It has to be legible
 
 A timed input with no feedback is a coin flip. The HUD carries a `vault` line:
-`VAULT — SPACE` while a lip is armed, plus bars for the grace tail and for an
-early press still looking for its lip.
+`VAULT — F` while a lip is in range, plus bars for the grace tail and for a press
+still looking for its lip.
 
 ### Measured
 
-Real solver, stub collision world, `npm run verify:vault`, 20 checks:
+Real solver, stub collision world, `npm run verify:vault`, 23 checks:
 
 | | |
 |---|---|
-| press 6 m out (well outside the window) | no vault — comes out as an ordinary jump |
-| press inside the window | vaults, ends up **past** the box |
+| press 6 m out (outside `triggerDist`) | no vault — and no jump either, F is not Space |
+| press inside the range | vaults, ends up **past** the box |
 | no press at all | no vault; you stall on the face at x 9.6 |
-| press ~80 ms before contact | vaults (early half) |
+| press 1.35 m out | vaults (early side) |
 | press after contact, inside `windowAfter` | vaults, still gets you over |
-| head-on vs 43° entry, same 20 m/s | **4.25 m** peak vs 3.20 m; x 25.8 vs 10.1 |
-| 43° entry | throws you diagonally, as `straighten` 0.3 asks |
+| head-on vs 43° entry, same 20 m/s | **4.25 m** peak vs 3.20 m; x 27.4 vs 10.2 |
 | past `maxEntryAngle` | no vault |
-| Space in open air | still jumps, vy 13.2 — nothing is eaten |
-| early press that then veers away | becomes a jump, vy 13.2 |
-| 8 / 20 / 34 m/s, press 96 ms out | all three vault — the window is a duration |
+| `triggerDist` 1.5 vs 5.0, same 3 m press | too early / registers — the knob works |
+| F in open air | does nothing at all |
+| Space in open air, and Space at the lip | jumps both times, never vaults |
+| `triggerLead` 0, at 8 / 20 / 34 m/s | all vault on the same 1.35 m press |
+| `triggerLead` 0.12, 4 m press | too early at 8 m/s, registers at 34 — range grew with speed |
+
+> The harness re-asserts the approach speed until the launch. Ground friction is
+> 34 m/s², so a runner that stops being driven the moment it presses coasts to a
+> halt inside a metre — that is the test letting go of the stick, not the vault
+> failing, and it cost one confusing red before it was spotted.
 
 ---
 

@@ -25,6 +25,7 @@ export interface Intent {
   dash: Btn;
   slide: Btn;
   slam: Btn;       // C in the air: everything stops and you go straight down
+  vault: Btn;      // F: hop a lip you are running at, timed against the lip
   thrust: Btn;     // hover jets; shares the jump key, see engine/input.ts
   grapple: Btn;    // middle mouse: fire on press, hang on held (unless grapple.toggle)
 }

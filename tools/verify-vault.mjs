@@ -78,7 +78,8 @@ const WORLD = {
 const btn = (pressed = false, held = false) => ({ pressed, held });
 const intent = (over = {}) => ({
   moveX: 0, moveY: 0, yaw: 0, pitch: 0,
-  jump: btn(), dash: btn(), slide: btn(), grapple: btn(), slam: btn(), thrust: btn(),
+  jump: btn(), dash: btn(), slide: btn(), grapple: btn(), slam: btn(),
+  vault: btn(), thrust: btn(),
   ...over,
 });
 
@@ -108,8 +109,12 @@ function approach(p, press, ticks = 240) {
     let go = false;
     if (!pressed && press(p, gap)) { go = true; pressed = true; }
     const jumpsBefore = p.jumpsLeft;
-    if (p.grounded && p.pos.x < FACE - R && !pressed) { p.vel.x = keep.x; p.vel.z = keep.z; }
-    S.step(p, intent({ jump: btn(go, go) }), WORLD, DT);
+    // Keep the approach speed alive right up to the lip. Ground friction is
+    // 34 m/s^2, so a runner that stops being driven the moment it presses coasts
+    // to a halt inside a metre — that is the harness letting go of the stick, not
+    // the vault failing. Stops at the launch, which owns velocity from there.
+    if (p.grounded && p.vaultT === 0 && p.pos.x < FACE - R) { p.vel.x = keep.x; p.vel.z = keep.z; }
+    S.step(p, intent({ vault: btn(go, go) }), WORLD, DT);
     if (p.vaultT > 0) vaulted = true;
     if (!vaulted && p.jumpsLeft < jumpsBefore) jumped = true;
     peak = Math.max(peak, p.pos.y);
@@ -118,12 +123,12 @@ function approach(p, press, ticks = 240) {
 }
 
 // ---------------------------------------------------------------------------
-console.log('\nSpace is the vault only when there is a lip to vault');
+console.log('\nF vaults only when there is a lip in range');
 {
-  // Well outside windowBefore: 20 m/s x 0.16 s = 3.2 m of window, press at 6 m.
+  // Well outside triggerDist (1.5 m by default).
   const early = approach(runner(), (p, gap) => gap < 6.0);
   check(!early.vaulted, 'a press 6 m out does not vault');
-  check(early.jumped, '...it comes out as an ordinary jump');
+  check(!early.jumped, '...and does not come out as a jump either — F is not Space');
 
   const timed = approach(runner(), (p, gap) => gap < 1.0);
   check(timed.vaulted, 'a press inside the window vaults');
@@ -137,8 +142,8 @@ console.log('\nSpace is the vault only when there is a lip to vault');
 // ---------------------------------------------------------------------------
 console.log('\nthe window has two sides');
 {
-  const before = approach(runner(), (p, gap) => gap < 20 * T.vault.windowBefore * 0.5);
-  check(before.vaulted, `early half: pressed ~${(T.vault.windowBefore * 500).toFixed(0)} ms out`);
+  const before = approach(runner(), (p, gap) => gap < T.vault.triggerDist * 0.9);
+  check(before.vaulted, `early half: pressed ${(T.vault.triggerDist * 0.9).toFixed(2)} m out`);
 
   // Late: press only once the face has already been touched.
   const after = approach(runner(), (p) => p.vaultGrace > 0);
@@ -164,39 +169,66 @@ console.log('\nthe arc is paid for by the entry angle');
 }
 
 // ---------------------------------------------------------------------------
-console.log('\nnothing is eaten');
+console.log('\ntriggerDist is the range, and it is the knob');
 {
-  // Open floor, no box in range: Space has to be the jump it has always been.
+  const dist0 = T.vault.triggerDist;
+  // A press at a fixed 3 m: outside a 1.5 m range, inside a 5 m one. Nothing
+  // else changes, so any difference is the knob doing its job.
+  T.vault.triggerDist = 1.5;
+  const tight = approach(runner(), (p, gap) => gap < 3.0);
+  check(!tight.vaulted, 'triggerDist 1.5: a press 3 m out is too early');
+
+  T.vault.triggerDist = 5.0;
+  const loose = approach(runner(), (p, gap) => gap < 3.0);
+  check(loose.vaulted, 'triggerDist 5.0: the same press now registers');
+  T.vault.triggerDist = dist0;
+}
+
+// ---------------------------------------------------------------------------
+console.log('\nF is its own key');
+{
+  // Open floor, no box in range. F does nothing; Space still jumps.
   const p = S.makePlayer({ x: -60, y: HH, z: 0 });
   p.grounded = true;
   p.state = 'grounded';
   p.vel = { x: 12, y: 0, z: 0 };
+  S.step(p, intent({ vault: btn(true, true) }), WORLD, DT);
+  check(p.vel.y <= 0 && p.jumpsLeft === T.jump.maxJumps, 'F in open air does nothing at all');
   S.step(p, intent({ jump: btn(true, true) }), WORLD, DT);
-  check(p.vel.y > 0, `Space in open air still jumps (vy ${p.vel.y.toFixed(1)})`);
+  check(p.vel.y > 0, `Space still jumps, untouched (vy ${p.vel.y.toFixed(1)})`);
 
-  // Armed, pressed, then the lip never arrives: failToJump hands the input back.
+  // Space next to a vaultable lip is a jump, not a vault — the whole point of
+  // moving off the shared key.
   const q = runner(20, 0);
-  let done = false;
-  for (let k = 0; k < 400; k++) {
+  let fired = false;
+  for (let k = 0; k < 240 && !fired; k++) {
     const gap = FACE - R - q.pos.x;
-    const go = !done && gap < 20 * T.vault.windowBefore * 0.9;
-    if (go) { done = true; q.vel.x = 0; q.vel.z = -20; }   // veer away on the press
-    if (q.grounded && !done) { q.vel.x = 20; q.vel.z = 0; }
+    const go = gap < 1.0;
+    if (q.grounded && !go) { q.vel.x = 20; q.vel.z = 0; }
     S.step(q, intent({ jump: btn(go, go) }), WORLD, DT);
-    if (q.vel.y > 0.5) break;
+    if (go) fired = true;
   }
-  check(q.vel.y > 0.5, `an early press that misses becomes a jump (vy ${q.vel.y.toFixed(1)})`);
+  check(q.vaultT === 0, 'Space at the lip jumps and does NOT vault');
 }
 
 // ---------------------------------------------------------------------------
-console.log('\nspeed does not change the timing');
+console.log('\ntriggerLead buys back the time a fixed distance loses');
 {
-  // The window is a duration, so the same gap-in-seconds has to work at any
-  // speed. A fixed-distance probe would fail the fast case.
+  const lead0 = T.vault.triggerLead;
+  // At 0 the range is the same metres at every speed, so the same gap works.
+  T.vault.triggerLead = 0;
   for (const v of [8, 20, 34]) {
-    const r = approach(runner(v), (p, gap) => gap / v < T.vault.windowBefore * 0.6);
-    check(r.vaulted, `${v} m/s vaults on a press ${(T.vault.windowBefore * 600).toFixed(0)} ms out`);
+    const r = approach(runner(v), (p, gap) => gap < T.vault.triggerDist * 0.9);
+    check(r.vaulted, `${v} m/s vaults on a press 1.35 m out (pure distance)`);
   }
+  // Turned up, the range grows with speed: a 4 m press is too early at 8 m/s
+  // and fine at 34.
+  T.vault.triggerLead = 0.12;
+  const slow = approach(runner(8), (p, gap) => gap < 4.0);
+  const fast = approach(runner(34), (p, gap) => gap < 4.0);
+  check(!slow.vaulted, 'lead 0.12: 4 m is still too early at 8 m/s');
+  check(fast.vaulted, 'lead 0.12: 4 m registers at 34 m/s — the range grew with speed');
+  T.vault.triggerLead = lead0;
 }
 
 console.log(fails ? `\n${fails} FAILED\n` : '\nall good\n');

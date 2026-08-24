@@ -98,9 +98,9 @@ export class Hud {
       // The vault is a timed input now, and a timed input you get no feedback on
       // is a coin flip. `late` is the grace after touching the lip; `wait` is an
       // early press still looking for one.
-      `vault    ${p.vaultArmed ? 'VAULT — SPACE  ' : '               '}`
+      `vault    ${p.vaultArmed ? 'VAULT — F      ' : '               '}`
         + `late ${bar(p.vaultGrace, T.vault.windowAfter)}`
-        + `  wait ${bar(p.vaultPending, T.vault.windowBefore)}`,
+        + `  wait ${bar(p.vaultPending, T.vault.inputHold)}`,
       `dash cd  ${bar(T.dash.cooldown - p.dashCooldown, T.dash.cooldown)}`,
       `cables   ${p.grappling
         ? `${p.cables.map((c) => (c.on ? c.len.toFixed(1).padStart(5) : '    -')).join(' ')}`
@@ -123,8 +123,9 @@ export class Hud {
       this.help.textContent = [
         `WASD move · Space jump · Shift dash · Ctrl slide`,
         `C in the air = ground slam · landing it makes your next dashes hit harder`,
-        `dash into a low ledge + Space as you hit it = vault (arc over, keeps speed)`,
+        `dash into a low ledge + F as you reach it = vault (arc over, keeps speed)`,
         `  the squarer you hit it, the higher and further it throws you`,
+        `  vault/triggerDist sets how close you must be for F to register`,
         `hold Space with no jumps left = thrusters (hover + shoot)`,
         `  + Shift while thrusting = afterburner (drinks fuel, goes fast)`,
         `air into a wall = wallrun (auto-runs) · Space = eject`,

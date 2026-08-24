@@ -383,12 +383,12 @@ function probeLedge(p: Player, dir: V3, reach: number, col: CollisionWorld): Lip
  * The timing window. Runs once a tick BEFORE the state machine, because it has
  * to decide who owns the Space press before the jump gets its hands on it.
  *
- * Everything here is a duration rather than a distance. A fixed half-metre probe
- * is forty milliseconds of warning at 30 m/s and a fifth of a second at 6, which
- * would mean the faster you got the harder the vault became for no reason anyone
- * could name. Reaching `speed * windowBefore` ahead instead puts the press at the
- * same moment of the approach at every speed, and that is the only version of
- * this that is learnable.
+ * The range it arms at is `triggerDist` metres, plus `triggerLead` seconds of
+ * travel. Distance is the knob you steer by, because it is the thing you can
+ * actually see: the lip is either inside the range or it is not, and that reads
+ * the same off every approach. The lead term exists because a fixed distance is
+ * a shrinking amount of TIME the faster you close on it, so at high speed a pure
+ * distance quietly gets stricter; dialling lead up buys that back.
  *
  * Returns the lip so tryVault can launch off it without probing twice.
  */
@@ -402,7 +402,8 @@ function vaultSense(p: Player, col: CollisionWorld): Lip | null {
   if (h < t.minSpeed) return null;
   const dir = V.v3(p.vel.x / h, 0, p.vel.z / h);
 
-  const lip = probeLedge(p, dir, Math.max(t.reach, h * t.windowBefore), col);
+  const range = t.triggerDist + h * t.triggerLead;
+  const lip = probeLedge(p, dir, Math.max(t.reach, range), col);
   if (!lip) return null;
 
   // Touching it. Remember what we hit and how fast we were going, because the
@@ -416,14 +417,14 @@ function vaultSense(p: Player, col: CollisionWorld): Lip | null {
     p.vaultEntryVel = V.v3(p.vel.x, 0, p.vel.z);
     p.vaultArmed = true;
   } else {
-    p.vaultArmed = lip.dist / h <= t.windowBefore;
+    p.vaultArmed = lip.dist <= range;
   }
   return lip;
 }
 
 /**
- * Space, timed against the lip. Deliberately NOT a jump: it spends no jump, and
- * it never slows you down — it only ever adds. What it costs is the timing, and
+ * F, timed against the lip. Deliberately NOT a jump: it spends no jump, and it
+ * never slows you down — it only ever adds. What it costs is the timing, and
  * what it pays is decided by the angle you came in at.
  */
 function tryVault(p: Player, lip: Lip | null): boolean {
@@ -433,8 +434,8 @@ function tryVault(p: Player, lip: Lip | null): boolean {
 
   const contact = lip !== null && lip.dist <= t.reach;
 
-  // Timed: a press has to be live, either one waiting for this lip or one that
-  // landed just after it. Untimed: the old automatic mantle, off contact alone.
+  // Timed: an F press has to be live, either one waiting for this lip or one
+  // that landed just after it. Untimed: the old automatic mantle, off contact.
   if (t.timed) { if (p.vaultPending <= 0) return false; }
   else if (!contact) return false;
 
@@ -491,9 +492,6 @@ function tryVault(p: Player, lip: Lip | null): boolean {
   p.vaultPending = 0;
   p.vaultGrace = 0;
   p.vaultArmed = false;
-  // The press was spent on the vault, so it must not come back out as a jump on
-  // the next tick — the jump buffer is still holding the same keystroke.
-  p.bufJump = 0;
 
   // Both ground states clamp vertical velocity to zero every tick, so a hop that
   // leaves the state alone is a hop that gets deleted on the next one.
@@ -1100,13 +1098,9 @@ function tickTimers(p: Player, dt: number) {
   p.vaultT = d(p.vaultT);
   p.vaultCooldown = d(p.vaultCooldown);
   p.vaultGrace = d(p.vaultGrace);
-  // An early Space that never found its lip turns back into a jump rather than
-  // evaporating. You asked to leave the ground; silently getting nothing for it
-  // is a worse answer than getting it a frame or two late.
-  if (p.vaultPending > 0) {
-    p.vaultPending = d(p.vaultPending);
-    if (p.vaultPending <= 0 && T.vault.failToJump) p.bufJump = T.jump.bufferTime;
-  }
+  // Just lapses. On its own key there is nothing to hand the press back to, and
+  // an F that found no lip cost you nothing to begin with.
+  p.vaultPending = d(p.vaultPending);
   p.slamBoost = d(p.slamBoost);
   p.grappleKeep = d(p.grappleKeep);
   p.grappleCooldown = d(p.grappleCooldown);
@@ -1140,17 +1134,19 @@ function tickTimers(p: Player, dt: number) {
 export function step(p: Player, i: Intent, col: CollisionWorld, dt: number) {
   tickTimers(p, dt);
 
-  // Who owns Space this tick. The vault claims it only when there is actually a
-  // lip in the window — everywhere else the press falls straight through to the
-  // jump, so binding both to one key costs nothing in open air. The sense pass
-  // has to run here, before the state machine, or updateGrounded consumes the
-  // buffered jump first and the vault never gets a look at its own button.
+  // F on its own key, so there is nothing to arbitrate: a press outside the
+  // range simply does nothing, and the jump never has to be consulted. The sense
+  // pass still runs here rather than next to the launch, because the launch has
+  // to happen after the state machine (see tryVault) and the press has to be
+  // recorded on the tick it arrived on.
   const lip = vaultSense(p, col);
-  const vaultClaim = T.vault.enabled && T.vault.timed && i.jump.pressed
-    && p.state !== 'wallrunning' && !p.slamming
-    && (p.vaultArmed || p.vaultGrace > 0);
-  if (vaultClaim) p.vaultPending = T.vault.windowBefore;
-  else if (i.jump.pressed) p.bufJump = T.jump.bufferTime;
+  if (T.vault.enabled && T.vault.timed && i.vault.pressed
+      && p.state !== 'wallrunning' && !p.slamming
+      && (p.vaultArmed || p.vaultGrace > 0)) {
+    p.vaultPending = T.vault.inputHold;
+  }
+
+  if (i.jump.pressed) p.bufJump = T.jump.bufferTime;
   if (i.dash.pressed) p.bufDash = T.dash.bufferTime;
   if (i.slide.pressed) p.bufSlide = T.slide.bufferTime;
 
