@@ -52,15 +52,8 @@ export function makePlayer(spawn: V3): Player {
     slamBoost: 0,
     dashBoost: 1,
     vaultT: 0,
-    vaultPush: 0,
     vaultCooldown: 0,
     vaultDir: V.v3(),
-    vaultArmed: false,
-    vaultPending: 0,
-    vaultGrace: 0,
-    vaultRise: 0,
-    vaultNormal: V.v3(),
-    vaultEntryVel: V.v3(),
     grappling: false,
     grappleReel: 0,
     grappleAuto: false,
@@ -310,7 +303,6 @@ function trySlam(p: Player, i: Intent, col: CollisionWorld): boolean {
   p.vel = V.v3(p.vel.x * T.slam.keepH, -T.slam.speed, p.vel.z * T.slam.keepH);
   if (p.state === 'wallrunning') detachWall(p);
   p.vaultT = 0;                 // no hopping a ledge on the way down
-  p.vaultPending = 0;           // ...and the press that was waiting for one is spent
   enter(p, 'airborne');
   registerTech(p);
   return true;
@@ -325,22 +317,12 @@ function updateSlam(p: Player) {
 
 // ---------------------------------------------------------------- vault
 
-/** What the ledge probe found: a lip worth launching off, and where it is. */
-interface Lip {
-  rise: number;    // how far its top sits above your feet
-  normal: V3;      // horizontal face normal, pointing back at you
-  dist: number;    // gap from the capsule surface to the face, metres
-}
-
 /**
- * Ledge probe. Finds a lip you are running at that is too tall for the
- * controller's autostep but low enough to hop. Null means "not a vault": no face,
- * a slope, a gap, a wall, or an approach too glancing to be a launch.
- *
- * `reach` is a parameter rather than a constant because the timing window has to
- * see further ahead than the contact test does — see vaultSense.
+ * Ledge probe. Finds a lip you are about to run into that is too tall for the
+ * controller's autostep but low enough to hop, and returns how far its top sits
+ * above your feet. Null means "not a vault": no face, a slope, a gap, or a wall.
  */
-function probeLedge(p: Player, dir: V3, reach: number, col: CollisionWorld): Lip | null {
+function ledgeAhead(p: Player, dir: V3, col: CollisionWorld): number | null {
   const t = T.vault;
   const feetY = p.pos.y - T.character.height / 2;
 
@@ -348,7 +330,7 @@ function probeLedge(p: Player, dir: V3, reach: number, col: CollisionWorld): Lip
   // controller already walks up; higher and it misses the short ledges that are
   // most of the point.
   const from = V.v3(p.pos.x, feetY + T.character.stepHeight + 0.1, p.pos.z);
-  const hit = col.rayHit(from, dir, T.character.radius + reach);
+  const hit = col.rayHit(from, dir, T.character.radius + t.reach);
   if (!hit) return null;
   // Only a face steep enough to actually stop you. Anything shallower is a slope,
   // which is the controller's job and not a thing to be launched up.
@@ -367,133 +349,34 @@ function probeLedge(p: Player, dir: V3, reach: number, col: CollisionWorld): Lip
   // Under stepHeight the controller already walks it. Over maxHeight it is a wall,
   // and turning walls into launches would delete wallrunning from the game.
   if (rise <= T.character.stepHeight || rise > t.maxHeight) return null;
-
-  const n = V.norm(V.v3(hit.normal.x, 0, hit.normal.z));
-  if (V.lenH(n) < 1e-4) return null;
-  // Head-on is 1. Too glancing and you are skimming a wall rather than diving
-  // into a box, and a wall you are travelling along already belongs to wallrun.
-  if (-(dir.x * n.x + dir.z * n.z) < Math.cos(t.maxEntryAngle)) return null;
-
-  // From the capsule SURFACE, not its centre: that is the gap the window counts
-  // down, and the radius would otherwise make the timing depend on the hitbox.
-  return { rise, normal: n, dist: Math.max(0, hit.dist - T.character.radius) };
+  return rise;
 }
 
 /**
- * The timing window. Runs once a tick BEFORE the state machine, because it has
- * to decide who owns the Space press before the jump gets its hands on it.
- *
- * Everything here is a duration rather than a distance. A fixed half-metre probe
- * is forty milliseconds of warning at 30 m/s and a fifth of a second at 6, which
- * would mean the faster you got the harder the vault became for no reason anyone
- * could name. Reaching `speed * windowBefore` ahead instead puts the press at the
- * same moment of the approach at every speed, and that is the only version of
- * this that is learnable.
- *
- * Returns the lip so tryVault can launch off it without probing twice.
+ * Hitting the edge of something should cost you a step, not the run. This fires
+ * automatically when you are moving into a vaultable lip, and it is deliberately
+ * NOT a jump: it spends no jump, sets no cooldown you can feel, and never slows
+ * you down — it only ever adds.
  */
-function vaultSense(p: Player, col: CollisionWorld): Lip | null {
-  const t = T.vault;
-  p.vaultArmed = false;
-  if (!t.enabled || p.vaultT > 0 || p.vaultCooldown > 0) return null;
-  if (p.state === 'wallrunning' || p.slamming) return null;
-
-  const h = V.lenH(p.vel);
-  if (h < t.minSpeed) return null;
-  const dir = V.v3(p.vel.x / h, 0, p.vel.z / h);
-
-  const lip = probeLedge(p, dir, Math.max(t.reach, h * t.windowBefore), col);
-  if (!lip) return null;
-
-  // Touching it. Remember what we hit and how fast we were going, because the
-  // late half of the window fires AFTER the collision has flattened both — a
-  // grace period that hands you a standing-start hop is not a window, it is a
-  // consolation prize.
-  if (lip.dist <= t.reach) {
-    p.vaultGrace = t.windowAfter;
-    p.vaultRise = lip.rise;
-    p.vaultNormal = lip.normal;
-    p.vaultEntryVel = V.v3(p.vel.x, 0, p.vel.z);
-    p.vaultArmed = true;
-  } else {
-    p.vaultArmed = lip.dist / h <= t.windowBefore;
-  }
-  return lip;
-}
-
-/**
- * Space, timed against the lip. Deliberately NOT a jump: it spends no jump, and
- * it never slows you down — it only ever adds. What it costs is the timing, and
- * what it pays is decided by the angle you came in at.
- */
-function tryVault(p: Player, lip: Lip | null): boolean {
+function tryVault(p: Player, col: CollisionWorld): boolean {
   const t = T.vault;
   if (!t.enabled || p.vaultT > 0 || p.vaultCooldown > 0) return false;
   if (p.state === 'wallrunning') return false;
 
-  const contact = lip !== null && lip.dist <= t.reach;
+  const h = V.lenH(p.vel);
+  if (h < t.minSpeed) return false;
+  const dir = V.v3(p.vel.x / h, 0, p.vel.z / h);
+  const rise = ledgeAhead(p, dir, col);
+  if (rise === null) return false;
 
-  // Timed: a press has to be live, either one waiting for this lip or one that
-  // landed just after it. Untimed: the old automatic mantle, off contact alone.
-  if (t.timed) { if (p.vaultPending <= 0) return false; }
-  else if (!contact) return false;
-
-  // Launch off what is in front of us, or — on a late press — off what we hit a
-  // few frames ago, at the speed we hit it with.
-  let rise: number, normal: V3, entry: V3;
-  if (contact) {
-    rise = lip!.rise;
-    normal = lip!.normal;
-    entry = V.v3(p.vel.x, 0, p.vel.z);
-  } else if (p.vaultGrace > 0) {
-    rise = p.vaultRise;
-    normal = p.vaultNormal;
-    entry = p.vaultEntryVel;
-  } else {
-    return false;
-  }
-
-  const speed = V.lenH(entry);
-  if (speed < t.minSpeed) return false;
-  const dir = V.v3(entry.x / speed, 0, entry.z / speed);
-
-  // Entry angle, normalised: 1 is dead head-on, 0 the sloppiest approach that
-  // still counts. Everything the vault pays out scales by this, which is the
-  // whole reason to aim the dash at the crate instead of clipping its corner.
-  const lo = Math.cos(t.maxEntryAngle);
-  const head = -(dir.x * normal.x + dir.z * normal.z);
-  const q = V.clamp((head - lo) / Math.max(1e-4, 1 - lo), 0, 1);
-
-  // The line out: your own, turned toward straight-over-the-lip by `straighten`.
-  // At 0 a diagonal entry throws you diagonally across the top, which is what
-  // makes the angle something you steer with and not only something you score on.
-  const outX = V.lerp(dir.x, -normal.x, t.straighten);
-  const outZ = V.lerp(dir.z, -normal.z, t.straighten);
-  const outLen = Math.hypot(outX, outZ) || 1;
-  const out = V.v3(outX / outLen, 0, outZ / outLen);
-
-  // Clearing the lip is derived rather than picked: v = sqrt(2gh) is the same
-  // relation the jump height is read with, and a fixed impulse is either too weak
-  // for the tall ledges or a pop on the short ones. That part is the FLOOR. What
-  // makes it an arc on the far side rather than a mantle is launchUp on top, and
-  // that part is earned by the angle.
-  const up = Math.sqrt(2 * T.world.gravityRise * (rise + t.clearance)) + q * t.launchUp;
+  // Exactly the launch the lip needs, derived rather than picked: v = sqrt(2gh)
+  // is the same relation the jump height is read with. A fixed impulse is either
+  // too weak for the tall ledges or a pop on the short ones.
+  const up = Math.sqrt(2 * T.world.gravityRise * (rise + t.clearance));
   p.vel.y = Math.max(p.vel.y, up);
-
-  const push = Math.max(speed, t.push + q * t.pushBonus);
-  p.vel.x = out.x * push;
-  p.vel.z = out.z * push;
-
-  p.vaultDir = out;
-  p.vaultPush = push;
+  p.vaultDir = dir;
   p.vaultT = t.hold;
   p.vaultCooldown = t.hold + t.cooldown;
-  p.vaultPending = 0;
-  p.vaultGrace = 0;
-  p.vaultArmed = false;
-  // The press was spent on the vault, so it must not come back out as a jump on
-  // the next tick — the jump buffer is still holding the same keystroke.
-  p.bufJump = 0;
 
   // Both ground states clamp vertical velocity to zero every tick, so a hop that
   // leaves the state alone is a hop that gets deleted on the next one.
@@ -1099,14 +982,6 @@ function tickTimers(p: Player, dt: number) {
   p.wallCooldown = d(p.wallCooldown);
   p.vaultT = d(p.vaultT);
   p.vaultCooldown = d(p.vaultCooldown);
-  p.vaultGrace = d(p.vaultGrace);
-  // An early Space that never found its lip turns back into a jump rather than
-  // evaporating. You asked to leave the ground; silently getting nothing for it
-  // is a worse answer than getting it a frame or two late.
-  if (p.vaultPending > 0) {
-    p.vaultPending = d(p.vaultPending);
-    if (p.vaultPending <= 0 && T.vault.failToJump) p.bufJump = T.jump.bufferTime;
-  }
   p.slamBoost = d(p.slamBoost);
   p.grappleKeep = d(p.grappleKeep);
   p.grappleCooldown = d(p.grappleCooldown);
@@ -1140,17 +1015,7 @@ function tickTimers(p: Player, dt: number) {
 export function step(p: Player, i: Intent, col: CollisionWorld, dt: number) {
   tickTimers(p, dt);
 
-  // Who owns Space this tick. The vault claims it only when there is actually a
-  // lip in the window — everywhere else the press falls straight through to the
-  // jump, so binding both to one key costs nothing in open air. The sense pass
-  // has to run here, before the state machine, or updateGrounded consumes the
-  // buffered jump first and the vault never gets a look at its own button.
-  const lip = vaultSense(p, col);
-  const vaultClaim = T.vault.enabled && T.vault.timed && i.jump.pressed
-    && p.state !== 'wallrunning' && !p.slamming
-    && (p.vaultArmed || p.vaultGrace > 0);
-  if (vaultClaim) p.vaultPending = T.vault.windowBefore;
-  else if (i.jump.pressed) p.bufJump = T.jump.bufferTime;
+  if (i.jump.pressed) p.bufJump = T.jump.bufferTime;
   if (i.dash.pressed) p.bufDash = T.dash.bufferTime;
   if (i.slide.pressed) p.bufSlide = T.slide.bufferTime;
 
@@ -1199,7 +1064,7 @@ export function step(p: Player, i: Intent, col: CollisionWorld, dt: number) {
   // state (which would otherwise re-apply air control into it) and before the
   // rope. Vaulting is suppressed for the same reason: the whole move is "down".
   if (p.slamming) updateSlam(p);
-  else tryVault(p, lip);
+  else tryVault(p, col);
 
   // After the state, before the move: the rope gets the last word on velocity,
   // so it can cancel whatever the state just added that the rope would not allow.
@@ -1233,8 +1098,8 @@ export function step(p: Player, i: Intent, col: CollisionWorld, dt: number) {
   // whole thing exists to remove.
   if (p.vaultT > 0) {
     const along = p.vel.x * p.vaultDir.x + p.vel.z * p.vaultDir.z;
-    if (along < p.vaultPush) {
-      const add = p.vaultPush - along;
+    if (along < T.vault.push) {
+      const add = T.vault.push - along;
       p.vel.x += p.vaultDir.x * add;
       p.vel.z += p.vaultDir.z * add;
     }

@@ -81,22 +81,8 @@ export interface Player {
   // ledge probe and hands velocity back, so it works out of a run, a fall, a
   // dash or a slide without any of them having to know about it.
   vaultT: number;        // seconds left of the forward push over the lip
-  vaultPush: number;     // the forward floor THIS vault launched with
   vaultCooldown: number;
   vaultDir: V3;          // horizontal direction the hop is carrying you
-
-  // The timing window. Space is the vault button and the jump button, so the two
-  // are told apart by the situation: `vaultArmed` says a vaultable lip is close
-  // enough that Space belongs to the vault, `vaultPending` is a press waiting for
-  // the lip to arrive, and `vaultGrace` is the tail after contact where a late
-  // press still counts. The lip fields are what the grace path launches off,
-  // because by then the collision has already thrown the real ones away.
-  vaultArmed: boolean;   // HUD cue: press now
-  vaultPending: number;  // seconds left on an early press looking for its lip
-  vaultGrace: number;    // seconds left on a late press catching the lip behind you
-  vaultRise: number;     // height of the lip touched at the last contact
-  vaultNormal: V3;       // its horizontal face normal, pointing back at you
-  vaultEntryVel: V3;     // horizontal velocity you arrived with, pre-bonk
 
   // Grapple. Not a state — a constraint layered on top of whatever you are
   // already doing, so you can grapple out of a dash, a wallrun or a slide.

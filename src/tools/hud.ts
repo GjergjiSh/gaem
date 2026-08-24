@@ -95,12 +95,6 @@ export class Hud {
       `wall     ${p.wallSide ? (p.wallSide > 0 ? 'right' : 'left ') : '--   '} arc ${bar(T.wall.gravityRamp - p.wallTime, T.wall.gravityRamp)}  chain ${p.wallChain}/${T.wall.maxChain}`,
       `coyote   ${bar(p.coyoteJump, T.jump.coyoteTime)}  buf ${bar(p.bufJump, T.jump.bufferTime)}`,
       `slidecoy ${bar(p.slideCoyote, T.slide.coyoteTime)}${p.slideCoyote > 0 ? '  LEDGE TECH ARMED' : ''}`,
-      // The vault is a timed input now, and a timed input you get no feedback on
-      // is a coin flip. `late` is the grace after touching the lip; `wait` is an
-      // early press still looking for one.
-      `vault    ${p.vaultArmed ? 'VAULT — SPACE  ' : '               '}`
-        + `late ${bar(p.vaultGrace, T.vault.windowAfter)}`
-        + `  wait ${bar(p.vaultPending, T.vault.windowBefore)}`,
       `dash cd  ${bar(T.dash.cooldown - p.dashCooldown, T.dash.cooldown)}`,
       `cables   ${p.grappling
         ? `${p.cables.map((c) => (c.on ? c.len.toFixed(1).padStart(5) : '    -')).join(' ')}`
@@ -123,8 +117,7 @@ export class Hud {
       this.help.textContent = [
         `WASD move · Space jump · Shift dash · Ctrl slide`,
         `C in the air = ground slam · landing it makes your next dashes hit harder`,
-        `dash into a low ledge + Space as you hit it = vault (arc over, keeps speed)`,
-        `  the squarer you hit it, the higher and further it throws you`,
+        `run into a low ledge = vault (automatic, keeps your speed)`,
         `hold Space with no jumps left = thrusters (hover + shoot)`,
         `  + Shift while thrusting = afterburner (drinks fuel, goes fast)`,
         `air into a wall = wallrun (auto-runs) · Space = eject`,
