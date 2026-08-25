@@ -486,10 +486,12 @@ export class Renderer {
       this.levelGroup.add(ring);
     }
 
-    // Every copy of every kit model in the district, collapsed into one draw
-    // call per distinct piece. Not in the editor, where a model has to stay a
-    // child of the brush it belongs to so the gizmo drags it.
-    if (!this.edges) this.batchModels();
+    // Every copy of every kit model in the district, and every brush that
+    // repeats a size, a surface and a colour, collapsed into one draw call per
+    // distinct piece. Not in the editor, where a model has to stay a child of
+    // the brush it belongs to so the gizmo drags it, and where a brush has to
+    // keep its own material so selection can tint it.
+    if (!this.edges) this.batchDraws();
 
     // The city has changed shape, so the baked shadow map is out of date. One
     // flag, one extra pass on the next frame, and then never again — which is
@@ -528,7 +530,7 @@ export class Renderer {
    * the two cells it can see instead of the whole map.
    */
   private static readonly CELL = 128;
-  private batchModels() {
+  private batchDraws() {
     interface Batch {
       geo: THREE.BufferGeometry;
       mat: THREE.Material;
@@ -537,6 +539,40 @@ export class Renderer {
     }
     const batches = new Map<string, Batch>();
     const roots: THREE.Object3D[] = [];
+    const boxes: THREE.Mesh[] = [];
+    const cellOf = (o: THREE.Object3D) => {
+      const C = Renderer.CELL;
+      return `${Math.round(o.position.x / C)},${Math.round(o.position.z / C)}`;
+    };
+    const into = (
+      geo: THREE.BufferGeometry, mat: THREE.Material, shadow: boolean,
+      cell: string, m: THREE.Matrix4,
+    ) => {
+      const key = `${geo.uuid}|${mat.uuid}|${shadow}|${cell}`;
+      let b = batches.get(key);
+      if (!b) { b = { geo, mat, shadow, m: [] }; batches.set(key, b); }
+      b.m.push(m);
+    };
+
+    // The brushes themselves. `boxFor` quantises its geometry key to 25 cm and
+    // `materialFor` is one material per (surface, colour), so two brushes that
+    // agree on size, surface and colour ALREADY share both — which is the whole
+    // condition for instancing, arrived at without anything new. A kerb is 0.7 x
+    // 0.9 x whatever and there are hundreds of them; a truss is one member
+    // repeated down a mile of girder.
+    //
+    // Batches of one are left alone rather than instanced. An InstancedMesh of a
+    // single matrix costs the same draw and a little more state, and most of the
+    // masses in the district are one-offs.
+    for (const brush of this.brushMeshes) {
+      const mat = brush.material as THREE.Material;
+      if (Array.isArray(brush.material) || mat === HIDDEN) continue;
+      brush.updateWorldMatrix(true, false);
+      into(brush.geometry, mat, brush.castShadow, cellOf(brush),
+        brush.matrixWorld.clone());
+      boxes.push(brush);
+    }
+
     for (const brush of this.brushMeshes) {
       for (const child of brush.children) {
         if ((child as THREE.LineSegments).isLineSegments) continue;
@@ -545,15 +581,8 @@ export class Renderer {
         child.traverse((o) => {
           const mesh = o as THREE.Mesh;
           if (!mesh.isMesh || Array.isArray(mesh.material)) return;
-          const C = Renderer.CELL;
-          const cell = `${Math.round(brush.position.x / C)},${Math.round(brush.position.z / C)}`;
-          const key = `${mesh.geometry.uuid}|${mesh.material.uuid}|${mesh.castShadow}|${cell}`;
-          let b = batches.get(key);
-          if (!b) {
-            b = { geo: mesh.geometry, mat: mesh.material, shadow: mesh.castShadow, m: [] };
-            batches.set(key, b);
-          }
-          b.m.push(mesh.matrixWorld.clone());
+          into(mesh.geometry, mesh.material, mesh.castShadow, cellOf(brush),
+            mesh.matrixWorld.clone());
           found = true;
         });
         if (found) roots.push(child);
@@ -561,6 +590,7 @@ export class Renderer {
     }
     if (!batches.size) return;
     for (const b of batches.values()) {
+      if (b.m.length < 2) continue;
       const im = new THREE.InstancedMesh(b.geo, b.mat, b.m.length);
       for (let i = 0; i < b.m.length; i++) im.setMatrixAt(i, b.m[i]);
       im.instanceMatrix.needsUpdate = true;
@@ -573,6 +603,16 @@ export class Renderer {
     // model, and leaving the tree alone is what keeps a rebuild the only thing
     // that has to know about any of this — but they no longer draw.
     for (const r of roots) r.visible = false;
+    // A brush whose box went into a batch stops drawing the same way one under
+    // a model does: a dedicated hidden material, so the mesh stays in
+    // `brushMeshes` and stays raycastable for the sword, the Getsuga and the
+    // projectiles. Only the ones that actually got instanced — a batch of one
+    // was left as it was and still has to draw itself.
+    for (const m of boxes) {
+      const b = batches.get(`${m.geometry.uuid}|${(m.material as THREE.Material).uuid}`
+        + `|${m.castShadow}|${cellOf(m)}`);
+      if (b && b.m.length > 1) m.material = HIDDEN;
+    }
   }
 
   /**

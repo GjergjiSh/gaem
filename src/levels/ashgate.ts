@@ -526,6 +526,29 @@ function ramp(
   return { yaw, climb, len, q, brush };
 }
 
+/**
+ * A steel member: one box laid along the line from `a` to `b`, centred on it.
+ *
+ * `ramp` puts its TOP SURFACE on the line, because a ramp is a floor and a floor
+ * belongs where you asked for it. A truss member is not a floor, it is a stick
+ * between two joints, and it belongs ON the line rather than under it — so these
+ * are two functions instead of one with a flag, and neither has to explain
+ * itself at the call site.
+ *
+ * Square section, because every member of a lattice is the same section turned a
+ * different way, and a rectangular one would need a roll angle to say which way.
+ */
+function member(a: P3, b: P3, w: number, c: number, t?: string) {
+  const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
+  const flat = Math.hypot(dx, dz);
+  const len = Math.hypot(flat, dy);
+  // A joint that lands on top of another joint is not a member. Rounding in a
+  // profile can produce one, and a 2 cm box is a brush the verifier rejects.
+  if (len < 0.4) return;
+  box([(a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2], [w, w, len], c,
+    orient(Math.atan2(dx, dz), -Math.atan2(dy, flat)), t);
+}
+
 /** A prop standing on `y`, at the model's own size. */
 function prop(m: string, x: number, y: number, z: number, yaw = 0, scale = 1) {
   const s = sciBrush(m, scale);
@@ -2338,8 +2361,47 @@ export const LINE_OVER = 14;
 const RAIL_W = 1.6, RAIL_H = 0.9;
 /** How high a frame's posts reach: the top of the rail, and not past it. */
 const MAST_UP = LINE_OVER + RAIL_H / 2;
-/** How far one span's girder and rail run past a bend into the next one's. */
+/** How far one span's chords and rail run past a bend into the next one's. */
 const LAP = 1.6;
+/**
+ * The girder is a TRUSS, and these are its three numbers.
+ *
+ * It was one 6 x 1.6 m box per span, which is the shape a girder has in a
+ * drawing and not the shape one has in the world: a mile of blank slab under the
+ * road, reading as a kerbstone the size of a street and telling you nothing
+ * about how the road is held up. Nothing else on the Line was blocky — the deck
+ * is a road, the rail is a rail, the columns are columns — so the one part
+ * carrying all of it was the one part that looked like a placeholder.
+ *
+ * So: two chords under the deck edges, and a web of posts and diagonals between
+ * them in each side plane. A post at every joint and one diagonal in every panel,
+ * the diagonals alternating, which is the pattern that leaves NOTHING BUT
+ * TRIANGLES — and a triangle is a hole. That is the other half of the reason to
+ * build it this way rather than draw a lattice on a box: at 8 x 5.5 m the
+ * openings are bigger than a dash, so the underside of the Line stops being a
+ * ceiling and becomes something you go through. The Line runs 18 m clear over
+ * roofs that reach 30, so this is reachable geometry, not scenery.
+ *
+ * `TRUSS_D` is measured to the bottom chord's CENTRELINE from the deck's
+ * underside. 5.5 m over spans up to 78 m is about 1:14, which is what a real
+ * truss of this reach is, and it is also what makes the diagonals sit at 35°
+ * rather than lying down.
+ */
+const TRUSS_D = 5.5;
+/** A chord's section, and a web member's. Chords are heavier; they always are. */
+const CHORD = 1.2, WEB = 0.7;
+/** One panel of the web — the length of a triangle, and so of the hole in it. */
+const PANEL = 8;
+/**
+ * How deep the whole structure reaches below the deck's TOP surface: the slab,
+ * the truss, and half a chord to get to the underside of it.
+ *
+ * Exported because `verify:level` measures the air under the Line and has to
+ * start its ray below the girder rather than below the deck — started under the
+ * deck it hits the truss's own ties and reports the truss instead of whatever
+ * the Line is flying over.
+ */
+export const LINE_UNDER = LINE_T + TRUSS_D + CHORD / 2;
 /** How far apart the piers stand, and how clear of a junction they keep. */
 const PIER_SPAN = 62, PIER_CLEAR = 26;
 /** Portal legs stand this far either side of the centreline. */
@@ -2468,6 +2530,12 @@ for (const leg of LINE_LEGS) {
     p.x + (leg.axis === 'z' ? off : 0),
     p.z + (leg.axis === 'x' ? off : 0),
   ];
+  /** A point `off` across the leg from `p` and `along` down it, at height `y`. */
+  const pt = (p: P3, off: number, along: number, y: number): P3 => ({
+    x: p.x + (leg.axis === 'z' ? off : along),
+    y,
+    z: p.z + (leg.axis === 'x' ? off : along),
+  });
 
   for (const [lo, hi] of segs) {
     const yLo = lineY(leg, lo);
@@ -2483,9 +2551,10 @@ for (const leg of LINE_LEGS) {
       box([kx, mid.y + 0.45, kz], [0.7, 0.9, seg.len], TIER, seg.q, S_STEEL);
     }
 
-    // A girder under the deck and the rail over it: both the length of the span
-    // and both running LAP past the bend into the next span's, so the two
-    // overlap rather than meeting on a plane.
+    // The girder. Two chords under the deck EDGES — the same two lines the piers
+    // stand on, so the truss lands on its columns rather than near them — each
+    // running LAP past the bend into the next span's, so consecutive chords
+    // overlap instead of meeting on a plane.
     //
     // That lap is what lets the piers stand sixty metres apart. A span used to
     // need a frame of its own because it had nothing else holding it up, and
@@ -2495,8 +2564,49 @@ for (const leg of LINE_LEGS) {
     // pier carries the road between them instead, which is what a girder is
     // for, and the columns go where a column should go rather than where the
     // road happens to change its mind.
-    box([mid.x, mid.y - LINE_T / 2 - 0.8, mid.z], [6, 1.6, seg.len + LAP],
-      GANTRY, seg.q, S_STEEL);
+    for (const sgn of [-1, 1]) {
+      const [cx, cz] = side(mid, sgn * LINE_PY);
+      box([cx, mid.y - LINE_T - TRUSS_D, cz], [CHORD, CHORD, seg.len + LAP],
+        GANTRY, seg.q, S_STEEL);
+    }
+
+    // The web, in the plane of each chord. Panels are as near PANEL as divide
+    // the span evenly, because a truss with one odd bay at the end is a truss
+    // built by a script and this one is meant to look built.
+    //
+    // A joint belongs to exactly ONE span: posts run 1..n, so the joint at the
+    // start of a span is the previous span's last post rather than a second one
+    // in the same place. Doubling them was two boxes fighting over a millimetre
+    // at every bend on the Line.
+    const bays = Math.max(2, Math.round((hi - lo) / PANEL));
+    const bay = (hi - lo) / bays;
+    /** A joint: `at` along the leg, `sgn` across it, `drop` below the deck top. */
+    const joint = (at: number, sgn: number, drop: number): P3 => {
+      const c = pos(at, lineY(leg, at) - drop);
+      const [jx, jz] = side(c, sgn * LINE_PY);
+      return { x: jx, y: c.y, z: jz };
+    };
+    const TOP = LINE_T, BOT = LINE_T + TRUSS_D;
+    for (const sgn of [-1, 1]) {
+      for (let i = 0; i < bays; i++) {
+        const a = lo + i * bay, b = a + bay;
+        if (i > 0) member(joint(a, sgn, TOP), joint(a, sgn, BOT), WEB, GANTRY, S_STEEL);
+        // Alternating, so every opening is a triangle and no two diagonals in a
+        // row lean the same way.
+        if (i % 2) member(joint(a, sgn, TOP), joint(b, sgn, BOT), WEB, GANTRY, S_STEEL);
+        else member(joint(a, sgn, BOT), joint(b, sgn, TOP), WEB, GANTRY, S_STEEL);
+      }
+      member(joint(hi, sgn, TOP), joint(hi, sgn, BOT), WEB, GANTRY, S_STEEL);
+    }
+    // And a tie across the bottom every other joint, which is what makes the two
+    // side trusses one box girder instead of two ladders standing near each
+    // other. Every other, not every: from the street you read the rhythm, and a
+    // tie at every joint is a floor.
+    for (let i = 2; i <= bays; i += 2) {
+      const a = lo + i * bay;
+      member(joint(a, -1, BOT), joint(a, 1, BOT), WEB, GANTRY, S_STEEL);
+    }
+
     // The rail: ONE beam down the centreline, on the deck's own slope. One, not
     // one under each edge — a single rail is what a gantry runs on and what the
     // frames below are shaped to carry.
@@ -2505,7 +2615,9 @@ for (const leg of LINE_LEGS) {
   }
 
   // Piers. A leg under each edge of the deck down to the ground, a cap across
-  // under the deck, and the same posts carried up to the rail.
+  // AT THE BOTTOM CHORD — the girder sits on its columns, which is the whole
+  // order of an elevated road: column, cap, girder, deck — and the same posts
+  // carried up to the rail.
   //
   // The Overpass stood on a single column down the centreline, which was fine
   // because it ran down a 24 m avenue nothing else used. The chords run down
@@ -2536,15 +2648,45 @@ for (const leg of LINE_LEGS) {
       const top = y - LINE_T;
       const p = pos(at, 0);
       LINE_PIERS.push({ x: p.x, z: p.z });
+      /** Where the column stops and the girder starts: the bottom chord. */
+      const capY = top - TRUSS_D;
       for (const sgn of [-1, 1]) {
         const [px, pz] = side(p, sgn * LINE_PY);
-        box([px, (top - BASE) / 2, pz], [2.4, top + BASE, 2.4], MAST, undefined, S_STEEL);
+        box([px, (capY - BASE) / 2, pz], [2.4, capY + BASE, 2.4], MAST, undefined, S_STEEL);
         box([px, y + MAST_UP / 2, pz], [1.6, MAST_UP, 1.6], MAST, undefined, S_STEEL);
+        // Knee braces, in the plane of the truss above them: the column flaring
+        // out into the girder it carries rather than meeting it at a point. This
+        // is the join you actually see from the street, because it is the one
+        // place where the two heaviest things on the Line touch.
+        for (const dir of [-1, 1]) {
+          member({ x: px, y: capY - 4.5, z: pz },
+            pt(p, sgn * LINE_PY, dir * 5.5, capY), WEB, GANTRY, S_STEEL);
+        }
+        // And the same again above the deck, under the end of the rail's cross
+        // beam. Two 14 m posts holding a rail up on nothing are a pair of
+        // sticks; braced, they are a portal frame. They stay out at the chord
+        // line, which is 6.8 m off centre and so well clear of the cargo.
+        for (const dir of [-1, 1]) {
+          member({ x: px, y: y + LINE_OVER - 5, z: pz },
+            pt(p, sgn * LINE_PY, dir * 5, y + LINE_OVER - RAIL_H / 2), WEB, GANTRY, S_STEEL);
+        }
       }
       const across = LINE_PY * 2 + 2.4;
-      box([p.x, top - 1.2, p.z],
-        leg.axis === 'z' ? [across, 1.6, 2.4] : [2.4, 1.6, across],
+      box([p.x, capY, p.z],
+        leg.axis === 'z' ? [across, CHORD, CHORD] : [CHORD, CHORD, across],
         GANTRY, undefined, S_STEEL);
+      // Portal bracing across the legs: a tie and an X above it, in the top half
+      // of the columns so that nothing new arrives in the street. A pair of
+      // columns is two objects; a pair with an X between them is one frame.
+      {
+        const braceLo = capY * 0.55;
+        member(pt(p, -LINE_PY, 0, braceLo), pt(p, LINE_PY, 0, braceLo),
+          WEB, MAST, S_STEEL);
+        for (const sgn of [-1, 1]) {
+          member(pt(p, sgn * LINE_PY, 0, braceLo),
+            pt(p, -sgn * LINE_PY, 0, capY - 1.2), WEB, MAST, S_STEEL);
+        }
+      }
       // The cross beam, in the SAME band as the rail rather than above it.
       // Above it, it was a step standing proud of the rail at every frame — a
       // bump on the one surface the cargo runs along, and the cargo runs along
@@ -2568,13 +2710,17 @@ for (const leg of LINE_LEGS) {
 // nothing runs through.
 for (const j of JUNCTIONS) {
   const top = j.y - LINE_T;
+  const capY = top - TRUSS_D;
   box([j.x, j.y - LINE_T / 2, j.z], [LINE_W, LINE_T, LINE_W], ROAD, undefined, S_ROAD);
   for (const sx of [-1, 1]) {
     for (const sz of [-1, 1]) {
       const px = j.x + sx * LINE_PY;
       const pz = j.z + sz * LINE_PY;
-      box([px, (top - BASE) / 2, pz], [2.4, top + BASE, 2.4], MAST, undefined, S_STEEL);
+      box([px, (capY - BASE) / 2, pz], [2.4, capY + BASE, 2.4], MAST, undefined, S_STEEL);
       box([px, j.y + MAST_UP / 2, pz], [1.6, MAST_UP, 1.6], MAST, undefined, S_STEEL);
+      // The corner post of the truss, carrying the deck's corner down to the
+      // chord ring the columns hold up.
+      member({ x: px, y: top, z: pz }, { x: px, y: capY, z: pz }, WEB, GANTRY, S_STEEL);
     }
   }
   LINE_PIERS.push({ x: j.x, z: j.z });
@@ -2585,10 +2731,25 @@ for (const j of JUNCTIONS) {
   box([j.x, j.y + LINE_OVER, j.z], [RAIL_W, RAIL_H, LINE_W], GANTRY, undefined, S_STEEL);
   box([j.x, j.y + LINE_OVER, j.z], [LINE_W, RAIL_H, RAIL_W], GANTRY, undefined, S_STEEL);
   for (const sgn of [-1, 1]) {
-    box([j.x, top - 1.2, j.z + sgn * LINE_PY], [across, 1.6, 2.4], GANTRY, undefined, S_STEEL);
-    box([j.x + sgn * LINE_PY, top - 1.2, j.z], [2.4, 1.6, across], GANTRY, undefined, S_STEEL);
+    // The chord ring, at the same level as every leg's bottom chord so the four
+    // girders arriving here land on one thing instead of four. It is a ring
+    // rather than two beams because a crossing is carried in both directions.
+    box([j.x, capY, j.z + sgn * LINE_PY], [across, CHORD, CHORD], GANTRY, undefined, S_STEEL);
+    box([j.x + sgn * LINE_PY, capY, j.z], [CHORD, CHORD, across], GANTRY, undefined, S_STEEL);
     box([j.x, j.y + LINE_OVER, j.z + sgn * LINE_PY], [across, RAIL_H, RAIL_W],
       GANTRY, undefined, S_STEEL);
+  }
+  // A V of diagonals in each of the four side planes, off the corners up to the
+  // middle of the deck edge above. Same web, same triangles, turned the corner:
+  // the square reads as part of the girder rather than a block the girder runs
+  // into.
+  for (const sgn of [-1, 1]) {
+    for (const dir of [-1, 1]) {
+      member({ x: j.x + dir * LINE_PY, y: capY, z: j.z + sgn * LINE_PY },
+        { x: j.x, y: top, z: j.z + sgn * LINE_PY }, WEB, GANTRY, S_STEEL);
+      member({ x: j.x + sgn * LINE_PY, y: capY, z: j.z + dir * LINE_PY },
+        { x: j.x + sgn * LINE_PY, y: top, z: j.z }, WEB, GANTRY, S_STEEL);
+    }
   }
 }
 

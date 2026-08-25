@@ -209,18 +209,40 @@ head('what got built');
   // primitive count once per cell it appears in, NOT once per copy: the
   // hundredth building on a street is a matrix, and the first one in a new cell
   // is thirteen calls.
+  //
+  // Plain brushes batch on the same rule, and for the same reason: `boxFor`
+  // keys its geometry on the surface and the size quantised to 25 cm, and
+  // `materialFor` is one material per (surface, colour), so any two brushes
+  // that agree on all three already share a geometry and a material and differ
+  // in nothing but a matrix. A district is full of those -- every kerb, every
+  // window mullion, every member of the Line's girder -- so the price of a
+  // brush is its DISTINCT (surface, size, colour, cell), not the brush.
   const CELL = 128;
   const cells = new Map();
+  const groups = new Map();
   let calls = 0;
   for (const b of A.brushes) {
-    if (!b.m) { calls++; continue; }
-    const key = `${b.m}|${Math.round(b.p[0] / CELL)},${Math.round(b.p[2] / CELL)}`;
+    const cell = `${Math.round(b.p[0] / CELL)},${Math.round(b.p[2] / CELL)}`;
+    if (!b.m) {
+      // Same quantisation `boxFor` uses. A pyramid is unit geometry at any size,
+      // so its size is not part of the key.
+      const q = (v) => Math.round(Math.abs(v) * 4) / 4;
+      const geo = b.kind === 'pyramid' ? 'pyramid'
+        : `${q(b.s[0])}|${q(b.s[1])}|${q(b.s[2])}`;
+      const key = `${b.t ?? 'panel'}|${geo}|${b.c ?? 0x6b7280}|${!b.d}|${cell}`;
+      if (groups.has(key)) continue;
+      groups.set(key, true);
+      calls++;
+      continue;
+    }
+    const key = `${b.m}|${cell}`;
     if (cells.has(key)) continue;
     cells.set(key, true);
     calls += prims[b.m] ?? 1;
   }
-  note(`~${calls} draw calls (${cells.size} instanced batches over ${
-    A.brushes.filter((b) => b.m).length} model brushes)`);
+  note(`~${calls} draw calls (${cells.size} model batches over ${
+    A.brushes.filter((b) => b.m).length} model brushes, ${groups.size} brush batches over ${
+    A.brushes.filter((b) => !b.m).length} plain ones)`);
 
   // Every model the level names has to be a file on disk. A name that is in the
   // measured table but no longer in the pack loads as nothing and leaves a hole
@@ -748,7 +770,7 @@ const DT = 1 / 120;
 const btn = () => ({ pressed: false, held: false });
 const intent = (over = {}) => ({
   moveX: 0, moveY: 0, yaw: 0, pitch: 0,
-  jump: btn(), dash: btn(), slide: btn(), slam: btn(), vault: btn(), thrust: btn(), grapple: btn(),
+  jump: btn(), dash: btn(), slide: btn(), slam: btn(), thrust: btn(), grapple: btn(),
   ...over,
 });
 /** Camera yaw that makes moveY = 1 push along (dx, dz). */
@@ -1069,6 +1091,13 @@ head('the Line is a CIRCUIT: no ends, and nothing to fall off');
   check(spurRail === 0, `and carries its rail the whole way (${spurRail})`);
 
   // --- and there is still air under all of it.
+  //
+  // Measured from the BOTTOM OF THE GIRDER, not from the deck. The girder used
+  // to be a 1.6 m slab and the difference did not matter; it is a 5.5 m truss
+  // now, and a ray started under the deck hits the truss's own chords and ties
+  // and reports a constant five metres, whatever the Line happens to be flying
+  // over. A check that cannot see a building is not checking for one.
+  const UNDER = A.LINE_UNDER;
   let buried = 0;
   let worst = { clear: 1e9, where: '' };
   for (const leg of A.LINE_LEGS) {
@@ -1080,14 +1109,14 @@ head('the Line is a CIRCUIT: no ends, and nothing to fall off');
       for (const off of [0, 4, -4]) {
         const x = leg.axis === 'z' ? leg.at + off : at;
         const z = leg.axis === 'z' ? at : leg.at + off;
-        const g = surfaceAt(x, z, y - 4.2);
-        clear = Math.max(clear, g === null ? 1e3 : y - 1.6 - g);
+        const g = surfaceAt(x, z, y - UNDER - 0.6);
+        clear = Math.max(clear, g === null ? 1e3 : y - UNDER - g);
       }
       if (clear < 2) buried++;
       if (clear < worst.clear) worst = { clear, where: `${leg.name} at ${at.toFixed(0)}` };
     }
   }
-  note(`tightest clearance under the deck is ${worst.clear.toFixed(1)} m (${worst.where})`);
+  note(`tightest clearance under the girder is ${worst.clear.toFixed(1)} m (${worst.where})`);
   check(buried === 0, `no leg dives into a building on its way across (${buried} buried)`);
 }
 

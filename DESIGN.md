@@ -1811,81 +1811,34 @@ Final state, all measured:
 
 ---
 
-## 25. Vaulting — F, a range you set, and the angle is the score
+## 25. Vaulting — the edge stops costing you the run
 
 ### What it is
 
-Dash at something head-on, press **F** as you reach it, and the lip throws you
-into an arc on the far side. The button is the move: no press, no vault, and the
-crate stops you like any other wall.
+Run into a lip between `character.stepHeight` and `vault.maxHeight` and you hop
+it. No button. It is deliberately **not** a jump: it spends no jump charge, has no
+input to mistime, and never subtracts speed — it only ever adds.
 
-It is not a jump. It spends no jump charge and it never subtracts speed — it only
-ever adds. What it costs is the timing, and what it pays is set by the angle you
-came in at.
+A button would defeat the point. The thing this protects is flow, and by the time
+you have noticed the ledge and pressed something, the flow is already gone.
 
-> This replaced an automatic mantle, which fired off the ledge itself on the
-> argument that a button you have to notice a ledge to press arrives after the
-> flow it was protecting. True — but it also meant the most dramatic geometry in
-> the level resolved itself while you held W, and a verb with no input has no
-> ceiling. `vault.timed: false` puts the old behaviour back untouched.
+### A modifier, not a state
 
-### Its own key, and why that was the second answer
-
-The first version bound it to Space and told the vault and the jump apart by the
-situation: while a lip was in range, Space was the vault; everywhere else it was
-the jump. That worked, and the machinery to make it work was the largest part of
-the feature — a claim evaluated before the state machine (because `updateGrounded`
-consumes `bufJump` and would spend the keystroke first), a `failToJump` fallback
-so a claimed press that found no lip came back as a jump, and guards to stop the
-claim swallowing the wallrun eject.
-
-All of it existed to answer one question — *whose press was that?* — and the one
-time it guessed wrong was the one time you wanted the other move. **F deletes the
-question.** The claim, the fallback and the guards went with it. A press outside
-the range now does nothing at all, which is the correct amount of nothing.
-
-What stayed is the ordering, for a reason that has nothing to do with the key:
-`vaultSense` still runs before the state machine because the press has to be
-recorded on the tick it arrived, and the launch still runs after it because both
-ground states clamp `vel.y` to zero every tick.
-
-### The range is the knob
-
-| | |
-|---|---|
-| `vault.triggerDist` | **metres from the lip that F starts working.** Press further out and nothing happens |
-| `vault.triggerLead` | extra range as seconds of travel. `0` = the same metres at every speed |
-| `vault.inputHold` | how long a registered press keeps looking for its lip before it lapses |
-| `vault.windowAfter` | press this long *after* touching the lip and it still counts |
-
-Arming range is `triggerDist + speed · triggerLead`. Distance is the knob you
-steer by because it is the thing you can *see*: the lip is either inside the range
-or it is not, and that reads the same off every approach.
-
-The lead term exists because a fixed distance is a shrinking amount of **time** the
-faster you close on it — 1.5 m is 190 ms at 8 m/s and 44 ms at 34. At `0` the move
-therefore gets stricter the better you are. That is a real cost and it is the
-default anyway, because a range you can see beats a range that silently rescales;
-`triggerLead` is there to buy the time back if fast approaches start feeling
-unfair.
-
-`inputHold` is deliberately independent of the range. The range decides whether a
-press *counts*; this decides how long it *waits*. Tying them together would mean
-widening the range also made every press linger, which is two changes from one
-slider.
-
-The late side is a grace period, and it has to remember the rise, the face normal
-and the velocity you arrived with — by the time it fires the collision has
-flattened all three, and a grace window that hands you a standing-start hop is a
-consolation prize, not a window.
+Same shape as the grapple: a probe and a velocity change, layered on whatever you
+were already doing. Nothing in `grounded`, `airborne`, `dashing` or `sliding`
+knows it exists, so it works out of all of them, and there is no fifth state to
+keep consistent with the other four.
 
 ### The probe
 
 Two rays. Forward from **just above the autostep** — lower and it keeps finding
 ramps the controller already walks up, higher and it misses the short ledges that
 are most of the point — and then, if that face is steep enough to actually stop
-you (the same `wall.maxAngle` test the wallrun uses), a second ray **straight down
-just past the face**, from above the tallest ledge allowed.
+you (the same `wall.maxAngle` test the wallrun uses, so slopes stay the
+controller's problem), a second ray **straight down just past the face**, from
+above the tallest ledge allowed.
+
+The height that comes back decides everything:
 
 | rise above your feet | what happens |
 |---|---|
@@ -1897,78 +1850,50 @@ The tall-wall case needs no special handling and gets none: the down-probe's
 origin is buried inside the wall, which reports a surface at the very top of the
 range and fails the height test on its own.
 
-Distance comes back measured from the capsule **surface**, not its centre, or
-`triggerDist` would quietly mean something different at a different
-`character.radius`.
+### The launch is derived, not picked
 
-### Entry angle is the skill the move is testing
-
-The probe rejects anything more than `vault.maxEntryAngle` off head-on. Past that
-you are skimming a wall rather than diving into a box, and a wall you are
-travelling along already belongs to the wallrun.
-
-Inside it, the angle normalises to `q` — 1 dead head-on, 0 at the sloppiest legal
-approach — and everything the vault pays out scales by it:
-
-| | |
-|---|---|
-| `vault.launchUp` | extra rise at `q = 1`, **on top of** clearing the lip. This is the arc knob |
-| `vault.pushBonus` | extra forward speed floor at `q = 1` |
-| `vault.straighten` | how far the launch line turns from your own toward square-over-the-lip. At 0 a diagonal entry throws you diagonally across the top; at 1 every vault comes out square, which is safer to land and much more boring |
-
-Clearing the lip is derived, not picked:
-`v = sqrt(2 · gravityRise · (rise + clearance))`, the same relation the jump height
-is read with. But that is the **floor**. What makes it an arc on the far side
-instead of a mantle is `launchUp` on top, and that part is earned.
+`v = sqrt(2 · gravityRise · (rise + clearance))` — the same relation the jump
+height is read with. A fixed impulse is either too weak for the tall ledges or a
+visible pop on the short ones; this clears every ledge by exactly
+`vault.clearance` and no more.
 
 ### The part that actually took the work
 
+Getting *up* was easy. Arriving with your speed intact was not, and two things
+had to be fixed for it:
+
 **Both ground states clamp vertical velocity to zero every tick.** `updateGrounded`
 and `updateSliding` each run `vel.y = min(vel.y, 0)`. A hop applied before the
-state machine is deleted on the next tick, and one that leaves the state alone is
-deleted on the same one. The vault launches *after* the state update and moves you
-to `airborne` itself.
+state machine is a hop that gets deleted on the next tick, and one that leaves the
+state alone gets deleted on the same one. The vault runs *after* the state update
+and moves you to `airborne` itself.
 
 **The collision response deletes exactly the velocity that carries you over the
-lip.** You are still inside the face while climbing it, so the post-move projection
-strips the forward component every tick and you scrape up the wall to arrive on
-top with nothing. The push is re-asserted each tick for `vault.hold` seconds — as a
-floor, never a cap. It re-asserts `p.vaultPush`, the floor *this* vault launched
-with, not the base constant, or a head-on launch would lose its `pushBonus` on the
-first tick of the rise.
+lip.** You are still inside the face while climbing it, so the post-move
+projection strips the forward component every tick and you scrape up the wall to
+arrive on top with nothing. So `vault.push` is re-asserted each tick for
+`vault.hold` seconds — as a floor, never a cap, so it cannot slow a fast approach.
 
 And the thing you just vaulted must not grab you: a chest-high ledge is a legal
 wallrun surface by angle, so `attachWall` refuses while a vault is live.
 
-### It has to be legible
-
-A timed input with no feedback is a coin flip. The HUD carries a `vault` line:
-`VAULT — F` while a lip is in range, plus bars for the grace tail and for a press
-still looking for its lip.
-
 ### Measured
 
-Real solver, stub collision world, `npm run verify:vault`, 23 checks:
+Real solver, stub collision world, 19 checks:
 
 | | |
 |---|---|
-| press 6 m out (outside `triggerDist`) | no vault — and no jump either, F is not Space |
-| press inside the range | vaults, ends up **past** the box |
-| no press at all | no vault; you stall on the face at x 9.6 |
-| press 1.35 m out | vaults (early side) |
-| press after contact, inside `windowAfter` | vaults, still gets you over |
-| head-on vs 43° entry, same 20 m/s | **4.25 m** peak vs 3.20 m; x 27.4 vs 10.2 |
-| past `maxEntryAngle` | no vault |
-| `triggerDist` 1.5 vs 5.0, same 3 m press | too early / registers — the knob works |
-| F in open air | does nothing at all |
-| Space in open air, and Space at the lip | jumps both times, never vaults |
-| `triggerLead` 0, at 8 / 20 / 34 m/s | all vault on the same 1.35 m press |
-| `triggerLead` 0.12, 4 m press | too early at 8 m/s, registers at 34 — range grew with speed |
-
-> The harness re-asserts the approach speed until the launch. Ground friction is
-> 34 m/s², so a runner that stops being driven the moment it presses coasts to a
-> halt inside a metre — that is the test letting go of the stick, not the vault
-> failing, and it cost one confusing red before it was spotted.
+| 0.6 / 1.0 / 1.5 / 1.8 m ledges at 10 u/s | all vault, all end up on top, 0.88–0.95 s |
+| speed over the lip | **110%** of the 11 u/s run-in — the air accel adds a little; nothing is lost |
+| same 1.2 m ledge with `vault.enabled` off | run ends at **0.0 u/s**, still on the floor |
+| …with it on | **12.1 u/s**, over the top |
+| falling short onto a 1.5 m lip | vaults, 12.1 u/s on top — the platform-edge save |
+| 0.3 m step | no vault; the controller walks it |
+| 5 m wall | no vault, and you do not end up on top of it |
+| 2.4 m ledge (over `maxHeight`) | no vault |
+| drifting in at 1.5 u/s (under `minSpeed`) | no vault |
+| jumps spent | 0 |
+| times it fires per ledge | 1 |
 
 ---
 
@@ -3799,3 +3724,88 @@ The fix is to hold the target linear and half-float, and put the two includes at
 the end of the composite shader instead. The line gets drawn in scene-referred
 light, and the frame goes through tone mapping and encoding exactly once, on its
 way to the canvas.
+
+## 47. The girder becomes a truss
+
+The Line's girder was one box per span: 6 m wide, 1.6 m deep, slung under the
+deck and lapping past the bend into the next span's (§44). That is the shape a
+girder has in a *drawing*. In the world it was a mile of blank slab under the
+road — a kerbstone the size of a street, telling you nothing about how the road
+is held up. Everything else on the Line was already the thing it was: the deck a
+road, the rail a rail, the columns columns. The one part carrying all of it was
+the one part that still looked like a placeholder.
+
+So it is a truss. Two chords under the deck **edges** — the same two lines the
+piers stand on, so the girder lands on its columns instead of near them — and a
+web of posts and diagonals between them in each side plane. A post at every
+joint and one diagonal in every panel, the diagonals alternating, which is the
+pattern that leaves nothing but triangles. A tie across the bottom every other
+joint, which is what makes two side trusses one box girder rather than two
+ladders standing near each other.
+
+`TRUSS_D` is 5.5 m to the bottom chord's centreline. Over spans up to 78 m that
+is about 1:14, which is what a real truss of this reach is, and it is also what
+keeps the diagonals at 34° instead of lying down. Panels are 8 m, near enough to
+divide each span evenly — a truss with one odd bay at the end is a truss built by
+a script.
+
+### The triangles are the point, not the decoration
+
+At 8 x 5.5 m every opening is bigger than a dash. The underside of the Line
+stops being a ceiling and becomes something you go *through*, and it is reachable
+geometry rather than scenery: the Line runs 18 m clear over roofs that reach 30.
+
+### The order a bridge is actually built in
+
+The pier cap used to sit 1.2 m under the deck, because the thing above it was a
+slab and a slab needs holding at its own level. It is at the bottom chord now,
+and the columns stop there: column, cap, girder, deck. The junction squares get
+the same — a ring of chord at that level, so the four girders arriving at a
+crossing land on one thing instead of four.
+
+Two braces came with it, both for the same reason. **Knee braces** at the top of
+each column, in the plane of the truss above it, so the column flares out into
+the girder rather than meeting it at a point — that is the join you actually see
+from the street, because it is where the two heaviest things on the Line touch.
+And **portal bracing** across the two columns of a pier: a tie and an X above it,
+in the top half so nothing new arrives in the street. A pair of columns is two
+objects; a pair with an X between them is one frame. The same knee brace repeats
+above the deck under the end of the rail's cross beam, where two 14 m posts
+holding a rail up on nothing were a pair of sticks.
+
+Everything stays clear of the centreline, because that is the cargo's. The
+carriers hang 5.8 m under the rail and are 5.2 m wide; the chord line is 6.8 m
+off centre.
+
+### It cost 880 brushes, and no draw calls
+
+A truss is many small members and the district had 158 draw calls of headroom, so
+the first version of this did not fit — by about six times. The note on the
+budget in `verify:level` says what to do about that, and it is not raising the
+number: **make the renderer submit fewer calls**.
+
+Which it could, for free. `boxFor` keys its geometry on the surface and the size
+quantised to 25 cm, and `materialFor` is one material per (surface, colour) — so
+any two brushes agreeing on all three *already* share a geometry and a material
+and differ in nothing but a matrix. That is the same condition §40 found for kit
+models, arrived at without anything new, and a district is full of it: every
+kerb, every window mullion, and now every member of a mile of girder. So
+`batchModels` became `batchDraws` and takes the brushes' own boxes as well,
+grouped by the same (geometry, material, shadow, 128 m cell) key, hidden behind
+the same `HIDDEN` material that keeps them raycastable for the sword and the
+Getsuga. Batches of one are left alone: an `InstancedMesh` of a single matrix
+costs the same draw and a little more state.
+
+3227 brushes at ~2442 calls became 4109 at ~2211. The raw variant — no kit
+models at all, so every brush is its own draw — went from 1606 calls to 1076 on
+2488 brushes.
+
+### And the clearance check had to start lower
+
+`no leg dives into a building on its way across` rayed down from under the deck.
+With a 1.6 m slab there that was fine; with a 5.5 m truss the ray hits the
+truss's own chords and ties and reports a constant five metres, whatever the Line
+happens to be flying over. A check that cannot see a building is not checking for
+one, so it starts below the girder now — `LINE_UNDER` is exported for it — and
+the tightest real clearance on the map is 2.5 m, over a 10 m roof on the west
+side.
