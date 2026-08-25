@@ -10,6 +10,7 @@ dist/
 
 # the verify tools each get their own scratch dir
 .verify-level/
+.inspect-level/
 .verify-diag*/
 .stats-tmp/
 .fl-tmp/

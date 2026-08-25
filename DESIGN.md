@@ -3809,3 +3809,55 @@ happens to be flying over. A check that cannot see a building is not checking fo
 one, so it starts below the girder now — `LINE_UNDER` is exported for it — and
 the tightest real clearance on the map is 2.5 m, over a 10 m roof on the west
 side.
+
+## 48. The other half of the frame
+
+§47 trussed the girder and stopped at the deck, which turned out to be trussing
+the half you *look* at and leaving the half you *stand in*. Fourteen metres
+between the deck and the rail, and in them two posts every sixty metres and
+nothing else — a road with some sticks over it, not the top of a gantry. It is
+also the half that matters, because it is the one the player is inside.
+
+So the section is one frame all the way through. The DECK is the bottom chord of
+the truss above and the top chord of the truss below; the posts continue through
+it on the same joints; the two webs are the same web with the diagonals leaning
+opposite ways, so a joint has a post through it and a V either side. A chord
+along each side at the rail's level closes the top, in the rail's own band so the
+cross beam at every pier meets it without a step.
+
+Everything stays on the 6.8 m chord line, which is where the masts already stood.
+That leaves 12.9 m of clear road down the middle — the deck is 16 m — so running
+the Line is running down the middle of a colonnade rather than threading posts.
+And it is all outside the cargo: the carriers are 5.2 m wide on the centreline.
+
+### A wall needs doors, and the doors have to be where the bridges are
+
+The frames are a wall with holes in it, and the three places the roofscape
+reaches the Line are exactly the places a wall must not be. That was a real way
+to break the level: a bridge landing at the back of a lattice is a way on that is
+bricked up, and nothing in the geometry would have said so.
+
+`LINE_GATES` declares the three, once, and **both halves read it**: the web skips
+its post and the two diagonals either side across a 12 m doorway, and the bridges
+in the ways-on block are built at the gate's own position rather than at a number
+that happens to match. Move a gate and the doorway moves with it.
+
+Then `verify:level` rays through each one — outside the deck edge to the
+centreline, three lines along, two heights. Two things had to be right about that
+ray and neither was obvious:
+
+- **The deck height at the probe, not at the gate.** A pitch runs at 16°, so
+  three metres along one is half a metre of drop. Aimed off the gate's own height
+  the ray finds the kerb.
+- **Above the kerb.** The kerb is 0.9 m and is *meant* to be there — you step
+  over it. The first version of this check probed at 1.2 m and reported two gates
+  walled up; both were the kerb, and the frames had been open all along. What is
+  being asked about is the web, and a post or a diagonal runs the full fourteen
+  metres, so 2.2 m and 7 m both find one if it is there.
+
+Closing the gates by hand (`GATE_W = 0`) makes the check fail, which is the only
+way to know it is a check and not decoration.
+
+4109 brushes became 4732, and ~2211 draw calls became ~2280 — the frames are one
+post and one diagonal repeated a few hundred times, which is the case §47's
+batcher was built for. The raw variant is 3111 brushes at ~1141 calls.

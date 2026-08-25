@@ -2474,6 +2474,38 @@ export const LINE_LEGS: Leg[] = [
   chord('chord-east', 71, 41, 34),
 ];
 
+/**
+ * Where something comes ONTO the Line, so the side frames leave a doorway.
+ *
+ * The frames between the deck and the rail are a wall with holes in it, and a
+ * hole you cannot get to is not a way on. So the three places the roofscape
+ * reaches the Line are declared here, ONCE, and both halves read them: the
+ * frames skip their web across a gate, and the bridges further down are built at
+ * the gate's own position rather than at a number that happens to match. Move one
+ * and the doorway moves with it.
+ *
+ * `sgn` is which edge of the deck the bridge arrives at, across the leg.
+ */
+export const LINE_GATES = [
+  /** Off the Spire's terrace, onto the north side. */
+  { leg: LINE_LEGS[0], at: 20, sgn: -1 as const },
+  /** Off the spine roofs, onto the west chord where it bottoms out. */
+  { leg: LINE_LEGS[4], at: 40, sgn: 1 as const },
+  /** Off the tall block beside the east chord, on a long diagonal. */
+  { leg: LINE_LEGS[5], at: 75, sgn: 1 as const },
+];
+/**
+ * How wide a doorway is.
+ *
+ * Twelve metres, which is a panel and a half — so a gate always takes out a
+ * post and the two diagonals either side of it rather than sometimes leaving a
+ * member standing in the middle of the opening.
+ */
+const GATE_W = 12;
+/** Is `at` on this side of this leg inside a doorway? */
+const atGate = (leg: Leg, at: number, sgn: number, pad = 0) => LINE_GATES.some(
+  (g) => g.leg === leg && g.sgn === sgn && Math.abs(g.at - at) < GATE_W / 2 + pad);
+
 /** Deck height anywhere along a leg. */
 export function lineY(leg: Leg, at: number): number {
   const n = leg.nodes;
@@ -2612,6 +2644,40 @@ for (const leg of LINE_LEGS) {
     // frames below are shaped to carry.
     box([mid.x, mid.y + LINE_OVER, mid.z], [RAIL_W, RAIL_H, seg.len + LAP],
       GANTRY, seg.q, S_STEEL);
+
+    // --- and the same thing again, above the deck ---------------------------
+    // The girder under the road was half the structure and looked like all of
+    // it, because the fourteen metres between the deck and the rail had two
+    // posts every sixty metres in them and nothing else. That is not the top of
+    // a gantry, it is a road with some sticks over it — and it is also the half
+    // you are standing in, which makes it the half that matters.
+    //
+    // So the section is one frame all the way through: the DECK is the bottom
+    // chord of the truss above and the top chord of the truss below, the posts
+    // continue through it on the same joints, and the two webs are the same web.
+    // A chord along each side at the rail's level closes it, in the rail's own
+    // band so the cross beam at every pier meets it without a step.
+    for (const sgn of [-1, 1]) {
+      const [tx, tz] = side(mid, sgn * LINE_PY);
+      box([tx, mid.y + LINE_OVER, tz], [CHORD, RAIL_H, seg.len + LAP],
+        GANTRY, seg.q, S_STEEL);
+      const UP = -LINE_OVER;
+      for (let i = 0; i <= bays; i++) {
+        const a = lo + i * bay, b = a + bay;
+        // A post at every joint, on the same line as the one below it — except
+        // across a doorway, where the wall has to have a hole in it.
+        if (i > 0 && !atGate(leg, a, sgn)) {
+          member(joint(a, sgn, 0), joint(a, sgn, UP), WEB, GANTRY, S_STEEL);
+        }
+        if (i === bays) continue;
+        // And a diagonal in every panel, leaning the opposite way to the one
+        // under it — so a joint has a post going through it and a V either side,
+        // and the whole side reads as one lattice rather than two stacked.
+        if (atGate(leg, (a + b) / 2, sgn, bay / 2)) continue;
+        if (i % 2) member(joint(a, sgn, UP), joint(b, sgn, 0), WEB, GANTRY, S_STEEL);
+        else member(joint(a, sgn, 0), joint(b, sgn, UP), WEB, GANTRY, S_STEEL);
+      }
+    }
   }
 
   // Piers. A leg under each edge of the deck down to the ground, a cap across
@@ -2780,9 +2846,15 @@ export const rails: [number, number, number][][] = [(() => {
 // roofscape wherever one comes near — which, with nothing on it below 20 m,
 // means the tall blocks and the Spire rather than the street.
 {
-  const north = LINE_LEGS[0];
-  const cw = LINE_LEGS[4];
-  const ce = LINE_LEGS[5];
+  // Every one of these lands at a GATE — the same three declared up with the
+  // Line, which is what the side frames leave a doorway for. Read from there
+  // rather than typed again: a bridge that arrives where the wall has no hole in
+  // it is a way on that is bricked up.
+  const [gSpire, gWest, gEast] = LINE_GATES;
+  const cw = gWest.leg;
+  const ce = gEast.leg;
+  /** Where a gate meets the deck, across the leg. */
+  const lip = (g: typeof gSpire) => g.leg.at + g.sgn * (LINE_W / 2);
   /** A flat bridge from a roof edge to a deck edge. Both are level; a 1° ramp
    *  between them would be the one grade a slide dies on. */
   const bridge = (x0: number, z0: number, x1: number, z1: number, y: number) => {
@@ -2792,13 +2864,15 @@ export const rails: [number, number, number][][] = [(() => {
   };
   // Off the Spire's terrace, which sits at 30 with the north side passing three
   // metres away at 31.
-  bridge(20, ROWS[1].hi, 20, LOOP_Z0 - LINE_W / 2, Math.min(TERRACE, lineY(north, 20)));
+  bridge(gSpire.at, ROWS[1].hi, gSpire.at, lip(gSpire),
+    Math.min(TERRACE, lineY(gSpire.leg, gSpire.at)));
   // Onto the west chord where it bottoms out level with the spine roofs.
-  bridge(COLS[2].lo, 40, cw.at + LINE_W / 2, 40, Math.min(HEIGHT[2][2], lineY(cw, 40)));
+  bridge(COLS[2].lo, gWest.at, lip(gWest), gWest.at,
+    Math.min(HEIGHT[2][2], lineY(cw, gWest.at)));
   // And onto the east chord, off the tall block beside it, on a long diagonal
   // because that one is seven metres up.
   ramp({ x: COLS[4].lo, y: HEIGHT[3][4], z: 40 },
-    { x: ce.at + LINE_W / 2, y: lineY(ce, 75), z: 75 }, 10, 1.2, ROAD, 3,
+    { x: lip(gEast), y: lineY(ce, gEast.at), z: gEast.at }, 10, 1.2, ROAD, 3,
     undefined, S_ROAD);
 
   // A footbridge across the north end of the same avenue. The Overpass used to

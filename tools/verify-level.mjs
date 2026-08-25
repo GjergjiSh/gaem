@@ -1071,6 +1071,43 @@ head('the Line is a CIRCUIT: no ends, and nothing to fall off');
       + `(${worst.gap.toFixed(0)} m, ${worst.where})`);
   }
 
+  // --- the ways ON. The frames between the deck and the rail are a wall, and a
+  // wall is a thing a bridge can arrive at the back of. So every gate gets rayed
+  // through, at chest height, from outside the deck edge to the centreline: the
+  // gap in the web has to line up with the bridge that lands in it, and the two
+  // are declared in one place precisely so this can check that they still do.
+  {
+    let walled = 0;
+    const out = A.LINE_W / 2 + 2;
+    for (const g of A.LINE_GATES) {
+      for (const along of [-3, 0, 3]) {
+        const at = g.at + along;
+        // The deck height HERE, not at the gate's centre. A pitch runs at 16 deg,
+        // so three metres along one is half a metre of drop, and a ray aimed off
+        // the gate's own height finds the kerb rather than the frame.
+        const deck = A.lineY(g.leg, at);
+        // Above the kerb, which is 0.9 m and is meant to be there -- you step
+        // over it. What is being asked about is the WEB: posts and diagonals run
+        // the full fourteen metres, so either height finds one if it is there.
+        for (const h of [2.2, 7]) {
+          const off = g.sgn * out;
+          const from = g.leg.axis === 'z'
+            ? v(g.leg.at + off, deck + h, at) : v(at, deck + h, g.leg.at + off);
+          const dir = g.leg.axis === 'z' ? v(-g.sgn, 0, 0) : v(0, 0, -g.sgn);
+          const d = world.ray(from, dir, out);
+          if (d !== null && d < out) {
+            walled++;
+            note(`the gate at ${g.leg.name} ${g.at} is blocked ${d.toFixed(1)} m in, `
+              + `${h} m over the deck`);
+          }
+        }
+      }
+    }
+    note(`${A.LINE_GATES.length} ways onto the Line, each rayed across three lines `
+      + 'at two heights');
+    check(walled === 0, `every one of them has a doorway in the frame (${walled} walled up)`);
+  }
+
   // --- the chords leave the loop and rejoin it, so they get the same walk.
   let spurHole = 0, spurRail = 0;
   for (const leg of A.LINE_LEGS) {
