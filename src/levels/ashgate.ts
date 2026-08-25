@@ -314,6 +314,15 @@ const S_MASS2 = 'facade2';
 /** The footway every building stands on, which is what makes the road a road. */
 const S_PAVING = 'paving';
 const S_DECK = 'deck';
+/**
+ * The top of a building, which is NOT the same thing as a catwalk.
+ *
+ * Both were `deck` — poured concrete — and on the white district that made
+ * every rooftop the brightest surface in the frame and fifty of them read as
+ * fifty blank lids. A roof is loose stone ballast; a catwalk is a steel tread.
+ * They are two materials and they get two names.
+ */
+const S_ROOF = 'roofdeck';
 const S_TRIM = 'trim';
 const S_PLINTH = 'plinth';
 const S_ROAD = 'road';
@@ -325,6 +334,14 @@ const S_MARKED = 'marked';
 const S_LAMP = 'lamp';
 /** Colour that keeps reading when the sun cannot reach it — see surfaces.ts. */
 const S_PAINT = 'paint';
+/**
+ * Road markings. Its own surface rather than `paint`, because `paint` is in
+ * `LIT_SURFACES` — it is the map's language for "this thing glows" — and a lane
+ * line is not a light. It also has to stay recognisable through both
+ * derivations, which is what `RAW_SRC` is for: the greybox flattens it with
+ * everything else, and cyberedge picks it back out by name and paints it yellow.
+ */
+const S_LANE = 'lane';
 
 const HALF_PI = Math.PI / 2;
 
@@ -837,7 +854,7 @@ function mass(cx: number, cz: number, w: number, d: number, top: number): Roof {
   // above you can tell which roof belongs to which building, which is the one
   // view where this map is read as a plan.
   box([cx, top - DECK_T / 2, cz], [w, DECK_T, d], shade(mix(DECK, tint, 0.42), 0.94),
-    undefined, S_DECK);
+    undefined, S_ROOF);
   const r = { cx, cz, w, d, top };
   roofs.push(r);
   return r;
@@ -1972,6 +1989,44 @@ box([0, -BASE / 2, 0],
   [EXTENT.x1 - EXTENT.x0 + PAVE * 2, BASE, EXTENT.z1 - EXTENT.z0 + PAVE * 2], STREET,
   undefined, S_STREET);
 
+// --- lane markings ------------------------------------------------------------
+// One line down the middle of every avenue, and GEOMETRY rather than texture.
+//
+// They used to be painted into the blacktop, and that is why the district's
+// roads looked wrong: the whole street plan above is ONE brush, so a marking
+// tiled onto it comes out as a grid of dashes laid across the district
+// irrespective of where a road actually runs — including under the buildings,
+// and never down the middle of anything. A marking has to know where its road
+// is. A texture cannot; the plan can.
+//
+// Avenues only. An alley is 8 m, which is one lane, and a centre line down one
+// lane is a line down a corridor.
+/** Road-marking yellow. Matches `LANE_Y` in engine/surfaces.ts by hand. */
+const LANE = 0xe8b21e;
+{
+  const LANE_W = 0.42;
+  // Thin enough to be paint. Nothing under character.stepHeight was ever
+  // holding anything up, and 3 cm is a tenth of that.
+  const LANE_T = 0.03;
+  const x0 = EXTENT.x0 - PAVE, x1 = EXTENT.x1 + PAVE;
+  const z0 = EXTENT.z0 - PAVE, z1 = EXTENT.z1 + PAVE;
+  for (let i = 0; i < COL_GAP.length; i++) {
+    if (COL_GAP[i] < AVENUE) continue;
+    const x = (COLS[i].hi + COLS[i + 1].lo) / 2;
+    box([x, LANE_T / 2 + 0.004, (z0 + z1) / 2], [LANE_W, LANE_T, z1 - z0],
+      LANE, undefined, S_LANE);
+  }
+  for (let i = 0; i < ROW_GAP.length; i++) {
+    if (ROW_GAP[i] < AVENUE) continue;
+    const z = (ROWS[i].hi + ROWS[i + 1].lo) / 2;
+    // A hair lower than the north–south ones, so the two do not fight for the
+    // same millimetre where they cross. The one that runs THROUGH wins, which
+    // is also what a road authority would do.
+    box([(x0 + x1) / 2, LANE_T / 2, z], [x1 - x0, LANE_T, LANE_W],
+      LANE, undefined, S_LANE);
+  }
+}
+
 // --- the edge of the world ----------------------------------------------------
 // The district sits on a plate, and a plate has a rim.
 //
@@ -3069,7 +3124,7 @@ for (let ri = 0; ri < ROWS.length; ri++) {
     const C = COLS[ci], R = ROWS[ri];
     const k = ri * COLS.length + ci;
     const pw = 26, pd = 22, ph = 8;
-    box([C.c, ph - DECK_T / 2, R.c], [pw, DECK_T, pd], DECK, undefined, S_DECK);
+    box([C.c, ph - DECK_T / 2, R.c], [pw, DECK_T, pd], DECK, undefined, S_ROOF);
     roofs.push({ cx: C.c, cz: R.c, w: pw, d: pd, top: ph });
     for (const sx of [-1, 1]) {
       for (const sz of [-1, 1]) {
@@ -3337,6 +3392,16 @@ const CYBER_GROUND = 0xe9e7e1;
  * brush stays out of its way.
  */
 const CYBER_TARMAC = 0xf2f0ec;
+/**
+ * And the roofs, which are the one thing up here that is genuinely dark.
+ *
+ * Everything else in this style is off-white with dark accents cut into it. A
+ * roof is not an accent, it is a surface — fifty of them, and they are most of
+ * what you see from any height on the map. White they read as fifty blank lids
+ * and the district has no top to it; ballasted grey they read as the working
+ * side of a building, and the white walls get to be white against something.
+ */
+const CYBER_ROOF = 0x54565b;
 
 /** Ramp indices carry over untouched: this is a recolour, not a re-cut. */
 /**
@@ -3358,12 +3423,117 @@ const CYBER_SURFACE: Record<string, string> = {
   [S_STREET]: 'blacktop',
   [S_PAVING]: 'slab',
   [S_DECK]: 'slab',
+  // A roof is ballast, not concrete, and it is the only dark surface up here.
+  [S_ROOF]: 'roofdeck',
   [S_STEEL]: 'girder',
   [S_CRATE]: 'ribbed',
+  // Road paint stays road paint, and keeps its own colour rather than being
+  // sorted into one of the three material families below.
+  [S_LANE]: 'lane',
 };
 
+/**
+ * Glass, in openings this level cuts for it.
+ *
+ * The district had no glass. It had a window PAINTED INTO THE CLADDING — two
+ * dark rectangles per 22 m repeat, at a fixed height up that repeat — and the
+ * consequence is the bug you can see from any street: the repeat is measured in
+ * metres of BRUSH from the bottom of a face, so the row of windows sat 12.3 m up
+ * whatever it landed on. Every building shorter than that had none at all, and
+ * the taller ones had a row at a height with no relationship to the building.
+ * A wall texture does not know how tall the wall is, so it cannot be the thing
+ * that decides where a window goes.
+ *
+ * So the openings are placed here, off the same storey pitch `facade` uses, and
+ * they are real brushes with a real material in them. Which also buys the thing
+ * a painted window can never have: SIZES. An industrial building is mostly blank
+ * wall with the glazing gathered into a few big openings — a long strip window
+ * high up, and a handful of tall lights lower down — and not a field of evenly
+ * spaced squares.
+ *
+ * Cyberedge only, and appended AFTER the mapped list so it cannot shift an index
+ * `RAMP_BRUSHES_CYBER` is holding. The dusk level still paints its own windows
+ * and still wants to: they are what carries its night skyline, and they cost it
+ * nothing. This costs the white district about eighty draw calls and it has them
+ * — that variant wears no kit models at all, so it runs at half the budget.
+ */
+/**
+ * Glass, and it is much lighter than the instinct says.
+ *
+ * The first value here was a dark slate, on the reasoning that glass is dark —
+ * and every window on the map came out as a black rectangle punched in a white
+ * wall. Glass is not dark, it is a MIRROR: from outside, in daylight, most of
+ * what a pane sends back is the sky, and the sky at noon is the brightest thing
+ * in the scene. Dark is what a window looks like at night from outside, or at
+ * any time from in.
+ */
+const CYBER_GLASS = 0x8ea6b8;
+const GLAZING: Brush[] = (() => {
+  const out: Brush[] = [];
+  /** Half the depth of an opening: half of it stands proud, half is recessed. */
+  const OUT = 0.11;
+  /** A strip window, and a tall light. Two sizes, and that is the variety. */
+  const PANO_H = 2.7;
+  const TALL: [number, number] = [2.6, 4.2];
+  for (const r of roofs) {
+    // Plazas, canopies and the little service decks get none. A 2 m parapet
+    // with a strip window in it is not a building.
+    if (r.top < 10 || Math.min(r.w, r.d) < 12) continue;
+    const k = Math.round(r.cx) * 977 + Math.round(r.cz);
+    // Where an opening can go: between the service bands, which sit on an 8.5 m
+    // pitch from PLINTH. The ladder starts 2.2 m up rather than a full storey,
+    // because most of this district is 12 to 26 m and a ladder that starts at
+    // PLINTH + 8.5 clears the top of everything under 22 m — which is how the
+    // first cut of this glazed six buildings out of fifty.
+    const mid: number[] = [];
+    for (let y = PLINTH + 2.2; y < r.top - 3.0; y += 8.5) mid.push(y);
+    if (!mid.length) continue;
+
+    // The strip window: one brush, wrapping all four faces, two thirds up. A
+    // clerestory is what an industrial building glazes with, it is the single
+    // most recognisable thing about one, and it is also a whole building's
+    // glazing for the price of one box.
+    // Two thirds up by default, but chosen off the building's own hash when it
+    // has the storeys to choose from — a street where every strip window is at
+    // the same fraction of a different height is a street of one building.
+    const band = mid[mid.length === 1 ? 0
+      : Math.max(1, Math.min(mid.length - 1,
+        Math.round((mid.length - 1) * 0.66) + (hash(k) % 3) - 1))];
+    out.push({
+      p: [r.cx, band, r.cz],
+      s: [r.w + OUT * 2, PANO_H, r.d + OUT * 2],
+      c: CYBER_GLASS, t: 'glass',
+    });
+
+    // And the tall lights, on the lowest storey that has one, two to a face.
+    // Two, not six: the wall is the material and the glazing is the exception,
+    // and a row of them every four metres is an office block.
+    const low = mid[0];
+    if (low === band) continue;
+    for (let f = 0; f < 4; f++) {
+      const [nx, nz] = ([[1, 0], [-1, 0], [0, 1], [0, -1]] as const)[f];
+      const along = nx !== 0 ? r.d : r.w;
+      // Skip a face too short to carry two without them touching, and one face
+      // in four regardless — a building with the same two lights on all four
+      // sides is a building nobody built.
+      if (along < 16 || hash(k * 7 + f) % 4 === 0) continue;
+      for (const t of [-1, 1]) {
+        const off = t * along * 0.22;
+        const px = r.cx + nx * (r.w / 2) + (nx === 0 ? off : 0);
+        const pz = r.cz + nz * (r.d / 2) + (nz === 0 ? off : 0);
+        out.push({
+          p: [px, low, pz],
+          s: nx !== 0 ? [OUT * 2, TALL[1], TALL[0]] : [TALL[0], TALL[1], OUT * 2],
+          c: CYBER_GLASS, t: 'glass',
+        });
+      }
+    }
+  }
+  return out;
+})();
+
 export const RAMP_BRUSHES_CYBER: number[] = RAMP_BRUSHES_RAW.slice();
-export const brushesCyber: Brush[] = brushesRaw.map((b, i) => {
+const cyberMapped: Brush[] = brushesRaw.map((b, i) => {
   const src = RAW_SRC[i] ?? '';
   let surface = CYBER_SURFACE[src] ?? 'plate';
   // A texture cannot know which way a road points, so there are two blacktops
@@ -3371,12 +3541,21 @@ export const brushesCyber: Brush[] = brushesRaw.map((b, i) => {
   // longer along the road than across it, which is a good enough tell for
   // something that only decides which way a painted line runs.
   if (surface === 'blacktop') surface = b.s[0] >= b.s[2] ? 'blacktopX' : 'blacktopZ';
+  // The Line's deck instead tiles at its own WIDTH, which is the only way a
+  // texture can put a line down the middle of a road: one repeat across, so the
+  // centre of the map is the centre of the deck. It works for the deck and
+  // nothing else on the map, because the deck is the only road with a constant
+  // width — see `blacktopDeck`.
+  if (src === S_ROAD) surface = 'blacktopDeck';
   // Blacktop keeps a near-white brush: its darkness is painted into the map,
   // because a dark brush colour would multiply the lane markings down with it.
   const mass = surface === 'girder' ? CYBER_STEEL
     : surface === 'slab' ? CYBER_GROUND
-      : surface.startsWith('blacktop') ? CYBER_TARMAC : CYBER_MASS;
-  const c = b.c === RAW_WHITE ? CYBER_TRIM : b.c === RAW_RED ? CYBER_RED : mass;
+      : surface === 'roofdeck' ? CYBER_ROOF
+        : surface === 'lane' ? LANE
+          : surface.startsWith('blacktop') ? CYBER_TARMAC : CYBER_MASS;
+  const c = surface === 'lane' ? LANE
+    : b.c === RAW_WHITE ? CYBER_TRIM : b.c === RAW_RED ? CYBER_RED : mass;
   return {
     ...b,
     // The accent bands stay bare. They are 30 cm of pure colour doing a job —
@@ -3393,6 +3572,7 @@ export const brushesCyber: Brush[] = brushesRaw.map((b, i) => {
     c,
   };
 });
+export const brushesCyber: Brush[] = [...cyberMapped, ...GLAZING];
 
 /**
  * Midday: the key high and nearly white, the dome deep blue, the haze pushed

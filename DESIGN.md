@@ -3931,3 +3931,101 @@ horizon is.
 district costs 2921 and the crown of the Spire costs 1129 — the rings are
 backdrop in a handful of far cells, so the frustum throws most of them away from
 any one camera, which is exactly what the 128 m cells are for.
+
+## 50. Windows that are where the wall is
+
+Six complaints about the white district, and five of them turned out to be one
+mistake made in five places: a texture was deciding something only the level
+knows.
+
+### The windows were painted into the cladding
+
+`plate` drew two dark rectangles per repeat, at a fixed height *up that repeat*.
+The repeat is 22 m of BRUSH measured from the bottom of a face, so the window row
+sat 12.3 m up whatever it landed on. Every building shorter than that had **no
+windows at all** — which is most of a district whose roofs run 12 to 30 m — and
+the taller ones had a row at a height with no relationship to the building. That
+is the whole of "windows either missing or misplaced", and it is not fixable in a
+texture, because a wall texture does not know how tall the wall is.
+
+So glazing is geometry. Openings placed off the same 8.5 m storey pitch
+`facade` uses, offset half a storey so a window is never sitting on a service
+band, and filled with a `glass` material. Two sizes, which is the variety a
+painted window can never have:
+
+- a **strip window** two thirds up, one brush, wrapping all four faces. A
+  clerestory is what an industrial building glazes with, it is the most
+  recognisable thing about one, and it is a whole building's glazing for the
+  price of one box.
+- **tall lights** on the lowest storey, two to a face, one face in four skipped
+  by hash. Two and not six: the wall is the material and the glazing is the
+  exception.
+
+The storey ladder starts at `PLINTH + 2.2` rather than a full storey up. The
+first cut started at `PLINTH + 8.5`, which clears the top of everything under
+22 m — and glazed six buildings out of fifty.
+
+Cyberedge only, appended after the mapped list so it cannot shift an index
+`RAMP_BRUSHES_CYBER` holds. The dusk level still paints its own windows and still
+should: they carry its night skyline and they cost it nothing. This costs the
+white district 60 draw calls, and that variant wears no kit models at all, so it
+runs at 1426 of 2600.
+
+### Glass is a mirror, not a dark thing
+
+The first colour here was a dark slate, on the reasoning that glass is dark, and
+every window came out as a black rectangle punched in a white wall. From outside
+in daylight a pane sends back the **sky**, which at noon is the brightest thing
+in the scene; dark is what glass looks like at night, or from indoors. So: a
+light blue-grey, a base map carrying a strong head-to-cill gradient, mullions,
+and a hard-edged diagonal sheen. Roughness 0.16 rather than a mirror 0.09 —
+tighter than that and you only catch the specular at the exact mirror angle, so
+every other pane on the street is its flat base colour, which is the difference
+between glass and dark paint.
+
+### The road markings were painted onto the whole street plan
+
+The district's streets are ONE brush covering the entire plan. The blacktop
+tiles every 9 m, so its "centre line" was a grid of dashes laid across the
+district irrespective of where a road ran — including under the buildings, and
+never down the middle of anything. Same mistake: a marking has to know where its
+road is.
+
+Markings are geometry now. One continuous yellow line down each of the four
+avenues — alleys get none, an 8 m alley is one lane — as a 3 cm strip, which is a
+tenth of `character.stepHeight`. Four brushes. `S_LANE` is its own surface rather
+than `paint`, because `paint` is in `LIT_SURFACES` (the map's word for "this
+glows") and a lane line is not a light; keeping it separate is also what lets
+cyberedge pick it back out of `RAW_SRC` by name and paint it yellow instead of
+sorting it into one of the three material families.
+
+The Line's deck is the exception, and it gets to keep its line in the texture:
+it is the one road on the map with a **constant width**, so `blacktopDeck` tiles
+at 16 m — exactly one repeat across the deck — which puts the line exactly down
+the middle, and because the deck brushes are rotated with the road it follows
+every pitch and bend for free.
+
+The asphalt itself went from a mid-grey to `#3f4247`. Blacktop under a hard noon
+key is darker than people draw it, and it has to be dark for the paint on it to
+read as paint rather than as a lighter grey.
+
+### The roofs were the pavement
+
+`mass()` has always emitted its roof as its own brush — it just wore `deck`, the
+same poured concrete as the footways. On the white district that made every
+rooftop the brightest surface in the frame, and fifty of them read as fifty
+blank lids. They are `roofdeck` now: loose stone ballast over the membrane,
+dense aggregate with worn patches and **no joints of any kind**, which is the
+strongest tell that it is not concrete. `sideUV`, because what you see of a
+40 cm deck edge is a fascia and not a section through the gravel. Zero new
+geometry, and a catwalk is still a steel tread — that is why this is a new
+surface name and not a change to `deck`.
+
+### And the steel was bland
+
+`girder` had flanges, a bolt row and a splice line. It now has the things that
+make a section read as fabricated rather than extruded: a graded web, a
+highlight along each flange, bolts drawn as a shadow and a lit crown instead of
+a dot, splice plates with their own bolt groups and a seam up the middle, and
+lengthwise roller streaks — paint on steel is sprayed over mill scale and never
+comes out even. Nothing here costs a draw call; it is the same one texture.

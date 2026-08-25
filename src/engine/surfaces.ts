@@ -199,6 +199,27 @@ const WIN_TILE = 12;
 /** Panes per repeat, each way. 5 over 12 m is a window every 2.4 m. */
 const WIN_N = 5;
 
+/**
+ * The asphalt itself, and the yellow that goes on it.
+ *
+ * The road was a mid-grey and read as a car park. Blacktop under a hard midday
+ * key is darker than people draw it — the value that looks right in a swatch is
+ * two stops too light once the sun is on it — and it has to be dark for the
+ * paint on it to be paint rather than a lighter grey.
+ *
+ * Both live here rather than inline because the lane lines are GEOMETRY (see
+ * the level) and the tiled asphalt is a texture, and the two have to agree
+ * about what colour a road is or the markings sit on a different road.
+ */
+export const ASPHALT = '#3f4247';
+/**
+ * Road-marking yellow. `LANE` in the level is the same colour as a brush, for
+ * the lines that are geometry — they have to match by hand, because a level
+ * cannot import this module: it would pull three.js into something
+ * `verify:level` compiles and runs on its own.
+ */
+export const LANE_Y = 'rgba(232, 178, 30, 0.92)';
+
 /** Deterministic noise, so a building's lights are the same every time it loads. */
 function rng(seed: number) {
   let a = seed >>> 0;
@@ -289,34 +310,13 @@ function paintPlate(ctx: CanvasRenderingContext2D, w: number, h: number) {
     ctx.fillRect(0, y, w, line);
   }
 
-  // Windows. Two to a repeat, which at this tile is two to twenty-two metres —
-  // sparse on purpose. A white industrial block is mostly blank wall with the
-  // glazing gathered into a few large openings, and spreading small windows
-  // evenly over it is how you get an office block instead. They sit clear of
-  // the panel centre at (0.25, 0.25), because that is the texel the roofs
-  // sample and a roof made of window is not the idea.
-  const winY = h * 0.56;
-  const winH = h * 0.17;
-  for (const u of [0.16, 0.56]) {
-    const x = u * w;
-    const ww = w * 0.28;
-    // Reveal first: an opening is a hole in a thick wall, so its head and jamb
-    // throw a shadow onto the glass before the glass is anything.
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.62)';
-    ctx.fillRect(x, winY, ww, winH);
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.10)';
-    ctx.fillRect(x, winY + winH * 0.72, ww, winH * 0.28);
-    // Mullions, four bays across and one transom, which is what makes it read
-    // as industrial glazing rather than as a dark rectangle.
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.34)';
-    const bar = Math.max(1, Math.round(w / 700));
-    for (let i = 1; i < 4; i++) ctx.fillRect(x + (i / 4) * ww, winY, bar, winH);
-    ctx.fillRect(x, winY + winH * 0.5, ww, bar);
-    // And a frame round the whole opening.
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)';
-    ctx.lineWidth = Math.max(1, line * 0.6);
-    ctx.strokeRect(x, winY, ww, winH);
-  }
+  // No windows. There were two painted into every repeat of this, and that is
+  // exactly why the district's windows were missing on half the buildings and
+  // in the wrong place on the rest: the tile is 22 m of BRUSH measured up from
+  // the bottom of the face, so the row sat 12.3 m up whatever it landed on.
+  // Anything shorter than that had none at all. A wall texture cannot know how
+  // tall the wall is, so it has no business deciding where a window goes — the
+  // glazing is geometry now, and this is cladding with nothing on it but joints.
 
   // And the fixing plate at every crossing: a square of slightly darker panel,
   // an outline, and four bolts. Small — about a third of a metre at this tile
@@ -385,6 +385,172 @@ function paintSlab(ctx: CanvasRenderingContext2D, w: number, h: number) {
 }
 
 /**
+ * Road paint — see `lane` below.
+ *
+ * Thermoplastic on asphalt, and the only thing it has to get right is that it
+ * is WORN. A road marking painted as a clean rectangle is a decal; the same
+ * marking with its edges eaten and its middle polished by tyres is a road that
+ * has been used. Drawn bright because the brush colour is the yellow.
+ */
+function paintLane(ctx: CanvasRenderingContext2D, w: number, h: number) {
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, w, h);
+  let seed = 0x4d19c7b;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  // Wear: bites out of the paint, heaviest along the middle where a wheel
+  // crosses it. These are holes in the line, so they are drawn dark and the
+  // asphalt colour underneath is what the eye supplies.
+  for (let i = 0; i < 700; i++) {
+    const x = rnd() * w;
+    const y = rnd() * h;
+    ctx.fillStyle = `rgba(0, 0, 0, ${0.10 + rnd() * 0.5})`;
+    ctx.beginPath();
+    ctx.arc(x, y, 1 + rnd() * (w / 90), 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // And a faint scuff along the length, which is the direction everything that
+  // ever touched it was travelling.
+  for (let i = 0; i < 60; i++) {
+    ctx.fillStyle = `rgba(0, 0, 0, ${0.04 + rnd() * 0.08})`;
+    ctx.fillRect(rnd() * w, 0, 1 + rnd() * 2, h);
+  }
+}
+
+/**
+ * Industrial glazing — see `glass` below.
+ *
+ * The district had no glass in it. It had a WINDOW PAINTED INTO THE WALL: two
+ * dark rectangles per 22 m tile of cladding, at a fixed height up that tile.
+ * Which is why half the buildings had no windows at all and the rest had them
+ * in the wrong place — the tile is measured in metres of brush from the bottom
+ * of the face, so the row landed 12.3 m up whatever it was on. Anything shorter
+ * than that got nothing, and anything taller got a row at a height that had no
+ * relationship to the building.
+ *
+ * You cannot fix that in a texture, because a texture does not know how tall
+ * the wall is. So glazing is GEOMETRY now — real openings placed by the level at
+ * real heights, this material is what fills them, and the cladding has no
+ * windows painted on it any more.
+ *
+ * What it has to sell is glass, from the outside, at noon. Three things do that
+ * and none of them is transparency: a vertical gradient, because a pane
+ * reflects the bright sky at the top and the dark street at the bottom and that
+ * gradient is the single strongest read; mullions, because glass this size is
+ * always divided; and a hard diagonal sheen, which is the reflection of
+ * something you cannot see and is what stops it looking like dark paint.
+ */
+function paintGlazing(ctx: CanvasRenderingContext2D, w: number, h: number) {
+  // Sky at the head, street at the cill. Bright, because the brush colour is
+  // dark and multiplies over this — the gradient has to live in the map or
+  // every pane on the map is the same flat value.
+  const g = ctx.createLinearGradient(0, 0, 0, h);
+  g.addColorStop(0, '#ffffff');
+  g.addColorStop(0.42, '#c9d6e2');
+  g.addColorStop(0.72, '#6f7d8c');
+  g.addColorStop(1, '#8d99a6');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, w, h);
+
+  // The sheen: a wide diagonal band of the sky reflected off the glass. Hard
+  // edges rather than a soft gradient, because a reflection in flat glass has
+  // an edge — a soft one reads as a smudge on the texture.
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(0, h * 0.72);
+  ctx.lineTo(w * 0.62, 0);
+  ctx.lineTo(w, 0);
+  ctx.lineTo(0, h * 1.0);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.30)';
+  ctx.fill();
+  ctx.restore();
+
+  // Mullions and a transom. Four bays to a repeat, which at this tile is a bay
+  // a little over a metre — industrial glazing, not a shopfront.
+  const bar = Math.max(2, Math.round(w / 130));
+  for (let i = 0; i <= 4; i++) {
+    const x = Math.round((i / 4) * w);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.34)';
+    ctx.fillRect(x - bar, 0, bar * 2, h);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.38)';
+    ctx.fillRect(x - bar, 0, bar, h);
+  }
+  for (const t of [0, 0.5, 1]) {
+    const y = Math.round(t * h);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.34)';
+    ctx.fillRect(0, y - bar, w, bar * 2);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.30)';
+    ctx.fillRect(0, y - bar, w, bar);
+  }
+
+  // The top-left texel is where the reveals sample — see `capUV`. A window is
+  // an opening in a thick wall, and what you see of its head and cill is the
+  // frame in shadow, not more glass.
+  ctx.fillStyle = '#3a3f45';
+  ctx.fillRect(0, 0, Math.max(2, Math.round(w * 0.05)), Math.max(2, Math.round(h * 0.05)));
+}
+
+/**
+ * Ballasted roofing for the tops of the buildings — see `roofdeck` below.
+ *
+ * Every roof on this map was the same poured concrete as the pavements, which
+ * is wrong twice: a roof is not a floor you pour and leave, and on the white
+ * district it made every rooftop the brightest surface in the frame. Fifty of
+ * them read as fifty blank white lids, and from any height that is most of what
+ * you can see.
+ *
+ * What is actually up there on a building like this is a flat roof finished in
+ * loose stone ballast — pea gravel over the membrane, held down by its own
+ * weight. So: dense small aggregate, a few slightly worn patches where it has
+ * been walked, and no joints of any kind, which is the single strongest tell
+ * that this is not concrete. It is drawn bright with dark stones because the
+ * brush colour multiplies over it, so the same map serves a mid-grey roof at
+ * dusk and a near-black one at noon.
+ */
+function paintGravel(ctx: CanvasRenderingContext2D, w: number, h: number) {
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, w, h);
+
+  let seed = 0x71c3d5b;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+
+  // Broad tonal drift first, under the stones. A field of even speckle reads as
+  // noise; the same speckle over slow patches reads as a surface that weather
+  // has been sitting on.
+  for (let i = 0; i < 90; i++) {
+    const r = w * (0.05 + rnd() * 0.13);
+    ctx.fillStyle = `rgba(0, 0, 0, ${0.03 + rnd() * 0.05})`;
+    ctx.beginPath();
+    ctx.arc(rnd() * w, rnd() * h, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // The ballast. Two passes: a dense bed of small stones, then a scatter of
+  // bigger ones with a light top and a dark underside, which is what stops
+  // gravel looking like sandpaper — a stone is a lit face and a shadow, and at
+  // this scale two pixels of each is enough to say so.
+  for (let i = 0; i < 26000; i++) {
+    const g = 0.05 + rnd() * 0.22;
+    ctx.fillStyle = `rgba(0, 0, 0, ${g})`;
+    ctx.fillRect(rnd() * w, rnd() * h, 1 + rnd() * 2, 1 + rnd() * 2);
+  }
+  const stone = Math.max(2, Math.round(w / 300));
+  for (let i = 0; i < 4200; i++) {
+    const x = rnd() * w;
+    const y = rnd() * h;
+    const r = stone * (0.7 + rnd() * 0.9);
+    ctx.fillStyle = `rgba(0, 0, 0, ${0.16 + rnd() * 0.24})`;
+    ctx.beginPath();
+    ctx.arc(x, y + r * 0.35, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = `rgba(255, 255, 255, ${0.10 + rnd() * 0.22})`;
+    ctx.beginPath();
+    ctx.arc(x - r * 0.2, y - r * 0.25, r * 0.62, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+/**
  * Painted structural steel — see `girder` below.
  *
  * Everything the Line is built from: masts, portal beams, the rail, the kerbs
@@ -401,26 +567,91 @@ function paintGirder(ctx: CanvasRenderingContext2D, w: number, h: number) {
   ctx.fillRect(0, 0, w, h);
 
   const line = Math.max(2, Math.round(w / 380));
-  // Flanges: a line in from each edge, with the web shaded very slightly
-  // between them so the section reads as an I and not as a stripe.
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.09)';
-  ctx.fillRect(w * 0.14, 0, w * 0.72, h);
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.38)';
-  for (const t of [0.14, 0.86]) ctx.fillRect(Math.round(t * w), 0, line, h);
 
-  // Bolt rows down both flanges, and a splice plate every half repeat where two
-  // lengths of section would actually be joined.
-  const bolt = Math.max(1, Math.round(w / 340));
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.52)';
+  // The rolled surface itself, before any of the joinery. Paint on steel is
+  // sprayed onto mill scale and it never comes out even: there are faint
+  // lengthwise streaks from the roller and the roll direction. Without this the
+  // section is a flat fill with lines on it, which is what "bland" means.
+  let seed = 0x3ba71d9;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  for (let i = 0; i < 240; i++) {
+    const x = rnd() * w;
+    ctx.fillStyle = rnd() > 0.5
+      ? `rgba(255, 255, 255, ${0.02 + rnd() * 0.05})`
+      : `rgba(0, 0, 0, ${0.02 + rnd() * 0.06})`;
+    ctx.fillRect(x, 0, 1 + rnd() * (w / 90), h);
+  }
+
+  // Flanges: a line in from each edge, with the web shaded between them so the
+  // section reads as an I and not as a stripe. The web is graded rather than
+  // flat — a web is a vertical plate, and the light falls off across it.
+  const web = ctx.createLinearGradient(w * 0.14, 0, w * 0.86, 0);
+  web.addColorStop(0, 'rgba(0, 0, 0, 0.16)');
+  web.addColorStop(0.42, 'rgba(0, 0, 0, 0.05)');
+  web.addColorStop(1, 'rgba(0, 0, 0, 0.15)');
+  ctx.fillStyle = web;
+  ctx.fillRect(w * 0.14, 0, w * 0.72, h);
+  // A highlight along the top of each flange, which is the edge that catches
+  // the sun on every beam in the district at once.
   for (const t of [0.14, 0.86]) {
-    for (let i = 0; i < 12; i++) {
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.30)';
+    ctx.fillRect(Math.round(t * w) - line, 0, line, h);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.42)';
+    ctx.fillRect(Math.round(t * w), 0, line, h);
+  }
+
+  // Bolt rows down both flanges. A bolt is a head with a shadow under it and a
+  // lit crown, not a dot: three primitives each, and it is the difference
+  // between a dotted line and hardware.
+  const bolt = Math.max(2, Math.round(w / 300));
+  const rows = 14;
+  for (const t of [0.14, 0.86]) {
+    const cx = t * w + line / 2;
+    for (let i = 0; i < rows; i++) {
+      const cy = (i + 0.5) * (h / rows);
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
       ctx.beginPath();
-      ctx.arc(t * w + line / 2, (i + 0.5) * (h / 12), bolt, 0, Math.PI * 2);
+      ctx.arc(cx, cy + bolt * 0.3, bolt, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+      ctx.beginPath();
+      ctx.arc(cx, cy, bolt * 0.92, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.34)';
+      ctx.beginPath();
+      ctx.arc(cx - bolt * 0.25, cy - bolt * 0.3, bolt * 0.4, 0, Math.PI * 2);
       ctx.fill();
     }
   }
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.24)';
-  for (const t of [0, 0.5, 1]) ctx.fillRect(0, Math.round(t * h) - line, w, line * 2);
+
+  // Splice plates where two lengths of section are joined: a raised plate
+  // across the whole width with its own bolt group and a seam up the middle.
+  // This is the piece that says "fabricated in lengths and bolted together"
+  // rather than "extruded forever", and it is the one detail a long girder
+  // needs most, because length is all a long girder has.
+  const plate = h * 0.055;
+  for (const t of [0, 0.5, 1]) {
+    const cy = Math.round(t * h);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.13)';
+    ctx.fillRect(0, cy - plate, w, plate * 2);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.20)';
+    ctx.fillRect(0, cy - plate, w, line);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.42)';
+    ctx.fillRect(0, cy + plate - line, w, line);
+    // The seam between the two lengths, dead centre of the plate.
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+    ctx.fillRect(0, cy - line / 2, w, line);
+    // And its bolts, in from each flange across the web.
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+    for (let i = 0; i < 6; i++) {
+      const bx = w * (0.22 + (i / 5) * 0.56);
+      for (const by of [-plate * 0.5, plate * 0.5]) {
+        ctx.beginPath();
+        ctx.arc(bx, cy + by, bolt * 0.85, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
 }
 
 /**
@@ -478,7 +709,7 @@ function paintCrate(ctx: CanvasRenderingContext2D, w: number, h: number) {
  * goes.
  */
 function paintRoad(ctx: CanvasRenderingContext2D, w: number, h: number, across: boolean) {
-  ctx.fillStyle = '#61646a';
+  ctx.fillStyle = ASPHALT;
   ctx.fillRect(0, 0, w, h);
 
   // Aggregate. Both lighter and darker than the binder, because tarmac is
@@ -501,15 +732,32 @@ function paintRoad(ctx: CanvasRenderingContext2D, w: number, h: number, across: 
     else ctx.fillRect(t * w - w * 0.06, 0, w * 0.12, h);
   }
 
-  // The centre line: dashes down the middle, four on, four off.
-  const paint = Math.max(2, Math.round(w / 150));
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
-  for (let i = 0; i < 4; i++) {
-    const a = (i + 0.15) / 4;
-    const b = (i + 0.65) / 4;
-    if (across) ctx.fillRect(a * w, h / 2 - paint / 2, (b - a) * w, paint);
-    else ctx.fillRect(w / 2 - paint / 2, a * h, paint, (b - a) * h);
-  }
+  // No markings. They used to be painted here, and that is the whole reason the
+  // district's roads looked wrong: this map tiles every nine metres over one
+  // brush that covers the entire street plan, so the "centre line" was a grid
+  // of dashes laid across the district irrespective of where a street actually
+  // ran — and half of them under the buildings. A marking has to know where the
+  // road is, and a tiled texture cannot. See `laneLine` in the level: the lines
+  // are geometry now, down the middle of each real street.
+}
+
+/**
+ * The Line's deck, which is the one road on the map whose width a texture CAN
+ * know: every span of it is exactly LINE_W across.
+ *
+ * So this one tiles at the deck's own width, which puts precisely one repeat
+ * across it and the centre line at precisely the middle — and because the deck
+ * brushes are laid along the road and rotated with it, the line runs down the
+ * road's own direction for free, up every pitch and round every bend. That is
+ * the whole trick, and it is only available because the width is a constant.
+ */
+function paintDeckRoad(ctx: CanvasRenderingContext2D, w: number, h: number) {
+  paintRoad(ctx, w, h, false);
+  // A continuous yellow line, not dashes: this is the centreline of a haul road
+  // and it is the one marking an industrial road always has.
+  const paint = Math.max(3, Math.round(w / 90));
+  ctx.fillStyle = LANE_Y;
+  ctx.fillRect(w / 2 - paint / 2, 0, paint, h);
 }
 
 function paintGlass(ctx: CanvasRenderingContext2D, w: number, h: number) {
@@ -646,6 +894,49 @@ export const SURFACES: Record<string, SurfaceDef> = {
     base: { paint: (c, w, h) => paintRoad(c, w, h, true), as: 'blacktop-x' },
     sideUV: [0.08, 0.08],
     tile: 9, roughness: 0.97, metalness: 0.0,
+  },
+  /**
+   * The Line's deck. `tile` is its WIDTH, which is what puts the centre line
+   * down the middle of it — see paintDeckRoad.
+   */
+  blacktopDeck: {
+    base: { paint: paintDeckRoad, as: 'blacktop-deck' },
+    sideUV: [0.08, 0.08],
+    tile: 16, roughness: 0.97, metalness: 0.0,
+  },
+  /**
+   * A building's roof: loose stone ballast over the membrane — see paintGravel.
+   *
+   * `sideUV` because a roof deck is 40 cm thick and what you see of its edge is
+   * a fascia, not a section through the gravel. Same reason the ground slab
+   * uses it and the opposite of what cladding does.
+   */
+  roofdeck: {
+    base: { paint: paintGravel, as: 'gravel' },
+    sideUV: [0.5, 0.06],
+    tile: 6, roughness: 0.97, metalness: 0.0,
+  },
+  /**
+   * Glass, in the openings the level cuts for it — see paintGlazing.
+   *
+   * Low roughness and no metalness: with a hard key overhead that gives a real
+   * specular off every pane in the district, which is most of what says glass
+   * rather than dark paint. `capUV` pins the head and cill of every opening to
+   * the frame colour, because those faces are the reveal.
+   */
+  /** Road markings, which are geometry on this map — see paintLane. */
+  lane: {
+    base: { paint: paintLane, as: 'lane' },
+    tile: 3, roughness: 0.86, metalness: 0.0,
+  },
+  glass: {
+    base: { paint: paintGlazing, as: 'glazing' },
+    capUV: [0.02, 0.02],
+    // 0.16 rather than a mirror finish. At 0.09 the specular is so tight that
+    // you only catch it at the exact mirror angle and every other pane on the
+    // street is its unlit base colour — which is the difference between glass
+    // and a dark rectangle. Broadening it puts a highlight on most of them.
+    tile: 4.5, roughness: 0.16, metalness: 0.0,
   },
   ribbed: {
     base: { paint: paintCrate, as: 'ribbed' },
