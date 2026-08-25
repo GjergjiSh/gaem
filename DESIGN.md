@@ -3861,3 +3861,73 @@ way to know it is a check and not decoration.
 4109 brushes became 4732, and ~2211 draw calls became ~2280 — the frames are one
 post and one diagonal repeated a few hundred times, which is the case §47's
 batcher was built for. The raw variant is 3111 brushes at ~1141 calls.
+
+## 49. Eighteen towers is not a city
+
+The backdrop was eighteen towers on a circle. From the crown you looked out and
+saw five of them per bearing with sky between, and behind the sky the far edge of
+the ground plate drawn as a hard line across the view. That is not a district
+inside a city, it is scenery placed near a level — and the fix is not better
+towers, it is *enough* of them, because a silhouette only encloses you when the
+gaps in it are filled by something further back.
+
+### Three rings, and each one has a job
+
+- **near**, 34–78 m, close in. This is the one whose absence you actually
+  noticed: the outer city's masses stop at 26 m and the towers started at 26 m
+  plus a long way up, so the skyline jumped from two storeys to thirty with a
+  hole at exactly the height every roof on the map looks out at.
+- **mid**, 66–150 m. The wall — the ring the eye reads as "the city".
+- **far**, 110–230 m, out in the fog. Tallest and least detailed, because its
+  whole job is to stand behind the gaps in the mid ring.
+
+### Rectangles, not circles
+
+A circle round a rectangular plate has to be pushed out at the corners to clear
+it, and everything pushed out along a corner bearing arrives in much the same
+place — the old ring clumped towers into two corners and left the long sides
+bare. These walk the *perimeter of a rectangle*, evenly spaced with a bounded
+jitter, so they are evenly spaced in the world, which is where they are seen
+from.
+
+The perimeter of a rectangle given its HALF-extents is `4(hx + hz)`. The first
+cut used `2(hx + hz)`, which is half of it, so `t` never left the first two
+sides: all a hundred towers piled into the north-west and three sides of the map
+were open sky. It is now a named function with the reason written on it.
+
+### Detail is spent by distance, coverage is bought with width
+
+A plain brush is a draw call, so a ring costs count × detail and the budget is
+not elastic. What survives at each range is measurable, so:
+
+- **No ring gets a cornice.** A 1.4 m band is two pixels at 300 m, and the old
+  eighteen were paying for one each.
+- **A beacon is one box** and the best thing per call on a night horizon, so
+  everything tall enough carries one.
+- **Signs** go on the near two rings only — a saturated colour at 600 m through
+  haze is a grey smudge. They are also sized in METRES now: as a fraction of the
+  tower they were fine on a 30 m mass and became a 50 m emissive panel once the
+  rings widened, and an emissive that big tone-maps to flat white, which reads as
+  a hole in the building rather than a lit sign. Same reason the sign palette
+  dropped the periwinkle and kept the warm end.
+
+And the cheap half: **a wider tower covers more horizon for the same one draw
+call**, so coverage is bought with width before it is bought with count. The fog
+ring is 92–168 m wide, which is what closed the last hole — thirty towers over
+its perimeter is one every 160 m, and that left a band of bare ground plate
+showing wherever a mid-ring gap lined up with a far-ring one. At 700 m through
+haze a superblock and three towers are the same silhouette anyway.
+
+### The plate's own edge
+
+The ground under all of this went from 1500 m across to 2600. It is one box
+either way, so it costs nothing, and it moves the plate's far edge from 750 m —
+where a third of `fogFar` is on it and it draws a line across the view — out to
+1300 m, where it is inside the last tenth and reads as haze. Which is what a
+horizon is.
+
+100 towers now instead of 18. 4732 brushes → 4965, ~2280 draw calls → ~2505 of
+2600. Measured against `renderer.info.render.calls`, the worst real view of the
+district costs 2921 and the crown of the Spire costs 1129 — the rings are
+backdrop in a handful of far cells, so the frustum throws most of them away from
+any one camera, which is exactly what the 128 m cells are for.

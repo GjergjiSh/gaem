@@ -259,6 +259,14 @@ const ACCENT = [
   0x6f8fd6,   // periwinkle
 ];
 
+/**
+ * What a billboard on the backdrop is painted. The warm end of ACCENT and the
+ * two greens, and NOT the periwinkle: a sign is an emissive surface, and a cool
+ * emissive at three hundred metres tone-maps to flat white — which against a
+ * dusk sky does not read as a lit sign, it reads as a hole in the building.
+ */
+const SIGN_C = [0xe86a6a, 0xd94f7a, 0xd6d05f, 0x74c07a, 0x2e8f6f];
+
 /** Window light, warm — the common one, because most of this place is offices. */
 const LIT_WARM = 0xffb765;
 /** Window light, cold. A few buildings on a different shift. */
@@ -2017,7 +2025,11 @@ for (const s of [-1, 1]) {
 // The ground the rest of the city stands on. The district's floor stops at the
 // rim, so without this every building past it is a model hanging over nothing —
 // and it is the gaps BETWEEN them, seen from the crown, where you would notice.
-box([0, -0.05 - BASE / 2, 0], [1500, BASE, 1500], shade(STREET, 0.34), undefined, S_STREET);
+// 2600 m across rather than 1500, which costs nothing — it is one box either
+// way — and buys the horizon. At 750 m the old plate's own far edge was a hard
+// line across the view with a third of the fog on it; at 1300 m it is inside
+// the last tenth of `fogFar` and reads as haze, which is what a horizon is.
+box([0, -0.05 - BASE / 2, 0], [2600, BASE, 2600], shade(STREET, 0.34), undefined, S_STREET);
 
 /**
  * One building of the outer city, on the ground, turned to face the district.
@@ -2082,99 +2094,164 @@ function outerBlock(m: string, x: number, z: number, inx: number, inz: number, k
   }
 }
 
+// The skyline, which is a RING and has to close.
+//
+// This was eighteen towers spread round a circle, and eighteen is not a city —
+// it is eighteen towers. From the crown you looked out and saw five of them per
+// bearing with sky between, and behind the sky the far edge of the ground plate
+// drawn as a hard line. That reads as scenery placed near a level rather than a
+// district inside a city, and the answer is not better towers, it is ENOUGH of
+// them: a silhouette only encloses you when the gaps in it are filled by
+// something further back.
+//
+// So three rings, and each one does a different job.
+//
+//   near   34–78 m, close in. Fills the band between the outer city's 14–26 m
+//          masses and the towers, which is the gap you actually noticed — a
+//          skyline that jumps straight from two storeys to thirty has a hole in
+//          it at exactly the height every roof on the map looks out at.
+//   mid    66–150 m. The wall. This is the ring the eye reads as "the city".
+//   far    110–230 m, out in the fog. Tallest and least detailed, because it is
+//          a silhouette and nothing else — its whole job is to stand behind the
+//          gaps in the mid ring.
+//
+// They are RECTANGULAR rings, not circular ones. A circle round a rectangular
+// plate has to be pushed out at the corners to clear it, and everything pushed
+// out along a corner bearing arrives in much the same place — the old ring
+// clumped towers into the corners and left the long sides bare. Walking the
+// perimeter of a rectangle spaces them evenly in the world, which is where they
+// are seen from.
 {
-  const RING_IN = 250;
-  const RING_OUT = 380;
   /**
    * The rectangle nothing out here may stand inside: the district, its rim, and
-   * now the two rows of buildings against it. That last clearance is why this
-   * is 75 m rather than the 30 it was — the far ring used to start where the
-   * near city now stands, and a backdrop tower growing out of a rooftop is the
-   * same bug whether the roof belongs to the map or to the city behind it.
+   * the two rows of buildings against it. 75 m of clearance, because a backdrop
+   * tower growing out of a rooftop is the same bug whether the roof belongs to
+   * the map or to the city behind it.
    */
   const CLEAR_X = (EXTENT.x1 - EXTENT.x0) / 2 + PAVE + 75;
   const CLEAR_Z = (EXTENT.z1 - EXTENT.z0) / 2 + PAVE + 75;
-  // Eighteen, down from fifty-four. The near silhouette is carried by the
-  // outer city's own masses now, and thirty towers' worth of draw calls buys a
-  // great deal more standing on a street inside the map than it ever did here.
-  for (let i = 0; i < 18; i++) {
-    const h = hash(i * 7919);
-    // Spread round the compass with a jitter, so the ring is not a polygon.
-    const ang = (i / 18) * Math.PI * 2 + ((h % 100) / 100 - 0.5) * 0.09;
-    let rad = RING_IN + ((h >>> 7) % 100) / 100 * (RING_OUT - RING_IN);
-    // Taller further out, which is how a skyline behind a skyline reads: the
-    // near ring cannot hide the far one, so the depth stays legible.
-    const top = 26 + ((h >>> 13) % 70) + (rad - RING_IN) * 0.35;
-    const w = 22 + ((h >>> 19) % 34);
-    const d = 22 + ((h >>> 23) % 34);
-    // A ring is a circle and the district is a rectangle, so a radius that
-    // clears the map along one bearing plants a tower on a corner roof along
-    // another: the district's corners are 256 m out, past the inner radius, and
-    // that is exactly where two of these landed the first time. Push each one
-    // out until its FOOTPRINT is clear of the whole rectangle — whichever axis
-    // it escapes by — rather than trusting the radius alone.
-    const ca = Math.abs(Math.cos(ang));
-    const sa = Math.abs(Math.sin(ang));
-    rad = Math.max(rad, Math.min(
-      ca > 1e-3 ? (CLEAR_X + w / 2) / ca : Infinity,
-      sa > 1e-3 ? (CLEAR_Z + d / 2) / sa : Infinity,
-    ));
-    const x = Math.cos(ang) * rad;
-    const z = Math.sin(ang) * rad;
-    const tint = shade(pick(FACADE_TINTS, i * 13), 0.9);
-    // Down to well below the street: the base is never seen, and a backdrop
-    // tower standing on its own visible bottom edge is a card, not a building.
-    box([x, (top - 60) / 2, z], [w, top + 60, d], tint, undefined, S_MASS);
-    box([x, top - 0.7, z], [w + 1.2, 1.4, d + 1.2], TRIM, undefined, S_TRIM);
-    // No lit bands out here any more. They were carrying the backdrop's night
-    // read before the walls had windows in them; now they are two brushes per
-    // tower saying something the facade already says, and 54 towers' worth of
-    // that is a hundred draw calls better spent inside the map.
-    const lit = h % 4 === 0 ? LIT_COLD : LIT_WARM;
-    // What it does at the top. Flat-topped boxes all the way round the horizon
-    // is the one thing that gives a backdrop away — a real skyline is mostly
-    // things standing on other things — so every tower ends in one of four
-    // ways, by hash, and no two neighbours end the same way for long.
-    const cap = h % 4;
-    let crest = top;
-    if (cap === 0 || cap === 1) {
-      // Stepped: a smaller mass set back on top, twice for the tall ones. The
-      // step used to carry a cornice band of its own, the way the main mass
-      // does. At 300 m a 1.2 m band is a pixel and a half, and forty of them
-      // is a whole building's worth of calls spent on something unresolvable.
-      let cy = top;
-      let cw = w * 0.62;
-      let cd = d * 0.62;
-      for (let step = 0; step < (cap === 0 ? 1 : 2); step++) {
-        const ch = 8 + ((h >>> (3 + step * 4)) % 20);
-        box([x, cy + ch / 2, z], [cw, ch, cd], tint, undefined, S_MASS);
-        cy += ch;
-        cw *= 0.62;
-        cd *= 0.62;
+
+  /**
+   * The perimeter of a rectangle given its HALF-extents, which is 4(hx + hz) and
+   * not 2(hx + hz). Worth its own function: the first cut of this used the half
+   * and every tower in all three rings landed in one half of the ring, piled
+   * into the north-west and left three sides of the map open to the sky.
+   */
+  const perim = (hx: number, hz: number) => (hx + hz) * 4;
+
+  /** A point `t` along a rectangle's perimeter, with the outward normal there. */
+  const onRect = (hx: number, hz: number, t: number) => {
+    const per = perim(hx, hz);
+    let u = ((t % per) + per) % per;
+    if (u < hz * 2) return { x: hx, z: -hz + u, nx: 1, nz: 0 };
+    u -= hz * 2;
+    if (u < hx * 2) return { x: hx - u, z: hz, nx: 0, nz: 1 };
+    u -= hx * 2;
+    if (u < hz * 2) return { x: -hx, z: hz - u, nx: -1, nz: 0 };
+    return { x: -hx + (u - hz * 2), z: -hz, nx: 0, nz: -1 };
+  };
+
+  /**
+   * `detail` out here is spent by DISTANCE, and that is the whole cost control.
+   *
+   * A plain brush is a draw call, so a ring costs its count times its detail and
+   * the district's budget is not elastic. What survives at each range is
+   * measurable, so: no ring gets a cornice, because a 1.4 m band is two pixels
+   * at 300 m and the old eighteen towers were paying for one each. A beacon is
+   * one box and the best thing per call on a night horizon, so everything tall
+   * enough carries one. A sign is what the eye goes to first, so the near two
+   * rings get them and the fog ring does not — a saturated colour at 600 m
+   * through haze is a grey smudge.
+   *
+   * `wide` is the other half of it, and it is the cheap half: a wider tower
+   * covers more of the horizon for the same one draw call, so coverage is bought
+   * with width before it is bought with count. The rings get wider as they go
+   * out, which is also just perspective — a 90 m mass at 700 m subtends what a
+   * 30 m one does at 230.
+   *
+   * The fog ring is very wide indeed (92–168 m), and that is what closes the
+   * last hole. Thirty towers over its perimeter is one every 160 m, which left a
+   * band of bare ground plate visible at the horizon wherever a mid-ring gap
+   * lined up with a far-ring one. Widening them shuts that without another call,
+   * and at 700 m through haze a superblock and three towers are the same
+   * silhouette anyway.
+   */
+  const RINGS = [
+    { pad: 30, jit: 55, n: 40, lo: 34, hi: 78, wide: 34, vary: 30, steps: 2, sign: true, seed: 31 },
+    { pad: 130, jit: 100, n: 40, lo: 66, hi: 150, wide: 44, vary: 40, steps: 1, sign: true, seed: 977 },
+    { pad: 300, jit: 190, n: 30, lo: 110, hi: 230, wide: 92, vary: 76, steps: 1, sign: false, seed: 4409 },
+  ];
+
+  for (const r of RINGS) {
+    const hx = CLEAR_X + r.pad;
+    const hz = CLEAR_Z + r.pad;
+    const per = perim(hx, hz);
+    for (let i = 0; i < r.n; i++) {
+      const h = hash(r.seed * 104729 + i * 6151);
+      // Evenly spaced round the perimeter, then jittered by up to half a step.
+      // The even spacing is what closes the ring; the jitter is what stops it
+      // reading as a fence, and it is bounded so that it can never open a hole.
+      const t = ((i + 0.5) / r.n + ((h % 1000) / 1000 - 0.5) * 0.8 / r.n) * per;
+      const at = onRect(hx, hz, t);
+      const out = ((h >>> 10) % 100) / 100 * r.jit;
+      const x = at.x + at.nx * out;
+      const z = at.z + at.nz * out;
+      const w = r.wide + ((h >>> 19) % r.vary);
+      const d = r.wide + ((h >>> 23) % r.vary);
+      const top = r.lo + ((h >>> 13) % (r.hi - r.lo));
+      const tint = shade(pick(FACADE_TINTS, r.seed + i * 13), 0.9);
+      // Down to well below the street: the base is never seen, and a backdrop
+      // tower standing on its own visible bottom edge is a card, not a building.
+      box([x, (top - 60) / 2, z], [w, top + 60, d], tint, undefined, S_MASS);
+      // What it does at the top. Flat-topped boxes all the way round the horizon
+      // is the one thing that gives a backdrop away — a real skyline is mostly
+      // things standing on other things — so every tower ends in one of four
+      // ways, by hash, and no two neighbours end the same way for long.
+      const cap = h % 4;
+      let crest = top;
+      if (cap === 0 || cap === 1) {
+        // Stepped: a smaller mass set back on top, twice for the tall ones.
+        let cy = top;
+        let cw = w * 0.62;
+        let cd = d * 0.62;
+        for (let step = 0; step < (cap === 0 ? 1 : r.steps); step++) {
+          const ch = 8 + ((h >>> (3 + step * 4)) % 20);
+          box([x, cy + ch / 2, z], [cw, ch, cd], tint, undefined, S_MASS);
+          cy += ch;
+          cw *= 0.62;
+          cd *= 0.62;
+        }
+        crest = cy;
+      } else if (cap === 2) {
+        // A mast — the outline that says communications rather than offices, and
+        // the one shape on a horizon that is unmistakably not a box.
+        const mh = 14 + ((h >>> 5) % 26);
+        box([x, top + mh / 2, z], [2.2, mh, 2.2], MAST, undefined, S_STEEL);
+        box([x, top + mh * 0.42, z], [9, 1.2, 9], MAST, undefined, S_STEEL);
+        crest = top + mh;
       }
-      crest = cy;
-    } else if (cap === 2) {
-      // A mast — the outline that says communications rather than offices, and
-      // the one shape on a horizon that is unmistakably not a box.
-      const mh = 14 + ((h >>> 5) % 26);
-      box([x, top + mh / 2, z], [2.2, mh, 2.2], MAST, undefined, S_STEEL);
-      box([x, top + mh * 0.42, z], [9, 1.2, 9], MAST, undefined, S_STEEL);
-      crest = top + mh;
-    }
-    // A beacon on anything tall enough to need one, wherever its top ended up.
-    if (crest > 84) box([x, crest + 1.2, z], [3.2, 1.5, 3.2], 0xff5a4a, undefined, S_LAMP);
-    // And on a few of them, a sign the size of a building — the thing your eye
-    // goes to first in any night skyline, and the only saturated colour out
-    // here. Turned to face the middle of the district, because a billboard
-    // facing away from the only person in the city is a wasted billboard.
-    if (h % 7 === 0 && top > 50) {
-      const bw = Math.min(w, d) * 0.8;
-      const bh = Math.min(24, top * 0.3);
-      const inx = -Math.cos(ang);
-      const inz = -Math.sin(ang);
-      box([x + inx * (w / 2 + 0.6), top * 0.66, z + inz * (d / 2 + 0.6)],
-        Math.abs(inx) > Math.abs(inz) ? [1.2, bh, bw] : [bw, bh, 1.2],
-        pick(ACCENT, i * 5), undefined, S_LAMP);
+      // A beacon on anything tall enough to need one, wherever its top ended up.
+      if (crest > 84) box([x, crest + 1.2, z], [3.2, 1.5, 3.2], 0xff5a4a, undefined, S_LAMP);
+      // And on a few of them, a sign the size of a building — turned to face the
+      // middle of the district, because a billboard facing away from the only
+      // person in the city is a wasted billboard.
+      // Sized in METRES, not as a fraction of the tower. As a fraction it was
+      // fine on a 30 m mass and became a fifty-metre emissive panel once the
+      // rings widened — and an emissive surface that big at 300 m through fog
+      // does not read as a sign, it blows out to a white rectangle and looks
+      // like a hole in the building.
+      if (r.sign && h % 9 === 0 && top > 50) {
+        const bw = Math.min(20, Math.min(w, d) * 0.7);
+        const bh = Math.min(15, top * 0.22);
+        // Straddling the face, not standing off it. The old ring's normals were
+        // diagonal, so a sign pushed clear of the wall still overlapped the mass
+        // on the other axis and `rule 1` was satisfied by accident; these
+        // normals are axis-aligned, and a sign 0.6 m off the face is a billboard
+        // floating beside a building. Half in the wall is also what a sign is.
+        box([x - at.nx * (w / 2), top * 0.66, z - at.nz * (d / 2)],
+          at.nx !== 0 ? [1.2, bh, bw] : [bw, bh, 1.2],
+          pick(SIGN_C, r.seed + i * 5), undefined, S_LAMP);
+      }
     }
   }
 }
