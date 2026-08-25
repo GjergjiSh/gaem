@@ -3446,10 +3446,12 @@ const CYBER_SURFACE: Record<string, string> = {
  *
  * So the openings are placed here, off the same storey pitch `facade` uses, and
  * they are real brushes with a real material in them. Which also buys the thing
- * a painted window can never have: SIZES. An industrial building is mostly blank
- * wall with the glazing gathered into a few big openings — a long strip window
- * high up, and a handful of tall lights lower down — and not a field of evenly
- * spaced squares.
+ * a painted window can never have: SIZES, put where the building wants them.
+ * The first floor gets one panoramic strip the length of the wall; every floor
+ * above it gets a row of short punched lights. That contrast is the whole point
+ * — a long run of glass low down with small openings over it reads as a working
+ * floor with offices above, where the same window repeated up the wall reads as
+ * a spreadsheet.
  *
  * Cyberedge only, and appended AFTER the mapped list so it cannot shift an index
  * `RAMP_BRUSHES_CYBER` is holding. The dusk level still paints its own windows
@@ -3472,60 +3474,59 @@ const GLAZING: Brush[] = (() => {
   const out: Brush[] = [];
   /** Half the depth of an opening: half of it stands proud, half is recessed. */
   const OUT = 0.11;
-  /** A strip window, and a tall light. Two sizes, and that is the variety. */
-  const PANO_H = 2.7;
-  const TALL: [number, number] = [2.6, 4.2];
+  /** The first floor's strip, and one of the lights above it. */
+  const PANO_H = 3.0;
+  const SMALL: [number, number] = [3.6, 2.4];
+  const FACES = [[1, 0], [-1, 0], [0, 1], [0, -1]] as const;
   for (const r of roofs) {
     // Plazas, canopies and the little service decks get none. A 2 m parapet
     // with a strip window in it is not a building.
     if (r.top < 10 || Math.min(r.w, r.d) < 12) continue;
-    const k = Math.round(r.cx) * 977 + Math.round(r.cz);
-    // Where an opening can go: between the service bands, which sit on an 8.5 m
-    // pitch from PLINTH. The ladder starts 2.2 m up rather than a full storey,
-    // because most of this district is 12 to 26 m and a ladder that starts at
-    // PLINTH + 8.5 clears the top of everything under 22 m — which is how the
-    // first cut of this glazed six buildings out of fifty.
+
+    // The storeys, and they are read off the building rather than chosen: the
+    // service bands sit on an 8.5 m pitch from PLINTH, so the wall between two
+    // of them is a floor, and the middle of that wall is where its glazing
+    // goes. Starting 2.2 m up rather than a full storey is what puts the first
+    // one just clear of the canopy at 5.2 — and it is also why this glazes
+    // everything down to 12 m instead of only the six buildings over 22.
     const mid: number[] = [];
     for (let y = PLINTH + 2.2; y < r.top - 3.0; y += 8.5) mid.push(y);
     if (!mid.length) continue;
 
-    // The strip window: one brush, wrapping all four faces, two thirds up. A
-    // clerestory is what an industrial building glazes with, it is the single
-    // most recognisable thing about one, and it is also a whole building's
-    // glazing for the price of one box.
-    // Two thirds up by default, but chosen off the building's own hash when it
-    // has the storeys to choose from — a street where every strip window is at
-    // the same fraction of a different height is a street of one building.
-    const band = mid[mid.length === 1 ? 0
-      : Math.max(1, Math.min(mid.length - 1,
-        Math.round((mid.length - 1) * 0.66) + (hash(k) % 3) - 1))];
+    // FIRST FLOOR: one panoramic strip, wrapping all four faces. This is the
+    // storey a building glazes properly — it is where the floor is used, it is
+    // the band your eye lands on from the street, and on a shed of this kind it
+    // is a single continuous run of glass rather than a set of openings. One
+    // brush, for a whole building.
     out.push({
-      p: [r.cx, band, r.cz],
+      p: [r.cx, mid[0], r.cz],
       s: [r.w + OUT * 2, PANO_H, r.d + OUT * 2],
       c: CYBER_GLASS, t: 'glass',
     });
 
-    // And the tall lights, on the lowest storey that has one, two to a face.
-    // Two, not six: the wall is the material and the glazing is the exception,
-    // and a row of them every four metres is an office block.
-    const low = mid[0];
-    if (low === band) continue;
-    for (let f = 0; f < 4; f++) {
-      const [nx, nz] = ([[1, 0], [-1, 0], [0, 1], [0, -1]] as const)[f];
-      const along = nx !== 0 ? r.d : r.w;
-      // Skip a face too short to carry two without them touching, and one face
-      // in four regardless — a building with the same two lights on all four
-      // sides is a building nobody built.
-      if (along < 16 || hash(k * 7 + f) % 4 === 0) continue;
-      for (const t of [-1, 1]) {
-        const off = t * along * 0.22;
-        const px = r.cx + nx * (r.w / 2) + (nx === 0 ? off : 0);
-        const pz = r.cz + nz * (r.d / 2) + (nz === 0 ? off : 0);
-        out.push({
-          p: [px, low, pz],
-          s: nx !== 0 ? [OUT * 2, TALL[1], TALL[0]] : [TALL[0], TALL[1], OUT * 2],
-          c: CYBER_GLASS, t: 'glass',
-        });
+    // EVERY FLOOR ABOVE IT: a row of smaller lights instead. That contrast is
+    // the whole point — a long strip low down and short punched openings above
+    // reads as a building with a working floor and offices over it, where the
+    // same window repeated up the wall reads as a spreadsheet.
+    for (let i = 1; i < mid.length; i++) {
+      for (const [nx, nz] of FACES) {
+        const along = nx !== 0 ? r.d : r.w;
+        if (along < 16) continue;
+        // One every thirteen metres or so, which on this district's 50 m blocks
+        // is four to a face. Spread over 86% of the width so the end ones stay
+        // off the corner — a window wrapping a corner is a window with no wall
+        // to sit in.
+        const n = Math.max(2, Math.min(5, Math.round(along / 13)));
+        for (let j = 0; j < n; j++) {
+          const off = ((j + 0.5) / n - 0.5) * along * 0.86;
+          const px = r.cx + nx * (r.w / 2) + (nx === 0 ? off : 0);
+          const pz = r.cz + nz * (r.d / 2) + (nz === 0 ? off : 0);
+          out.push({
+            p: [px, mid[i], pz],
+            s: nx !== 0 ? [OUT * 2, SMALL[1], SMALL[0]] : [SMALL[0], SMALL[1], OUT * 2],
+            c: CYBER_GLASS, t: 'glass',
+          });
+        }
       }
     }
   }

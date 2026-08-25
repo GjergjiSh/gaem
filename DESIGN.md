@@ -3953,13 +3953,24 @@ So glazing is geometry. Openings placed off the same 8.5 m storey pitch
 band, and filled with a `glass` material. Two sizes, which is the variety a
 painted window can never have:
 
-- a **strip window** two thirds up, one brush, wrapping all four faces. A
-  clerestory is what an industrial building glazes with, it is the most
-  recognisable thing about one, and it is a whole building's glazing for the
-  price of one box.
-- **tall lights** on the lowest storey, two to a face, one face in four skipped
-  by hash. Two and not six: the wall is the material and the glazing is the
-  exception.
+- the **first floor** gets one panoramic strip: a single brush wrapping all four
+  faces, the length of the wall. That is the storey a building of this kind
+  actually glazes — it is where the floor is used, and it is the band your eye
+  lands on from the street — and on a shed it is a continuous run of glass
+  rather than a set of openings. One brush for a whole building.
+- **every floor above it** gets a row of short punched lights instead, one every
+  thirteen metres, which on this district's 50 m blocks is four to a face, spread
+  over 86% of the width so the end ones stay off the corner.
+
+The contrast is the point. A long run of glass low down with small openings over
+it reads as a working floor with offices above; the same window repeated up the
+wall reads as a spreadsheet. This was the other way up in the first cut — strip
+high, lights low — which is a building nobody builds.
+
+The rows cost almost nothing to draw, and that is the batcher from §47 paying for
+itself: 631 glazing brushes come to **one** draw call more than 225 did, because
+every small light on the map is the same two sizes and they collapse per 128 m
+cell.
 
 The storey ladder starts at `PLINTH + 2.2` rather than a full storey up. The
 first cut started at `PLINTH + 8.5`, which clears the top of everything under
