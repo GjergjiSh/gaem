@@ -18,6 +18,10 @@ const KEYS = {
   // light. The solver gates it on having no jumps left (thruster.requireEmptyJumps),
   // so a held hop can't quietly burn the tank.
   thrust: ['Space'],
+  // X: deploy the wingsuit, press again to stow it. Its own key and not a
+  // modifier on an existing one, because it is a MODE — every other verb here is
+  // something you do for a moment, and this is something you are until you stop.
+  wing: ['KeyX'],
 };
 
 /** Gun slots, in arsenal order. Slot N is Digit(N+1). */
@@ -53,6 +57,7 @@ export class Input {
     slam: { pressed: false, held: false },
     thrust: { pressed: false, held: false },
     grapple: { pressed: false, held: false },
+    wing: { pressed: false, held: false },
   };
 
   /** Seconds since the mouse last moved — drives the camera drift-behind. */
@@ -114,6 +119,7 @@ export class Input {
       if (KEYS.dash.includes(e.code)) this.intent.dash.pressed = true;
       if (KEYS.slide.includes(e.code)) this.intent.slide.pressed = true;
       if (KEYS.slam.includes(e.code)) this.intent.slam.pressed = true;
+      if (KEYS.wing.includes(e.code)) this.intent.wing.pressed = true;
     });
     addEventListener('keyup', (e) => this.down.delete(e.code));
 
@@ -247,6 +253,7 @@ export class Input {
     this.intent.slide.held = on(KEYS.slide);
     this.intent.slam.held = on(KEYS.slam);
     this.intent.thrust.held = on(KEYS.thrust);
+    this.intent.wing.held = on(KEYS.wing);
   }
 
 
@@ -281,5 +288,6 @@ export class Input {
     this.intent.slam.pressed = false;
     this.intent.thrust.pressed = false;
     this.intent.grapple.pressed = false;
+    this.intent.wing.pressed = false;
   }
 }

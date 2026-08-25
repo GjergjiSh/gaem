@@ -179,6 +179,8 @@ export class Renderer {
   player: THREE.Group;
   /** One mesh per brush, index-aligned with level.brushes — the editor's handle. */
   brushMeshes: THREE.Mesh[] = [];
+  /** Last frame's facing, for the wingsuit's bank rate. */
+  private lastFacing = 0;
   /** 0..1 scope amount, written by the weapon each frame. Pulls FOV in. */
   adsT = 0;
   /**
@@ -284,6 +286,11 @@ export class Renderer {
 
     // Player: capsule plus a nose so facing direction is readable.
     this.player = new THREE.Group();
+    // Aircraft order: yaw outermost in world, then pitch about the body's own
+    // right, then roll about its own nose. The default 'XYZ' pitches about the
+    // WORLD x axis, which on a yawed body is a roll — and the wingsuit does both
+    // at once, so the order has to mean what it reads like.
+    this.player.rotation.order = 'YXZ';
     const body = new THREE.Mesh(
       new THREE.CapsuleGeometry(T.character.radius, T.character.height - 2 * T.character.radius),
       new THREE.MeshLambertMaterial({ color: 0xf43f5e }),
@@ -662,6 +669,28 @@ export class Renderer {
     this.player.rotation.y = p.facing;
     this.player.scale.y = V.damp(this.player.scale.y, sliding ? 0.55 : 1, 14, dt);
     this.player.visible = !fp;
+
+    // The wingsuit stance. The body lies along its own flight path: the head is
+    // the +Y axis, yaw has already pointed +Z down the horizontal course, so the
+    // pitch that puts the head on the velocity is a quarter turn less the flight
+    // angle. Level comes out prone, a vertical dive comes out head-down, and a
+    // zoom climb stands you back up — all of it read off the velocity rather
+    // than animated, so the pose can never lie about where you are going.
+    const flying = p.state === 'wingsuit';
+    let wantPitch = 0;
+    let bank = 0;
+    if (flying) {
+      const sp = V.len(p.vel);
+      const flight = sp > 1e-4 ? Math.asin(V.clamp(p.vel.y / sp, -1, 1)) : 0;
+      wantPitch = Math.PI / 2 - flight - T.wing.lean;
+      // Bank into the turn, off the rate the facing is actually changing at, so
+      // the roll comes from the flying rather than from the input.
+      const rate = dt > 1e-5 ? V.shortestAngle(this.lastFacing, p.facing) / dt : 0;
+      bank = V.clamp(rate * T.wing.roll, -Math.PI / 2, Math.PI / 2);
+    }
+    this.lastFacing = p.facing;
+    this.player.rotation.x = V.damp(this.player.rotation.x, wantPitch, flying ? 7 : 12, dt);
+    this.player.rotation.z = V.damp(this.player.rotation.z, bank, 6, dt);
 
     const over = Math.max(0, V.lenH(p.vel) - currentCap(p)) / T.momentum.hardCap;
 

@@ -832,6 +832,155 @@ function boostThruster(p: Player, i: Intent, wish: V3, dt: number): number {
   return t.gravityScale;
 }
 
+// ---------------------------------------------------------------- wingsuit
+
+/**
+ * The aim, as a unit vector. The wingsuit's only steering input: it flies where
+ * the camera points, which is what makes it read as a body in a stance rather
+ * than a character being driven with WASD.
+ */
+function lookDir(i: Intent): V3 {
+  const cp = Math.cos(i.pitch);
+  return V.v3(-Math.sin(i.yaw) * cp, Math.sin(i.pitch), -Math.cos(i.yaw) * cp);
+}
+
+/**
+ * Rotate a unit vector toward another by at most `maxRad`, preserving length.
+ *
+ * A slerp rather than a normalised lerp, because this is the one place in the
+ * solver where the ANGLE is the quantity being rate-limited — `turn` is in rad/s
+ * and has to mean that at every angle, or the suit turns faster when it happens
+ * to be pointing near where you are looking.
+ */
+function turnToward(from: V3, to: V3, maxRad: number): V3 {
+  const d = V.clamp(V.dot(from, to), -1, 1);
+  const ang = Math.acos(d);
+  if (ang < 1e-4) return to;
+  const t = Math.min(1, maxRad / ang);
+  const sin = Math.sin(ang);
+  // Antipodal: every rotation plane is equally valid and the slerp is 0/0. Take
+  // the linear blend, which for an exact reversal is degenerate and for anything
+  // else is close enough at the step sizes this runs at.
+  if (sin < 1e-5) {
+    const b = V.norm(V.add(V.scale(from, 1 - t), V.scale(to, t)));
+    return V.len(b) > 0.5 ? b : to;
+  }
+  const a = Math.sin((1 - t) * ang) / sin;
+  const b = Math.sin(t * ang) / sin;
+  return V.norm(V.add(V.scale(from, a), V.scale(to, b)));
+}
+
+function canWing(p: Player) {
+  // Airborne only. A wingsuit on the ground is a costume.
+  return T.wing.enabled && !p.grounded && p.state !== 'wingsuit';
+}
+
+/**
+ * Deploy, and everything else stops.
+ *
+ * A wingsuit is not a move you chain into — it is a different way of being in
+ * the air, and half a dash still running inside it would own the velocity the
+ * glide is trying to steer. So the dash, the slide, the wallrun, the slam, the
+ * vault and the rope all end here.
+ *
+ * The jets are the one exception, and deliberately: they are a modifier rather
+ * than a state, they are what turns the glide into flight, and cancelling them
+ * would make the two verbs exclusive when the whole point is that they combine.
+ */
+function doWing(p: Player, i: Intent) {
+  p.dashTime = 0;
+  p.slamming = false;
+  p.vaultT = 0;
+  if (p.state === 'wallrunning') detachWall(p);
+  if (p.grappling) releaseGrapple(p, false);
+  // Deployed at the apex of a jump there is no velocity to fly on, so the suit
+  // has no direction to turn and the first tick would be undefined. Take the aim
+  // and enough speed to have a wing.
+  const stall = Math.sqrt(T.wing.gravity / Math.max(1e-6, T.wing.lift));
+  if (V.len(p.vel) < stall * 0.5) p.vel = V.scale(lookDir(i), stall * 0.5);
+  enter(p, 'wingsuit');
+}
+
+function stowWing(p: Player) {
+  enter(p, p.grounded ? 'grounded' : 'airborne');
+}
+
+/**
+ * The glide. See `T.wing` for the model; this is that model and nothing else.
+ *
+ * Note what is NOT here: no air control, no wall attach, no cap from
+ * `currentCap`. The suit is exempt from the overspeed bleed too (see `step`),
+ * because bleeding a glide back to the run cap would delete the whole verb — a
+ * dive is supposed to be the fastest thing on the map.
+ */
+function updateWingsuit(p: Player, i: Intent, dt: number) {
+  const w = T.wing;
+  const aim = lookDir(i);
+
+  // --- GRAVITY, on the velocity VECTOR and not along the path. This is the whole
+  // model and it took two tries to get right: applied along the flight path only,
+  // as an energy term, aiming exactly level makes `dir.y` zero and gravity does
+  // nothing at all — you could hold the nose flat and fly forever, and a climb
+  // could bleed to a dead stop and hang there. A wingsuit that was a hover.
+  //
+  // On the vector it does both of its jobs at once, as it does in the world: the
+  // component along the path is the speed you gain diving and pay climbing, and
+  // the component across it bends the path down whatever you are aiming at.
+  //
+  // `wing.gravity`, not `world.gravityFall` — see the note on it. One value for
+  // both directions, whatever it is, or a dive would gain more than a climb costs
+  // and the loop would make energy.
+  p.vel.y -= w.gravity * dt;
+
+  let speed = V.len(p.vel);
+  let dir = speed > 1e-4 ? V.scale(p.vel, 1 / speed) : aim;
+
+  // --- LIFT, the only thing that fights that bend, and your hand is on it: the
+  // velocity swings toward where you look. Across the path, so it changes
+  // direction and never speed — free, which is why a dive can be spent on a
+  // climb.
+  //
+  // The rate goes as SPEED, which is the piece that makes this behave like a
+  // wing rather than like a steering wheel. Lift is proportional to v², so the
+  // rate it can rotate a path is v²/v — fast is agile, slow is floppy, out of
+  // one number. It also puts the stall where the arithmetic says: gravity bends
+  // down at g/v and lift bends up at lift·v, so level flight is sustainable
+  // exactly above sqrt(gravity / lift), and below that the nose falls whatever
+  // you do.
+  const rate = Math.min(w.turnMax, w.lift * speed);
+  dir = turnToward(dir, aim, rate * dt);
+
+  // --- DRAG, along the path, and the only irreversible term in here. It is what
+  // gives the dive a terminal speed and what stops dive-and-climb from being a
+  // closed loop you could pump for height.
+  speed = V.clamp(speed - w.drag * speed * speed * dt, 0, w.maxSpeed);
+  p.vel = V.scale(dir, speed);
+
+  // --- the jets. The suit already points where you look, so these only push.
+  // `requireEmptyJumps` is not consulted: it exists to stop a held hop lighting
+  // the jets, and there is no hop in here to hold.
+  const t = T.thruster;
+  p.thrusting = t.enabled && i.thrust.held && !p.fuelDry && p.fuel > 0;
+  p.boosting = false;
+  if (p.thrusting) {
+    p.fuelIdle = 0;
+    p.fuel = Math.max(0, p.fuel - t.burnRate * w.jetBurn * dt);
+    if (p.fuel <= 0) p.fuelDry = true;
+    p.vel.x += aim.x * w.jetAccel * dt;
+    p.vel.y += aim.y * w.jetAccel * dt;
+    p.vel.z += aim.z * w.jetAccel * dt;
+    const s = V.len(p.vel);
+    if (s > w.jetCap) p.vel = V.scale(p.vel, w.jetCap / s);
+  }
+
+  // The one way out that is not X or the ground: a dash. Being unable to leave a
+  // mode is worse than any rule it would break.
+  if (w.cancelOnDash && p.bufDash > 0 && canDash(p)) {
+    stowWing(p);
+    doDash(p, i);
+  }
+}
+
 // ---------------------------------------------------------------- states
 
 function gravity(p: Player, dt: number, scale = 1) {
@@ -1023,7 +1172,10 @@ export function step(p: Player, i: Intent, col: CollisionWorld, dt: number) {
   // Hold-to-hang by default; `toggle` turns the press into an on/off switch.
   if (i.grapple.pressed) {
     if (p.grappling) releaseGrapple(p);
-    else fireGrapple(p, i, col);
+    // A rope and a wing fight over the same velocity — the cable wants to hold
+    // you to a radius and the glide wants to fly a path — so firing one stows
+    // the other. Same rule as the slam, and the same reason.
+    else if (fireGrapple(p, i, col) && p.state === 'wingsuit') stowWing(p);
   } else if (!T.grapple.toggle && p.grappling && !i.grapple.held) {
     releaseGrapple(p);
   }
@@ -1037,9 +1189,21 @@ export function step(p: Player, i: Intent, col: CollisionWorld, dt: number) {
   // landing boost, which is the cost, and needs no rule of its own.
   if (p.slamming && T.slam.jumpCancel && i.jump.pressed) p.slamming = false;
 
+  // The wingsuit, before the state machine and for the same reason as the slam:
+  // deploying cancels whatever you were doing, so that move must not get a tick
+  // of its own first.
+  if (T.wing.enabled && i.wing.pressed) {
+    if (p.state === 'wingsuit') stowWing(p);
+    else if (canWing(p)) doWing(p, i);
+  }
+
   // Before the state machine: a slam cancels whatever you were doing, so the
   // state it cancels should not get a tick of its own first.
   trySlam(p, i, col);
+  // And a slam out of a wingsuit closes it. Both own velocity outright, so the
+  // two cannot run at once — and of the pair the slam is the one you just asked
+  // for.
+  if (p.slamming && p.state === 'wingsuit') stowWing(p);
 
   // Sprint is a held modifier, not a state — the cap change happens in currentCap().
   p.sprinting = T.sprint.enabled && i.dash.held && i.moveY > T.sprint.minForward;
@@ -1056,6 +1220,7 @@ export function step(p: Player, i: Intent, col: CollisionWorld, dt: number) {
       case 'dashing': updateDashing(p, i, col, dt); break;
       case 'sliding': updateSliding(p, i, wish, dt); break;
       case 'wallrunning': updateWallrunning(p, i, wish, col, dt); break;
+      case 'wingsuit': updateWingsuit(p, i, dt); break;
     }
     guard++;
   } while (p.state !== before && guard < 3);
@@ -1063,14 +1228,19 @@ export function step(p: Player, i: Intent, col: CollisionWorld, dt: number) {
   // The slam owns velocity outright while it is running, so it goes after the
   // state (which would otherwise re-apply air control into it) and before the
   // rope. Vaulting is suppressed for the same reason: the whole move is "down".
+  // Vaulting is suppressed in the suit for the reason it is suppressed in a
+  // slam: the whole move is a path, and a hop over a lip is not on it.
   if (p.slamming) updateSlam(p);
-  else tryVault(p, col);
+  else if (p.state !== 'wingsuit') tryVault(p, col);
 
   // After the state, before the move: the rope gets the last word on velocity,
   // so it can cancel whatever the state just added that the rope would not allow.
   updateGrapple(p, i, col, dt);
 
-  if (p.state !== 'dashing') bleedOverspeed(p, dt);
+  // The suit is exempt along with the dash. Bleeding a glide back toward the run
+  // cap would delete the verb outright: a dive is meant to be the fastest thing
+  // on the map, and `wing.maxSpeed` is what bounds it instead.
+  if (p.state !== 'dashing' && p.state !== 'wingsuit') bleedOverspeed(p, dt);
 
   p.prevPos = V.copy(p.pos);
   const res = col.move(p.pos, V.scale(p.vel, dt));
@@ -1118,8 +1288,10 @@ export function step(p: Player, i: Intent, col: CollisionWorld, dt: number) {
     p.lastWallX = 0;
     p.lastWallZ = 0;
     p.wallChain = 0;
-    if (p.state === 'airborne' || p.state === 'wallrunning') {
+    if (p.state === 'airborne' || p.state === 'wallrunning' || p.state === 'wingsuit') {
       // Buffered slide on landing — lets you slide the instant you touch down.
+      // Which is also how a wingsuit is supposed to end: you come in fast and
+      // flat, and the slide is what you do with the speed.
       if (p.bufSlide > 0 && canSlide(p)) doSlide(p);
       else enter(p, 'grounded');
     }

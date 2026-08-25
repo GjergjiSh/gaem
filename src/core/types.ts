@@ -1,6 +1,7 @@
 import type { V3 } from './vec';
 
-export type StateName = 'grounded' | 'airborne' | 'dashing' | 'sliding' | 'wallrunning';
+export type StateName = 'grounded' | 'airborne' | 'dashing' | 'sliding'
+  | 'wallrunning' | 'wingsuit';
 
 export interface Btn { pressed: boolean; held: boolean }
 
@@ -27,6 +28,7 @@ export interface Intent {
   slam: Btn;       // C in the air: everything stops and you go straight down
   thrust: Btn;     // hover jets; shares the jump key, see engine/input.ts
   grapple: Btn;    // middle mouse: fire on press, hang on held (unless grapple.toggle)
+  wing: Btn;       // X in the air: deploy the wingsuit, press again to stow it
 }
 
 export interface MoveResult {

@@ -4040,3 +4040,87 @@ highlight along each flange, bolts drawn as a shadow and a lit crown instead of
 a dot, splice plates with their own bolt groups and a seam up the middle, and
 lengthwise roller streaks — paint on steel is sprayed over mill scale and never
 comes out even. Nothing here costs a draw call; it is the same one texture.
+
+## 51. The wingsuit
+
+X in the air. A **mode**, not a move — every other verb in this solver is
+something you do for a moment, and this is something you *are* until you stop —
+so it is a state, and deploying it ends the dash, the slide, the wallrun, the
+slam, the vault and the rope. Half a dash still running inside it would own the
+velocity the glide is trying to steer.
+
+The jets are the one exception, and deliberately: they are a modifier rather
+than a state, they are what turns the glide into flight, and cancelling them
+would make the two verbs exclusive when the whole point is that they combine.
+
+### Three terms, and the trade falls out
+
+No line of this says "convert speed to height". It is three forces, each doing
+exactly one job:
+
+| | acts | changes |
+|---|---|---|
+| **gravity** | on the velocity vector | speed *along* the path, direction *across* it |
+| **lift** | across the path, toward where you look | direction only — so it is free |
+| **drag** | along the path | speed only, and it is the one irreversible term |
+
+Because turning is free and gravity is signed, aiming down buys speed and
+raising the mouse spends it. That is the whole mechanic, and `verify-wing.mjs`
+proves the trade cannot be run at a profit: four dive-and-climb loops come out
+lower and slower every time, because drag is the only term that does not reverse.
+
+### Two things I got wrong first
+
+**Gravity along the path only.** Modelling it as a pure energy term — `speed +=
+-g·dir.y` — means that aiming *exactly* level makes `dir.y` zero and gravity does
+nothing whatsoever. You could hold the nose flat and fly forever, and a climb
+could bleed to a dead stop and hang there. A wingsuit that was secretly a hover.
+On the *vector* it does both of its jobs at once, as it does in the world.
+
+**A constant turn rate.** Lift goes as v², so the rate it can bend a path goes as
+v²/v — which is **v**. Rate proportional to speed is the difference between a
+wing and a steering wheel: fast is agile, slow is floppy, out of one number. It
+also puts the stall exactly where the arithmetic says, because gravity bends the
+path down at `g/v` and lift bends it up at `lift·v`.
+
+### Three knobs, four numbers you can feel
+
+That is the payoff of the model being the real one — every quantity is one line
+of arithmetic instead of a thing you fiddle with:
+
+```
+terminal dive   sqrt(gravity / drag)    68 m/s   — 1.5x the hard cap
+stall           sqrt(gravity / lift)    26 m/s   — past a run, inside a dash
+glide ratio     lift / drag             6.9 : 1
+agility at v    lift * v                2.9 rad/s at terminal
+```
+
+The glide ratio is the one to watch, because it decides how much of the map one
+rooftop is worth. The first numbers gave 9.7:1, which carries you 290 m off a
+30 m roof — the entire district, in one press, which takes the traversal out of a
+traversal game. Just under seven crosses 180 m: further than any other verb here
+can reach, and still a choice about which way to go.
+
+### And its own gravity
+
+`world.gravityFall` is 62, about six times real, and correctly so — it is tuned
+to make a two-metre jump feel snappy. Flying under it is a different question,
+and the first version used it: a 66 m/s dive bought **sixteen metres** of climb,
+because at 62 m/s² a climb costs more than it can ever be worth. That is not
+momentum-based, it is falling with a cape.
+
+A wing holds some of your weight; `wing.gravity` is what is left over. At 24 the
+same dive is worth sixty metres. One value for both directions, whatever it is,
+or a dive would gain more than a climb costs and the loop would make energy.
+
+### The stance is read, not animated
+
+The body lies along its own flight path. The head is the +Y axis and yaw has
+already pointed +Z down the horizontal course, so the pitch that puts the head on
+the velocity is a quarter turn less the flight angle: level comes out prone, a
+vertical dive comes out head-down, a zoom climb stands you back up. All of it off
+the velocity, so the pose can never lie about where you are going.
+
+The player group's Euler order moved to `YXZ` for it. The default `XYZ` pitches
+about the *world* x axis, which on a yawed body is a roll — and the suit does
+both at once, so the order has to mean what it reads like.

@@ -486,6 +486,87 @@ export const T = {
     restartFuel: 20,    // fuel needed to re-ignite after running the tank dry
   },
 
+  wing: {
+    // The wingsuit. X in the air, press again to stow it, and it is a MODE
+    // rather than a move: everything else here is something you do for a moment,
+    // this is something you are until you stop.
+    //
+    // Three terms, each doing exactly one job, and between them they produce the
+    // trade the verb exists for without a line of code that mentions it:
+    //
+    //   gravity  acts on the velocity VECTOR. Along the path it is the speed you
+    //            gain diving and pay climbing; across the path it bends you down
+    //            whatever you are aiming at.
+    //   lift     the only thing that fights that bend, and your hand is on it:
+    //            the velocity swings toward where you look. Across the path, so
+    //            it changes direction and never speed — free, which is why a
+    //            dive can be spent on a climb.
+    //   drag     along the path, and the only irreversible term in here. It sets
+    //            the terminal dive and it is what stops dive-and-climb being a
+    //            closed loop you could pump for height.
+    enabled: true,
+    /**
+     * The suit's OWN gravity, and much lighter than the world's.
+     *
+     * `world.gravityFall` is 62 — about six times real, and correctly so: it is
+     * tuned to make a two-metre jump feel snappy. Flying under it is a different
+     * question, and the first version of this used it: a 66 m/s dive bought
+     * sixteen metres of climb, because at 62 m/s² a climb costs more than it can
+     * ever be worth. Which is not "momentum based", it is falling with a cape.
+     *
+     * A wing HOLDS some of your weight. This number is what is left over, and
+     * dropping it to 24 turns the same dive into sixty metres of climb — the
+     * trade is still exact, it is just worth making.
+     */
+    gravity: 24,
+    /**
+     * How hard the wing bites, in rad/s of path rotation per m/s of speed.
+     *
+     * Per m/s, not a constant — that is the whole of it. Lift goes as v², so the
+     * rate it can bend a path goes as v²/v, which is v. So one number gives both
+     * halves of how a wing behaves: fast is agile and slow is floppy.
+     *
+     * It also sets the stall outright. Gravity bends the path down at g/v, lift
+     * bends it up at lift·v, so level flight is sustainable exactly above
+     * sqrt(gravity / lift) — 26 m/s here, which is well past a run and inside
+     * what a dash reaches. Below it the nose falls whatever you do.
+     */
+    lift: 0.036,
+    turnMax: 3.2,       // ceiling on that rate, so terminal is not twitchy
+    /**
+     * Along-path drag, and the third leg of the tripod. THREE numbers set four
+     * things you can feel, and every one of them is one line of arithmetic —
+     * which is the only reason this is tunable rather than fiddled with:
+     *
+     *   terminal dive   sqrt(gravity / drag)     68 m/s
+     *   stall           sqrt(gravity / lift)     26 m/s
+     *   glide ratio     lift / drag              6.9 : 1
+     *   agility at v    lift * v                 2.9 rad/s at terminal
+     *
+     * The glide ratio is the one to watch, because it decides how much of the
+     * map one rooftop is worth. At the 9.7:1 this started on, a 30 m roof
+     * carried you 290 m — the whole district, in one press, which takes the
+     * traversal out of a traversal game. Just under seven crosses 180 m: still
+     * further than any other verb here can reach, and still a choice about which
+     * way to go.
+     */
+    drag: 0.0052,
+    maxSpeed: 96,       // hard ceiling, so a long dive cannot outrun collision
+    // A dash drops you out of the suit rather than trapping you in it. Off means
+    // X and the ground are the only ways out.
+    cancelOnDash: true,
+    // --- with the jets lit, the glide becomes flight. The suit already points
+    // where you look, so the jets do not steer, they only push — which is what
+    // makes the pair read as one thing rather than a hover with a cape on.
+    jetAccel: 50,       // accel along the aim while the jets burn
+    jetCap: 78,         // ceiling under jets
+    jetBurn: 1.35,      // fuel multiplier against an ordinary hover
+    // --- the look of it. The body lies along its flight path; these two say how
+    // far out of it the shoulders sit, and how hard it banks into a turn.
+    lean: 0.16,         // radians of nose-up out of the flight path
+    roll: 2.2,          // radians of bank per rad/s of turn, clamped to a right angle
+  },
+
   crosshair: {
     // The whole reticle is data: a centre dot plus four ticks. length 0 leaves
     // the bare dot (the original), dotSize 0 leaves a classic four-tick cross.
@@ -735,6 +816,16 @@ export const META: Record<string, { min?: number; max?: number; step?: number; d
   'shotgun/projDrop': { min: 0, max: 80, step: 0.5 },
   'shotgun/projSize': { min: 0.03, max: 0.6, step: 0.01 },
   'shotgun/damage': { min: 0, max: 2, step: 0.05, doc: 'Per pellet, x the shared head/body damage.' },
+  'wing/gravity': { min: 4, max: 62, step: 0.5, doc: "The suit's own gravity. Lower = a climb is worth making." },
+  'wing/lift': { min: 0.004, max: 0.2, step: 0.001, doc: 'rad/s of turn per m/s of speed. Stall = sqrt(gravity/lift). THE wingsuit knob.' },
+  'wing/turnMax': { min: 0.5, max: 8, step: 0.05, doc: 'Ceiling on the turn rate, so terminal is not twitchy.' },
+  'wing/drag': { min: 0.0005, max: 0.03, step: 0.0002, doc: 'Along-path drag. Terminal dive = sqrt(gravity/drag).' },
+  'wing/maxSpeed': { min: 20, max: 160, step: 1 },
+  'wing/jetAccel': { min: 0, max: 200, step: 1, doc: 'Accel along the aim with the jets lit.' },
+  'wing/jetCap': { min: 10, max: 160, step: 1 },
+  'wing/jetBurn': { min: 0.2, max: 4, step: 0.05 },
+  'wing/lean': { min: -0.8, max: 0.8, step: 0.01, doc: 'Radians of nose-up out of the flight path. Visual only.' },
+  'wing/roll': { min: 0, max: 6, step: 0.05, doc: 'Bank per rad/s of turn. Visual only.' },
   'thruster/thrust': { min: 0, max: 150, step: 1, doc: 'Upward accel while burning.' },
   'thruster/maxRise': { min: 0, max: 25, step: 0.5, doc: 'Vertical ceiling under thrust.' },
   'thruster/gravityScale': { min: 0, max: 1, step: 0.01, doc: '0 = weightless hover, 1 = full gravity.' },
