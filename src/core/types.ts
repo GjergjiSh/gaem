@@ -29,6 +29,7 @@ export interface Intent {
   thrust: Btn;     // hover jets; shares the jump key, see engine/input.ts
   grapple: Btn;    // middle mouse: fire on press, hang on held (unless grapple.toggle)
   wing: Btn;       // X in the air: deploy the wingsuit, press again to stow it
+  super: Btn;      // Z: the super dash. Aim at the sky and it launches you
 }
 
 export interface MoveResult {
@@ -62,15 +63,18 @@ export interface Player {
   grounded: boolean;
   groundNormal: V3;
   sprinting: boolean; // dash button doubles as sprint when sprint.enabled
-  stamina: number;    // dashing spends this; regenerates over time
 
-  // Thrusters. Their own resource, deliberately separate from stamina: hovering
-  // must never cost you a dash, or the two verbs fight over one pool.
+  // GAS. One tank, and everything that is not running, gliding or roping draws
+  // on it — jumps, dashes, slides, slams, wall jumps, the jets. There were two
+  // pools once, stamina for the dash and fuel for the jets, kept apart so that
+  // hovering could never cost you a dash. Which is also why neither meant
+  // anything: a pool that gates one verb is that verb's cooldown with a bar
+  // drawn on it. See T.gas.
+  gas: number;
+  gasIdle: number;    // seconds since the last SPEND — gates the refuel
+  gasDry: boolean;    // ran the tank empty; the JETS are locked out until gas.restart
   thrusting: boolean; // jets burning this tick
   boosting: boolean;  // ...and the afterburner is lit on top of that
-  fuel: number;
-  fuelIdle: number;   // seconds since the jets last burned — gates the refuel
-  fuelDry: boolean;   // ran the tank empty; locked out until restartFuel is back
 
   // Ground slam. Airborne only, and a modifier like the vault: it owns your
   // velocity until you land, then hands you a short window where the dash comes
@@ -101,6 +105,10 @@ export interface Player {
   dashCooldown: number;
   dashDir: V3;
   dashTime: number;
+  // The super dash (Z) shares the dashing state so every cancel and every link
+  // still works — this flag is which set of numbers the state is running on.
+  dashSuper: boolean;
+  superCooldown: number;
 
   // timers (seconds remaining)
   coyoteJump: number;

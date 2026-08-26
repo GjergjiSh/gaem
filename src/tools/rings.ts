@@ -1,6 +1,11 @@
-// The meters. Four flat bars stacked in the top-right corner, reading down:
-// thruster fuel, stamina, sword combo, Getsuga charge. Plus the red edge flash
-// when an enemy shot connects.
+// The meters. Three flat bars stacked in the top-right corner, reading down:
+// gas, sword combo, Getsuga charge. Plus the red edge flash when an enemy shot
+// connects.
+//
+// There were four. Stamina sat between gas and the sword, and it went with the
+// pool it was reading: the dash spends gas now, like everything else does, so
+// that bar had nothing left to say. A meter that is always full is not
+// information, it is furniture.
 //
 // They used to be big arcs flanking the crosshair, on the theory that peripheral
 // vision would pick them up without you looking away. It does — but it also puts
@@ -43,8 +48,7 @@ export class Rings {
   flash() { this.flashT = 0.45; }
 
   update(dt: number, s: {
-    stamina: number;        // 0..1
-    fuel: number;           // 0..1 thruster tank
+    gas: number;            // 0..1 — the one movement tank
     thrusting: boolean;
     boosting: boolean;
     charges: number;
@@ -59,7 +63,7 @@ export class Rings {
     const w = Math.round(m.width);
     const h = Math.round(m.height);
     const gap = Math.round(m.gap);
-    const rows = 4;
+    const rows = 3;
     const pad = 2;                                   // room for the rim stroke
     const cw = w + pad * 2;
     const ch = rows * h + (rows - 1) * gap + pad * 2;
@@ -98,36 +102,34 @@ export class Rings {
       c.fillRect(pad + w - len, y(row), len, h);
     };
 
-    // --- 0: the thruster tank. The burner drains multiples of it, so it gets its
-    // own colour — you need to see that you are spending fast without reading it.
+    // --- 0: the gas. Every move in the kit except running, the wing and the rope
+    // comes out of this one bar, so it is the only meter that is worth a colour
+    // change: the burner drains multiples of it, and you need to see that you are
+    // spending fast without stopping to read a number. Dims when full, so a topped
+    // -up tank fades out of notice and only a spent one draws the eye.
     track(0);
-    fill(0, s.fuel, s.boosting ? '#fb7185'
+    fill(0, s.gas, s.boosting ? '#fb7185'
       : s.thrusting ? '#fde047'
-        : s.fuel >= 1 ? 'rgba(250,204,21,.35)' : '#facc15');
+        : s.gas >= 1 ? 'rgba(250,204,21,.35)' : '#facc15');
 
-    // --- 1: stamina. Dims when full, so a topped-up resource fades out of notice
-    // entirely and only a spent one draws the eye.
-    track(1);
-    fill(1, s.stamina, s.stamina >= 1 ? 'rgba(56,189,248,.35)' : '#38bdf8');
-
-    // --- 2: the sword. One block per remaining swing, so the combo reads as a
+    // --- 1: the sword. One block per remaining swing, so the combo reads as a
     // count rather than a level; the cooldown refills the whole bar in red.
-    track(2);
+    track(1);
     const n = Math.max(1, Math.round(s.maxCharges));
     const seg = (w - (n - 1) * 2) / n;
     for (let i = 0; i < n; i++) {
       if (i >= s.charges) continue;
       c.fillStyle = '#e6edf3';
-      c.fillRect(pad + i * (seg + 2), y(2), seg, h);
+      c.fillRect(pad + i * (seg + 2), y(1), seg, h);
     }
     if (s.cooldown > 0) {
       c.fillStyle = '#f43f5e';
-      c.fillRect(pad, y(2), Math.round(w * (1 - s.cooldown)), h);
+      c.fillRect(pad, y(1), Math.round(w * (1 - s.cooldown)), h);
     }
 
-    // --- 3: the Getsuga, filling as it recharges. Same rule as stamina — a ready
+    // --- 2: the Getsuga, filling as it recharges. Same rule as the gas — a ready
     // wave dims out of notice, a spent one draws the eye.
-    track(3);
-    fill(3, s.getsuga, s.getsuga >= 1 ? 'rgba(129,140,248,.35)' : '#818cf8');
+    track(2);
+    fill(2, s.getsuga, s.getsuga >= 1 ? 'rgba(129,140,248,.35)' : '#818cf8');
   }
 }

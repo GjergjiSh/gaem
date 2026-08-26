@@ -46,7 +46,7 @@ const btn = () => ({ pressed: false, held: false });
 const intent = (pitch = 0, over = {}) => ({
   moveX: 0, moveY: 0, yaw: 0, pitch,
   jump: btn(), dash: btn(), slide: btn(), slam: btn(), thrust: btn(), grapple: btn(),
-  wing: btn(), ...over,
+  wing: btn(), super: btn(), ...over,
 });
 
 let fails = 0;
@@ -102,7 +102,7 @@ console.log('\ndeploying cancels everything except the jets');
   const q = flying(50);
   hold(q, 0, 0.2, { thrust: { pressed: false, held: true } });
   check(q.thrusting, 'the jets still light inside the suit');
-  check(q.fuel < T.thruster.fuelMax, `and they burn the tank (${q.fuel.toFixed(0)} of ${T.thruster.fuelMax})`);
+  check(q.gas < T.gas.max, `and they burn the tank (${q.gas.toFixed(0)} of ${T.gas.max})`);
 }
 
 // ---------------------------------------------------------------------------

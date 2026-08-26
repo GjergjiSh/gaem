@@ -5,7 +5,7 @@
 // structure automatically, so adding a param here is all it takes to get a slider.
 
 /** Bump when defaults change meaningfully — invalidates saved localStorage tunes. */
-export const TUNING_VERSION = 15;
+export const TUNING_VERSION = 16;
 
 export const T = {
   world: {
@@ -54,6 +54,12 @@ export const T = {
     coyoteTime: 0.12,
     bufferTime: 0.12,
     slideExitBonus: 1.28, // speed MULTIPLIER when jumping out of a slide
+    // Gas. Two numbers, because the two jumps are not the same purchase: the
+    // first one off the floor is how you get anywhere and is nearly free, the
+    // second one is a genuine extra metre of reach and should be felt. Set the
+    // ground one to 0 if a tight tank ever makes walking around feel taxed.
+    gas: 6,
+    gasAir: 12,         // the double jump, and any jump not off the ground
   },
 
   dash: {
@@ -74,6 +80,48 @@ export const T = {
     refundJumpOnDash: true,
     verticalAim: 0.35,    // how much camera pitch tilts an air dash (third person)
     verticalAimFP: 1.0,   // in first person you expect to dash exactly where you look
+    // Gas, spent on entry. This used to be `stamina.dashCost` against a pool
+    // nothing else touched, which made it a second cooldown; against the shared
+    // tank it is a real choice, because the gas you dash with is the gas you do
+    // not hover, slam or super-dash with.
+    gas: 25,
+  },
+
+  // Z. A dash, and every word of that is load-bearing: same state, same cancels,
+  // same tech, so everything you already know about a dash is still true. What is
+  // different is the size of it, and one clamp being off.
+  //
+  // The regular dash exits capped — `momentum.hardCap` horizontally and
+  // `jump.speed` vertically — because a dash is a REPOSITION and letting one
+  // launch you would make every other verb optional. This one is the launch. It
+  // exits at its own ceiling with the vertical clamp lifted, which is the whole
+  // difference: aim at the sky, press Z, and you leave with enough height to
+  // deploy the wing and go somewhere.
+  //
+  // Its own group, and its own `enabled`, deliberately: the shipped tune has
+  // `dash.enabled` false (Shift is sprint there), and a launch that quietly
+  // vanished with the dash would be a bug nobody could find.
+  superdash: {
+    enabled: true,
+    speed: 70,          // during the launch window
+    duration: 0.34,     // → ~24m of travel, before gravity gets a say
+    cooldown: 1.6,
+    gravityScale: 0,    // floaty for the window, like the dash. 1 = full weight
+    // Exit speed as a fraction of `speed`, and NOT clamped to hardCap or
+    // jump.speed. 70 x 0.85 = 59 m/s straight up, which is another ~49m of
+    // coasting on top of the 24 above — call it 70m of altitude from flat ground.
+    exitKeep: 0.85,
+    maxSpeed: 92,       // the one ceiling it does respect
+    /**
+     * How much of the camera pitch the launch honours, 0..1.
+     *
+     * At 1 the direction is spherical rather than the dash's tilted horizontal:
+     * the stick sets the compass bearing, the pitch sets the elevation, and
+     * aiming straight up goes straight up no matter what the stick says. Which
+     * is what "aim at the sky and press Z" has to mean.
+     */
+    aim: 1,
+    gas: 55,            // two per tank, and you cannot chain them. That is the cost
   },
 
   slide: {
@@ -98,6 +146,10 @@ export const T = {
     // ledge): boost on exit, then the coyote jump converts it. 0 = off.
     ledgeBoost: 0,      // flat speed added when a slide leaves a ledge
     ledgeDrop: 0,       // downward kick at the same moment — the fast GR drop
+    // Gas, on entry only. A slide is charged for the BOOST, not for the time:
+    // billing it per second would mean the longest slide — the one down a ramp
+    // that you set up for — is the one that costs most, which is backwards.
+    gas: 8,
   },
 
   wall: {
@@ -128,6 +180,10 @@ export const T = {
     refillJumps: true,
     refillDash: true,
     stickAssist: 14,      // pull toward the wall, keeps you glued through corners
+    // Gas for the EJECTION, and nothing for the run. Wallrunning is running —
+    // it is free by the same rule the ground is — but the kick off the wall is
+    // an impulse the size of a jump and is priced like one.
+    gasJump: 8,
   },
 
   bhop: {
@@ -436,12 +492,6 @@ export const T = {
     pullStagger: 1.2,   // seconds a hooked target can't shoot
   },
 
-  stamina: {
-    max: 100,
-    regen: 30,          // per second
-    dashCost: 25,       // dashing is gated on this, not just charges
-  },
-
   thruster: {
     // Hover jets on the jump button. Still not flight — the tank is short and
     // `maxRise` caps the climb — but responsive: the first pass felt like wading
@@ -450,7 +500,7 @@ export const T = {
     // it is the first knob to reach for if the jets ever feel heavy again.
     enabled: true,
     // Hold jump once your jumps are spent (jump, double jump, then hold). With
-    // this off the jets light on any held jump, which eats fuel on every hop.
+    // this off the jets light on any held jump, which eats gas on every hop.
     requireEmptyJumps: true,
     thrust: 62,         // upward accel while burning — snappy enough to kill a fall
     maxRise: 5,         // vertical speed ceiling under thrust — this is the knob
@@ -468,7 +518,7 @@ export const T = {
     gasCap: 38,         // ceiling the gas alone reaches — swing for more than this
     // --- afterburner: hold the dash key WHILE the jets are lit. The hover is for
     // holding a position and shooting; this is for crossing the arena. It costs
-    // multiples of the fuel, which is the only thing stopping it being the answer
+    // multiples of the gas, which is the only thing stopping it being the answer
     // to everything. Point and go: the stick if you're steering it, otherwise
     // wherever you're looking, pitch included.
     boost: true,
@@ -476,14 +526,34 @@ export const T = {
     boostCap: 34,       // horizontal ceiling under boost — THE ironman number
     boostRise: 13,      // vertical ceiling under boost (replaces maxRise while lit)
     boostAim: 1,        // how much camera pitch tilts the boost; 0 = flat only
-    boostBurn: 2.4,     // fuel burn multiplier while boosting
+    boostBurn: 2.4,     // gas burn multiplier while boosting
     boostDrag: 0.12,    // near-zero damping — a burn keeps what it builds
-    fuelMax: 120,
-    burnRate: 42,       // fuel/sec while burning
-    refuelRate: 40,     // fuel/sec once refuelling starts
-    refuelDelay: 0.35,  // seconds after releasing before refuel starts
+    burnRate: 42,       // gas/sec while burning
+  },
+
+  gas: {
+    // THE movement resource. One tank, and everything in the kit that is not
+    // running, gliding or roping draws on it: jumps, dashes, slides, slams, wall
+    // jumps, the jets.
+    //
+    // It used to be two pools — stamina for the dash, fuel for the jets — kept
+    // apart on the theory that hovering must never cost you a dash. Which was
+    // true, and also why neither pool ever meant anything: a resource that gates
+    // exactly one verb is that verb's cooldown wearing a bar. One tank makes the
+    // whole kit a budget you spend, and every cost below is an exchange rate
+    // between two verbs rather than a number in isolation.
+    //
+    // The COSTS are not here. They live with the move that pays them —
+    // `dash.gas`, `jump.gas`, `slam.gas` — because that is where you are looking
+    // when you want to know what a move is worth. This group is only the tank.
+    max: 120,
+    refuelRate: 40,     // gas/sec once refuelling starts
+    refuelDelay: 0.35,  // seconds after the last SPEND before refuel starts
     groundRefuel: 2.5,  // refuel multiplier while grounded — landing tops you up
-    restartFuel: 20,    // fuel needed to re-ignite after running the tank dry
+    // Gas needed to re-light the JETS after burning the tank dry. Only the jets:
+    // running the tank out is meant to cost you the thing that emptied it, and a
+    // lockout that also took your jump would strand you on a rooftop.
+    restart: 20,
   },
 
   wing: {
@@ -560,7 +630,7 @@ export const T = {
     // makes the pair read as one thing rather than a hover with a cape on.
     jetAccel: 50,       // accel along the aim while the jets burn
     jetCap: 78,         // ceiling under jets
-    jetBurn: 1.35,      // fuel multiplier against an ordinary hover
+    jetBurn: 1.35,      // gas multiplier against an ordinary hover
     // --- the look of it. The body lies along its flight path; these two say how
     // far out of it the shoulders sit, and how hard it banks into a turn.
     lean: 0.16,         // radians of nose-up out of the flight path
@@ -603,8 +673,11 @@ export const T = {
   },
 
   meters: {
-    // Four flat bars stacked in the top-right corner: fuel, stamina, sword,
-    // getsuga. They used to be big arcs flanking the crosshair, which put them
+    // Three flat bars stacked in the top-right corner: gas, sword, getsuga.
+    // There were four — stamina sat between gas and the sword — and it went with
+    // the pool it was reading. A bar that is always full is not information.
+    //
+    // They used to be big arcs flanking the crosshair, which put them
     // in the one place you are always looking. A resource meter is a thing you
     // GLANCE at — it belongs in a corner, small and quiet, and readable by the
     // colour that moved rather than by the number.
@@ -672,6 +745,11 @@ export const T = {
     push: 6,            // forward speed held through the hop, so you land ON it
     hold: 0.35,         // seconds that push is re-asserted while you rise
     cooldown: 0.2,      // no second vault until this expires
+    // Zero, and here so you can change your mind rather than because it is a
+    // knob worth turning. Nothing is bound to a vault — it fires off the ledge
+    // itself — so a cost on it is the level geometry billing you, and an empty
+    // tank would turn a lip you have cleared a hundred times into a wall.
+    gas: 0,
   },
 
   // C in the air: stop everything and go straight down. It is an escape and a
@@ -688,6 +766,21 @@ export const T = {
     minHeight: 2.5,     // metres of clear air needed under you before C will slam
     boostTime: 1.1,     // seconds after landing that dashes come out harder
     dashBoost: 1.3,     // x dash speed inside that window
+    // It used to cost nothing, and the comment above said so as a virtue. Against
+    // one shared tank "free" is not neutral: a free reset is the answer to every
+    // situation, and the landing window it hands you is worth paying for.
+    gas: 10,
+  },
+
+  // Not tuning — a switchboard, and the last folder in the panel because that is
+  // where you go looking for one. It lives in T because the panel is generated
+  // from the shape of T, so a flag here is a checkbox with no edit to panel.ts.
+  //
+  // Deliberately NOT persisted, unlike every other group: see panel.ts. A cheat
+  // that survives a reload is a cheat you forget is on, and then a tuning session
+  // spent wondering why the tank never moves.
+  cheats: {
+    infiniteGas: false,
   },
 
   character: {
@@ -772,7 +865,6 @@ export const META: Record<string, { min?: number; max?: number; step?: number; d
   'sword/arc': { min: 0.3, max: 3.14, step: 0.02, doc: 'Frontal cone width, radians.' },
   'sword/combo': { min: 1, max: 6, step: 1 },
   'sword/reflectSpeed': { min: 0.5, max: 4, step: 0.05 },
-  'stamina/dashCost': { min: 0, max: 100, step: 1, doc: '0 = dashing is free again.' },
   'grapple/range': { min: 5, max: 200, step: 1, doc: 'How far the hooks reach.' },
   'grapple/spread': { min: 0, max: 0.4, step: 0.005, doc: 'How far apart the two anchors land. 0 = both on one point.' },
   'grapple/minLen': { min: 0.5, max: 12, step: 0.1, doc: 'Arrive this close and it lets go.' },
@@ -836,17 +928,35 @@ export const META: Record<string, { min?: number; max?: number; step?: number; d
   'thruster/boostCap': { min: 0, max: 70, step: 0.5, doc: 'Horizontal ceiling under boost.' },
   'thruster/boostRise': { min: 0, max: 40, step: 0.5, doc: 'Vertical ceiling under boost.' },
   'thruster/boostAim': { min: 0, max: 1.5, step: 0.01, doc: '1 = the burn goes exactly where you look.' },
-  'thruster/boostBurn': { min: 1, max: 8, step: 0.1, doc: 'Fuel multiplier. This is the only cost.' },
   'thruster/boostDrag': { min: 0, max: 6, step: 0.02 },
   'thruster/hoverDrag': { min: 0, max: 12, step: 0.1, doc: 'Horizontal damping. 0 = you fly away.' },
   'thruster/gasAccel': { min: 0, max: 250, step: 5, doc: 'Jet accel while on a cable. The ODM burst.' },
   'thruster/gasCap': { min: 5, max: 60, step: 1, doc: 'Ceiling the gas alone reaches. Swing to beat it.' },
-  'thruster/fuelMax': { min: 10, max: 300, step: 5 },
-  'thruster/burnRate': { min: 1, max: 150, step: 1, doc: 'Fuel/sec. fuelMax / this = hover seconds.' },
-  'thruster/refuelRate': { min: 1, max: 150, step: 1 },
-  'thruster/refuelDelay': { min: 0, max: 3, step: 0.05 },
-  'thruster/groundRefuel': { min: 1, max: 6, step: 0.1, doc: 'Refuel multiplier while grounded.' },
-  'thruster/restartFuel': { min: 0, max: 100, step: 1, doc: 'Fuel needed to re-ignite after running dry.' },
+  'thruster/burnRate': { min: 1, max: 150, step: 1, doc: 'Gas/sec while hovering. gas.max / this = hover seconds.' },
+  'thruster/boostBurn': { min: 1, max: 8, step: 0.1, doc: 'Gas multiplier while the burner is lit.' },
+
+  // --- the tank, and the price list. Every cost is in the same units, so these
+  // sliders read against each other: gas.max / dash.gas is how many dashes.
+  'gas/max': { min: 10, max: 300, step: 5, doc: 'The tank. Every cost below is in these units.' },
+  'gas/refuelRate': { min: 1, max: 150, step: 1 },
+  'gas/refuelDelay': { min: 0, max: 3, step: 0.05, doc: 'Seconds after the last spend before refuel starts.' },
+  'gas/groundRefuel': { min: 1, max: 6, step: 0.1, doc: 'Refuel multiplier while grounded.' },
+  'gas/restart': { min: 0, max: 100, step: 1, doc: 'Gas needed to re-light the JETS after running dry.' },
+  'jump/gas': { min: 0, max: 60, step: 1, doc: 'Gas for a jump off the ground. 0 = walking is untaxed.' },
+  'jump/gasAir': { min: 0, max: 60, step: 1, doc: 'Gas for the double jump.' },
+  'dash/gas': { min: 0, max: 120, step: 1, doc: 'Gas per dash. gas.max / this = dashes on a tank.' },
+  'slide/gas': { min: 0, max: 60, step: 1, doc: 'Gas to enter a slide. Charged once, not per second.' },
+  'wall/gasJump': { min: 0, max: 60, step: 1, doc: 'Gas to kick off a wall. The run itself is free.' },
+  'vault/gas': { min: 0, max: 40, step: 1, doc: 'Gas per vault. Leave at 0 — nothing is bound to it.' },
+  'slam/gas': { min: 0, max: 60, step: 1, doc: 'Gas per slam.' },
+  'superdash/speed': { min: 20, max: 140, step: 1, doc: 'Speed held through the launch window.' },
+  'superdash/duration': { min: 0.05, max: 1, step: 0.01 },
+  'superdash/cooldown': { min: 0, max: 8, step: 0.05 },
+  'superdash/gravityScale': { min: 0, max: 1, step: 0.01, doc: '0 = floaty through the window, like a dash.' },
+  'superdash/exitKeep': { min: 0, max: 1.5, step: 0.01, doc: 'Fraction of speed kept on exit. NOT clamped to hardCap.' },
+  'superdash/maxSpeed': { min: 20, max: 160, step: 1, doc: 'The one ceiling the launch respects.' },
+  'superdash/aim': { min: 0, max: 1, step: 0.01, doc: '1 = straight up when you look straight up. THE super-dash knob.' },
+  'superdash/gas': { min: 0, max: 120, step: 1, doc: 'Gas per launch. gas.max / this = launches on a tank.' },
   'crosshair/spreadScale': { min: 0, max: 800, step: 10, doc: 'Px of bloom per radian of the equipped gun spread.' },
   'weapon/adsFov': { min: -60, max: 0, step: 1, doc: 'The whole scope: an FOV pull, no overlay.' },
   'weapon/adsSensScale': { min: 0.1, max: 1, step: 0.01 },

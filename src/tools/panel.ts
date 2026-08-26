@@ -44,10 +44,23 @@ function baseFor(name: string): any {
   return base;
 }
 
+/**
+ * Groups that are switches rather than tuning, and are never persisted anywhere:
+ * not into a profile file, not into localStorage. A cheat that survived a reload
+ * would be a cheat you forget is on, and then an afternoon spent wondering why
+ * the gas meter never moves. Worse, `cheats` written into titanfall.json would
+ * ship the cheat to everyone who loads that profile.
+ *
+ * The cost of the rule is that infinite gas is off again after a refresh, which
+ * is the right side to err on.
+ */
+const EPHEMERAL = new Set(['cheats']);
+
 /** How T differs from code defaults — the shape a profile file is stored in. */
 function profileDiff(): any {
   const out: any = {};
   for (const group of Object.keys(T)) {
+    if (EPHEMERAL.has(group)) continue;
     const obj = (T as any)[group], def = (DEFAULTS as any)[group];
     for (const key of Object.keys(obj)) {
       if (obj[key] !== def[key]) (out[group] ??= {})[key] = obj[key];
@@ -265,6 +278,7 @@ export class Panel {
   private captureOverrides() {
     this.overrides = {};
     for (const group of Object.keys(T)) {
+      if (EPHEMERAL.has(group)) continue;
       const obj = (T as any)[group], base = (BASE as any)[group];
       for (const key of Object.keys(obj)) {
         if (obj[key] !== base[key]) this.overrides[`${group}/${key}`] = obj[key];
@@ -284,6 +298,7 @@ export class Panel {
 
   /** Record one changed param and schedule a save. */
   private note(path: string, value: number | boolean | string) {
+    if (EPHEMERAL.has(path.split('/')[0])) return;
     this.overrides[path] = value;
     this.save();
   }

@@ -96,13 +96,23 @@ export class Hud {
       `coyote   ${bar(p.coyoteJump, T.jump.coyoteTime)}  buf ${bar(p.bufJump, T.jump.bufferTime)}`,
       `slidecoy ${bar(p.slideCoyote, T.slide.coyoteTime)}${p.slideCoyote > 0 ? '  LEDGE TECH ARMED' : ''}`,
       `dash cd  ${bar(T.dash.cooldown - p.dashCooldown, T.dash.cooldown)}`,
+      `super cd ${bar(T.superdash.cooldown - p.superCooldown, T.superdash.cooldown)}`
+        + `${p.state === 'dashing' && p.dashSuper ? '  LAUNCH' : ''}`
+        + `${p.superCooldown <= 0 && p.gas >= T.superdash.gas ? '  [Z]' : ''}`,
       `cables   ${p.grappling
         ? `${p.cables.map((c) => (c.on ? c.len.toFixed(1).padStart(5) : '    -')).join(' ')}`
           + `  ${p.grappleReel > 0 ? 'REEL' : p.grappleReel < 0 ? 'PAY' : 'hang'}`
           + `${p.thrusting ? '  GAS' : ''}`
         : `--   ${p.grappleKeep > 0 ? `keep ${bar(p.grappleKeep, T.grapple.keepTime)}` : ''}`}`,
-      `fuel     ${bar(p.fuel, T.thruster.fuelMax)}${p.boosting ? '  BURN x'
-        + T.thruster.boostBurn : p.thrusting ? '  THRUST' : p.fuelDry ? '  DRY' : ''}`,
+      // The one resource line. Every move except running, the wing and the rope
+      // comes out of it, so the useful thing to show beside the bar is what the
+      // tank is currently worth in moves.
+      `gas      ${bar(p.gas, T.gas.max)} ${p.gas.toFixed(0).padStart(3)}`
+        + `${T.cheats.infiniteGas ? '  INFINITE' : p.boosting ? '  BURN x'
+          + T.thruster.boostBurn : p.thrusting ? '  THRUST' : p.gasDry ? '  DRY' : ''}`,
+      `  buys   ${T.dash.gas > 0 ? `${Math.floor(p.gas / T.dash.gas)} dash  ` : ''}`
+        + `${T.superdash.gas > 0 ? `${Math.floor(p.gas / T.superdash.gas)} super  ` : ''}`
+        + `${T.jump.gasAir > 0 ? `${Math.floor(p.gas / T.jump.gasAir)} airjump` : ''}`,
       ``,
       `time     ${timing.run.toFixed(2)}s${timing.best !== null ? `   best ${timing.best.toFixed(2)}s` : ''}`,
       ...(combat ? [combat] : []),
@@ -116,10 +126,15 @@ export class Hud {
     if (this.showHelp) {
       this.help.textContent = [
         `WASD move · Space jump · Shift dash · Ctrl slide`,
+        `Z super dash — aim UP and it launches you high enough to wingsuit`,
+        `X in the air = wingsuit · aim down for speed, raise up to trade it for height`,
+        `  hold Space in the suit = jet mode (you fly where you look)`,
+        `GAS pays for everything but running, the wingsuit and the ropes`,
+        `  it refills fastest on the ground — landing is how you reload`,
         `C in the air = ground slam · landing it makes your next dashes hit harder`,
         `run into a low ledge = vault (automatic, keeps your speed)`,
         `hold Space with no jumps left = thrusters (hover + shoot)`,
-        `  + Shift while thrusting = afterburner (drinks fuel, goes fast)`,
+        `  + Shift while thrusting = afterburner (drinks gas, goes fast)`,
         `air into a wall = wallrun (auto-runs) · Space = eject`,
         `1 rifle · 2 shotgun · 3 railgun · 4 flamer · 5 rocket · 6 sam`,
         `hold E = weapon wheel (slows time, drag to pick) · Q last gun`,

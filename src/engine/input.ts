@@ -22,6 +22,11 @@ const KEYS = {
   // modifier on an existing one, because it is a MODE — every other verb here is
   // something you do for a moment, and this is something you are until you stop.
   wing: ['KeyX'],
+  // Z: the super dash. Its own key rather than a chord on Shift, because the two
+  // are different decisions — a dash is reflex and costs almost nothing, this is
+  // half a tank and a second and a half of your life, and a move you commit to
+  // should not be one key away from the one you spam.
+  super: ['KeyZ'],
 };
 
 /** Gun slots, in arsenal order. Slot N is Digit(N+1). */
@@ -58,6 +63,7 @@ export class Input {
     thrust: { pressed: false, held: false },
     grapple: { pressed: false, held: false },
     wing: { pressed: false, held: false },
+    super: { pressed: false, held: false },
   };
 
   /** Seconds since the mouse last moved — drives the camera drift-behind. */
@@ -120,6 +126,7 @@ export class Input {
       if (KEYS.slide.includes(e.code)) this.intent.slide.pressed = true;
       if (KEYS.slam.includes(e.code)) this.intent.slam.pressed = true;
       if (KEYS.wing.includes(e.code)) this.intent.wing.pressed = true;
+      if (KEYS.super.includes(e.code)) this.intent.super.pressed = true;
     });
     addEventListener('keyup', (e) => this.down.delete(e.code));
 
@@ -254,6 +261,7 @@ export class Input {
     this.intent.slam.held = on(KEYS.slam);
     this.intent.thrust.held = on(KEYS.thrust);
     this.intent.wing.held = on(KEYS.wing);
+    this.intent.super.held = on(KEYS.super);
   }
 
 
@@ -274,7 +282,8 @@ export class Input {
     this.intent.moveX = 0;
     this.intent.moveY = 0;
     for (const b of [this.intent.jump, this.intent.dash, this.intent.slide,
-      this.intent.slam, this.intent.thrust, this.intent.grapple]) {
+      this.intent.slam, this.intent.thrust, this.intent.grapple,
+      this.intent.wing, this.intent.super]) {
       b.pressed = false;
       b.held = false;
     }
@@ -289,5 +298,6 @@ export class Input {
     this.intent.thrust.pressed = false;
     this.intent.grapple.pressed = false;
     this.intent.wing.pressed = false;
+    this.intent.super.pressed = false;
   }
 }

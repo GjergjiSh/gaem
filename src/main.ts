@@ -307,8 +307,7 @@ function frame(now: number) {
   enemies.update(dt, player.pos, projectiles, gfx.wallMeshes);
   projectiles.update(dt, player.pos);
   rings.update(dt, {
-    stamina: player.stamina / T.stamina.max,
-    fuel: player.fuel / T.thruster.fuelMax,
+    gas: player.gas / T.gas.max,
     thrusting: player.thrusting,
     boosting: player.boosting,
     charges: sword.charges,

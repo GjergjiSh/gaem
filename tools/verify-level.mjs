@@ -771,7 +771,7 @@ const btn = () => ({ pressed: false, held: false });
 const intent = (over = {}) => ({
   moveX: 0, moveY: 0, yaw: 0, pitch: 0,
   jump: btn(), dash: btn(), slide: btn(), slam: btn(), thrust: btn(), grapple: btn(),
-  wing: btn(),
+  wing: btn(), super: btn(),
   ...over,
 });
 /** Camera yaw that makes moveY = 1 push along (dx, dz). */
@@ -1162,7 +1162,7 @@ head('the Line is a CIRCUIT: no ends, and nothing to fall off');
 head('the Spire: three ways up, and each one is inside its own budget');
 {
   useTune('shipped');
-  const tank = (T.thruster.fuelMax / T.thruster.burnRate) * T.thruster.maxRise;
+  const tank = (T.gas.max / T.thruster.burnRate) * T.thruster.maxRise;
   const cx = A.COLS[3].c, cz = A.ROWS[1].c;
 
   // Ray each balcony the level says it built. Sweeping the four faces blind

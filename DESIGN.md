@@ -4124,3 +4124,145 @@ the velocity, so the pose can never lie about where you are going.
 The player group's Euler order moved to `YXZ` for it. The default `XYZ` pitches
 about the *world* x axis, which on a yawed body is a roll — and the suit does
 both at once, so the order has to mean what it reads like.
+
+## 52. One tank, and a price list
+
+Two resource bars became one. There was **stamina** (100, regen 30, and the dash
+cost 25 of it) and there was **thruster fuel** (120, burn 42/s), and they were
+kept apart on an argument that is in the comment on the old `Player` struct:
+*hovering must never cost you a dash, or the two verbs fight over one pool.*
+
+That is true. It is also exactly why neither pool meant anything. A resource that
+gates precisely one verb is that verb's cooldown with a bar drawn on it — the
+dash already had a cooldown and a charge count, so stamina was a third copy of
+the same gate, and the bar it drew never moved except in lockstep with the other
+two. Meanwhile the whole rest of the kit — jumps, slides, slams, wall jumps — was
+free, so there was nothing for a budget to be *about*.
+
+Now there is one tank, `T.gas`, and everything draws on it. What that buys is not
+scarcity; it is that **every cost is an exchange rate between two verbs**. Gas
+spent on a dash is gas not spent hovering. Half a tank on a launch is two seconds
+of jets you no longer have. None of those trades existed when the pools were
+separate, and none of them needed a rule to say so.
+
+### The rule is blunt, and one thing makes it safe
+
+A move you cannot afford **does not come out**. Not a weaker one, not one on
+credit — nothing, and a buffered press waits on the tank exactly the way it waits
+on a cooldown. One rule, no special cases.
+
+That rule is only survivable because of what is *free*:
+
+- **running**, on the ground and on a wall — the run along a wall is running, and
+  charging for it is charging for existing
+- **the wingsuit** — a shape, not an engine
+- **the ropes** — the cable holds you up; the jets you fire on it are the jets
+- **the vault** — `vault.gas` exists and is **0**, because nothing is bound to a
+  vault. It fires off the ledge itself, so a cost on it is the level geometry
+  billing you, and an empty tank would turn a lip you have cleared a hundred
+  times into a wall
+
+Plus the ground refuels at `gas.groundRefuel` × the normal rate, so an empty tank
+on the deck is affordable again in **0.4s**. That is measured in
+`verify-gas.mjs`, and it is the test that licenses the blunt rule: the worst an
+empty tank can do is make you walk for a moment.
+
+### Where the costs live
+
+Not in `T.gas` — that group is only the tank. Each price lives with the move that
+pays it, because that is where you are looking when you want to know what a move
+is worth:
+
+| | | on a 120 tank |
+|---|---|---|
+| `jump.gas` | 6 | 20 hops |
+| `jump.gasAir` | 12 | the double jump is the one you feel |
+| `wall.gasJump` | 8 | the kick, not the run |
+| `slide.gas` | 8 | charged on **entry** |
+| `slam.gas` | 10 | it used to be free |
+| `dash.gas` | 25 | ~5 |
+| `superdash.gas` | 55 | 2, and they cannot be chained |
+| `thruster.burnRate` | 42/s | ~2.9s of hover |
+
+Two of those are worth their reasoning. **The slide bills on entry, not per
+second**: charging for the time would mean the longest slide — the one down a
+ramp that you set up for — is the one that costs most, which is backwards. You
+are paying for the boost. And **the slam used to cost nothing**, with the old
+comment offering that as a virtue; against one shared tank "free" is not neutral,
+because a free reset is the answer to every situation.
+
+`gasIdle` counts from the last **spend**, not the last burn, so a jump delays the
+refill the same way a hover does. Without that the tank refills between two hops
+and every number above is fiction.
+
+`gasDry` — the lockout after burning the tank out — stays the **jets' alone**. It
+exists so that burning the last drop costs you the thing that emptied it; a
+lockout that also took your jump would leave you on a rooftop with a part-full
+bar and nothing to press. There is a test for exactly that window: at 17 gas,
+under `gas.restart` of 20, the jets refuse and a jump comes out.
+
+### The cheat, and why it does not persist
+
+`T.cheats.infiniteGas`. It lives in `T` because the panel is generated from the
+shape of `T`, so a flag there is a checkbox with no edit to `panel.ts` at all.
+
+But `cheats` is in `EPHEMERAL` in panel.ts and is persisted **nowhere** — not
+into a profile file, not into localStorage. Two reasons, and the second is the
+real one: a cheat that survives a reload is a cheat you forget is on, and then an
+afternoon wondering why the meter never moves; and `profileDiff()` writes into
+the *shipped* `titanfall.json`, so one stray click would have shipped infinite
+gas to everyone who loads the default profile. The cost is that it is off again
+after a refresh, which is the right side to err on.
+
+## 53. Z, and one missing clamp
+
+The super dash. Everything about it is a dash — the same `dashing` state, so
+every cancel, every link and every bit of tech already known still applies,
+because there is nothing new to know. `p.dashSuper` is only which set of numbers
+the state is reading.
+
+Two things are different, and only two.
+
+**One missing clamp.** An ordinary dash exits with its vertical pinned to
+`jump.speed` and its horizontal to `momentum.hardCap`. That clamp is what keeps a
+dash a *reposition*: a dash that could fling you would make every other verb in
+the kit optional. This is the launch, so the clamp is off and `superdash.maxSpeed`
+is the only ceiling. 70 × 0.85 leaves you at 59 m/s, and straight up that is
+another ~49 m of coasting on top of the ~24 m the window already covered — **73 m
+off flat ground on code defaults, 87 m on the shipped tune.** Which is what makes
+it a wingsuit launcher: Z, wait, X, and you are gliding.
+
+**A spherical direction.** The dash builds its aim by setting `dir.y` on a
+full-length horizontal vector and normalising, which is right for a dash and
+quietly wrong here: with W held, a fully vertical aim comes out at **45°**,
+because `(0, 1, -1)` normalised is a diagonal. "Aim at the sky and press Z" has
+to mean the sky. So the launch scales the horizontal by `cos(pitch)` and sets
+`y = sin(pitch)` — the stick picks the compass bearing, the pitch picks the
+elevation, and looking straight up goes straight up whatever the stick says.
+There is a test on `dashDir.y > 0.99` with `moveY: 1` held, because that is the
+bug I would otherwise have shipped.
+
+### Its own `enabled`, and this one is not fussiness
+
+`superdash` is its own tuning group with its own `enabled`, not `dash.superX`
+fields. The shipped `titanfall.json` sets **`dash.enabled: false`** — Shift is
+sprint in that tune — so a launch gated on `dash.enabled` would have silently
+vanished in the profile the game actually boots into, and that is a bug with no
+symptom to search for. Verified against the real Rapier world under that profile:
+Z still launches, 87 m, `dash.enabled` false the whole time.
+
+### Where it fires from
+
+In `step()`, before the state machine, ahead of the wingsuit — the same place and
+for the same reason as the slam and the wing. Handling it once buys every entry
+at no cost: ground, air, slide, dash, wallrun, wingsuit, Z works out of all of
+them without a single one of those states knowing the move exists.
+
+Ahead of the wingsuit specifically, because Z out of a glide should be a launch
+and X on the next press should be a glide off the top of it. That ordering makes
+the pair a loop; the other way round the two presses cancel out.
+
+It cancels the rope, which the ordinary dash does not. `updateGrapple` gets the
+last word on velocity every tick, so a live cable would clamp a 70 m/s launch
+back to its radius — and that reads as Z doing nothing at all, which is worse
+than any rule it breaks.

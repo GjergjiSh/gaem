@@ -173,7 +173,7 @@ export const GAP = {
 };
 
 /** One thruster tank, in metres of climb. Sets the Spire's balcony spacing. */
-const TANK = (D.thruster.fuelMax / D.thruster.burnRate) * D.thruster.maxRise;
+const TANK = (D.gas.max / D.thruster.burnRate) * D.thruster.maxRise;
 
 /**
  * How far a wall jump ACTUALLY carries you sideways before you are back at the
