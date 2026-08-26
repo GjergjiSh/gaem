@@ -101,15 +101,21 @@
     "range": 185,
     "span": 2.25
   },
+  "wing": {
+    "gravity": 62,
+    "lift": 0.079,
+    "maxSpeed": 160,
+    "jetAccel": 117
+  },
   "crosshair": {
     "dotSize": 0,
-    "thickness": 4,
+    "length": 8,
+    "thickness": 1,
     "opacity": 1,
-    "color": "#00ff48"
+    "color": "#04f348"
   },
   "camera": {
     "firstPerson": true,
-    "bobAmount": 0.02,
     "fovBase": 90,
     "fovDash": 8,
     "fovSpeed": 12
