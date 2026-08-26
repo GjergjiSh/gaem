@@ -4266,3 +4266,102 @@ It cancels the rope, which the ordinary dash does not. `updateGrapple` gets the
 last word on velocity every tick, so a live cable would clamp a 70 m/s launch
 back to its radius — and that reads as Z doing nothing at all, which is worse
 than any rule it breaks.
+
+## 54. The Line moves to the rim
+
+The conveyor was a closed loop before this and it stays one. What changed is
+where the loop *is*.
+
+Two of its four legs ran down **interior** avenues — z = -35 and z = 101, the
+district's two wide east–west streets. That put 824 m of elevated deck and
+fourteen metres of gantry across the middle of the map, at eye level from every
+roof in it, in both directions. A district whose whole first rule is that you can
+cross it in any direction had a bridge through the view.
+
+All four legs now run the **rim**: the 18 m of pavement between the outermost
+blocks and the plate's edge. And the position is not a chosen number — it is the
+same answer on both axes:
+
+```
+LOOP_X  = (EXTENT.x1 - EXTENT.x0) / 2 + PAVE / 2   →  ±206
+LOOP_Z1 = (EXTENT.z1 - EXTENT.z0) / 2 + PAVE / 2   →  ±173
+```
+
+The middle of that band. A 16 m deck down the centre of an 18 m pavement leaves a
+metre inside and a metre out. The east and west legs were already there at ±206
+and nobody had noticed that the z pair was answering a different question; now
+both are derived, so a change to the block grid moves the Line with it.
+
+### Two things cross the middle, and only two
+
+The chords, down the north–south avenues at x = -72 and x = 71. They leave the
+loop at one rim leg, dip through the district, and rejoin it at the other — so a
+lap is either round the edge or a figure across the centre. Two crossings you
+choose between reads as a network; six read as scaffolding.
+
+They also keep the property the whole structure was built around: a 16 m deck
+down a 22 m avenue with daylight either side to fall through. `AVENUE_OP` — the
+one street widened to 24 m specifically for the Line — is the east chord's, and
+that is now the *only* thing it carries rather than one of six.
+
+### What it cost, and what it bought
+
+| | before | after |
+|---|---|---|
+| deck | 1368 m | 2208 m |
+| piers | 18 | 30 |
+| brushes | 4969 | 6069 |
+| draw calls (dusk) | 2509 | 2576 of 2600 |
+
+The deck grew 61% and the draw calls grew **2.7%**, which is worth understanding
+rather than being lucky about: the estimate prices a plain brush per distinct
+*(surface, quantised size, colour, 128 m cell)*, so a longer leg is nearly free —
+it is the same handful of member lengths repeated, and the only new cost is the
+cells it reaches into. The expensive parts of the Line are the *bends*, because
+each span's bay length is different and so is each span's diagonal. Extending a
+leg does not add a bend.
+
+24 calls of headroom is tight, and worth saying out loud rather than discovering
+later.
+
+The thing it bought that was not asked for: the rim legs pass **within a metre of
+the outer blocks the whole way round**. The roofscape and the Line are neighbours
+now instead of separate maps.
+
+### The gates had to move with it
+
+`LINE_GATES` is the single declaration the frames and the bridges both read — the
+web skips its members across a gate, and the bridge is built at the gate's own
+position. That is what made this survivable: moving a leg 138 m moved the doorway
+and the bridge together, and the only thing that broke was a gate whose *reason*
+had gone.
+
+- **north** (new). At x = -109 the profile holds its 28 m shelf and the roof it
+  passes is 28 too, a metre away. Dead level, so this is a landing and not a ramp.
+  It exists because without something like it the rim legs are a fence you can see
+  over for 1500 m and never climb — the specific risk of putting the loop out
+  here, answered by one slab.
+- **spire** (moved). It used to hop three metres onto the north leg, back when
+  that leg ran down the z = -35 avenue beside the Spire's block. The leg is 138 m
+  away now, so the connection goes to the thing that *is* beside the Spire: the
+  east chord runs down the avenue along its whole east face, four metres off it
+  and four metres up. A 28 m diagonal, because four metres up over four across is
+  a wall.
+- **west**, **east** — unchanged. Both are on chords, and the chords did not move.
+
+The legs are named consts now (`LEG_NORTH`, `CHORD_E`, …) and the gates carry a
+`name`. `LINE_LEGS[0]` was fine with four legs and is a trap with six.
+
+### One stale test, and what it was really measuring
+
+`verify:level` had a hand-written Spire hand-off check that indexed
+`LINE_LEGS[0]` and treated its `at` as an x coordinate. That is wrong for an
+x-axis leg — `at` is the z it runs down — and the check that used it,
+`gap < GAP_HOP_AT(...)`, was comparing a *negative* number and therefore passing
+on anything at all. Moving the loop turned the negative from -102 into -240 and
+the sign-blindness became visible.
+
+Rewritten off `LINE_GATES.find(name === 'spire')`, so it measures the gate that
+exists rather than the coordinates someone typed, and it now checks the direction
+that was actually missing: that the way back **up** is a ramp. A doorway onto a
+four-metre wall passes every other test in the file.

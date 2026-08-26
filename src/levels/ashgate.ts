@@ -54,13 +54,15 @@
 //                 the 16 m roof arrives in three stages. Those landings are why
 //                 this is a feature and not a gate: miss the timing and you
 //                 land on one, not in the street.
-//   the Line      ~1200 m of elevated deck over every wide avenue in the
-//                 district — two legs north–south, two east–west, four
-//                 junctions — falling from 38 m at the north-east end to 5 m at
-//                 the south-west. Long runs at 2.5–3° keep the speed you
-//                 arrive with; three pitches at 8, 12 and 17.5° are where it is
-//                 found, and those are the marked ones. Every gap in it is a
-//                 jump priced at one of the tiers.
+//   the Line      ~2200 m of elevated deck, and it runs the RIM: a closed loop
+//                 round the outside of the district, out on the pavement
+//                 between the last blocks and the plate's edge, climbing from
+//                 20 m at the west end to 44 at the east. Two chords cross the
+//                 middle — down the north–south avenues at x = ±72 — and only
+//                 two, so a lap is either round the edge or a figure across the
+//                 centre. Long runs at 2.5–3° keep the speed you arrive with;
+//                 the pitches at 8, 14 and 16° are where it is found. Every gap
+//                 in it is a jump priced at one of the tiers.
 //   the Spire     76 m. Balconies one thruster tank apart on three faces, a
 //                 shaft up the fourth — the full-depth gap between the tower
 //                 and its service core — and masts on top for the grapple.
@@ -2448,17 +2450,32 @@ box([ladderX - LADDER_LEN / 2 + 0.6, LADDER_TOP + 1.2, YARD_Z], [1.2, 2.4, SLOT 
   GANTRY, undefined, S_STEEL);
 
 // --- the Line ----------------------------------------------------------------
-// A conveyor, and the important word is CIRCUIT. It is a closed loop: 412 m
-// along the avenue at z = -35, down the east side of the district, 412 m back
-// along z = 101, up the west side, and into the first leg again. Something
-// running along the top of it never arrives anywhere — it comes back round.
+// A conveyor, and the important word is CIRCUIT. It is a closed loop, and it
+// runs the RIM: four legs, one down each side of the district, in the 18 m of
+// pavement between the outermost blocks and the plate's edge. Something running
+// along the top of it never arrives anywhere — it comes back round.
 //
-// That is the whole reason this is not the grid it started as. A grid of four
-// legs crossing has eight ENDS, and a platform travelling a track with an end
-// on it eventually runs off the end. There is no end here. Every leg finishes
-// at a junction square and every junction square is on the loop, including the
-// two chords over the north–south avenues, which leave the loop and rejoin it
-// rather than stopping.
+// The rim is where it belongs, and the first version had it wrong. Two of the
+// four legs ran down INTERIOR avenues — z = -35 and z = 101, the two wide
+// east–west streets — which put 824 m of elevated deck and fourteen metres of
+// gantry straight across the middle of the district at eye level from every roof
+// in it. A district you are meant to be able to see across had a bridge through
+// the view in both directions. Out on the pavement the same structure frames the
+// place instead of dividing it, and it does one more thing for free: it now runs
+// within a metre of the outer blocks the whole way round, so the roofscape and
+// the Line are neighbours rather than separate maps.
+//
+// TWO things cross the middle, and only two: the chords, down the north–south
+// avenues at x = -72 and x = 71. Those are the ones that earn it — they leave
+// the loop at one rim leg, dip through the district, and rejoin it at the other,
+// so a lap can be a lap round the edge or a figure across the centre. Two
+// crossings you choose between reads as a network; six reads as scaffolding.
+//
+// That closure is the whole reason this is not the grid it started as. A grid of
+// four legs crossing has eight ENDS, and a platform travelling a track with an
+// end on it eventually runs off the end. There is no end here. Every leg
+// finishes at a junction square and every junction square is on the loop, the
+// chords included.
 //
 // The two long sides share one height profile, which is what makes the whole
 // thing close: the deck is at the same height at any given x whether you are on
@@ -2540,10 +2557,22 @@ const PIER_SPAN = 62, PIER_CLEAR = 26;
 export const LINE_PY = LINE_W / 2 - 1.2;
 /** Everywhere the Line reaches the ground, so the verifier can measure spans. */
 export const LINE_PIERS: { x: number; z: number }[] = [];
-/** The two long sides run out here, over the pavement between blocks and rim. */
-const LOOP_X = 206;
-/** And the loop's two ends, which are the avenues at z = -35 and z = 101. */
-const LOOP_Z0 = -35, LOOP_Z1 = 101;
+/**
+ * Where the four legs run, and all four are the same answer to the same
+ * question: the middle of the outer pavement.
+ *
+ * The blocks stop at ±197 in x and ±164 in z, `PAVE` is 18 m wide outside that,
+ * and the rim wall stands at the far edge of it — so ±206 and ±173 are the
+ * centre lines of that band on each axis. A 16 m deck laid down the middle of it
+ * leaves a metre inside and a metre out, which is why the legs are here and not
+ * at a rounder number.
+ *
+ * The z pair used to be -35 and 101: the two wide east–west avenues, i.e. two
+ * legs cutting through the district rather than round it. See the note above.
+ */
+const LOOP_X = (EXTENT.x1 - EXTENT.x0) / 2 + PAVE / 2;
+const LOOP_Z1 = (EXTENT.z1 - EXTENT.z0) / 2 + PAVE / 2;
+const LOOP_Z0 = -LOOP_Z1;
 
 /**
  * A leg of the Line: a straight run with a height profile.
@@ -2597,13 +2626,25 @@ const chord = (name: string, x: number, top: number, dip: number): Leg => ({
     [LOOP_Z1 - 35, dip], [LOOP_Z1 - 8, top], [LOOP_Z1, top]],
 });
 
+/**
+ * The four rim legs and the two chords, and they are named rather than indexed
+ * because the gates below and the bridges further down all have to agree about
+ * which leg they mean. `LINE_LEGS[0]` was fine while there were four of them and
+ * it is a trap now.
+ */
+const LEG_NORTH: Leg = { name: 'north', axis: 'x', at: LOOP_Z0, nodes: LOOP_PROFILE };
+const LEG_SOUTH: Leg = { name: 'south', axis: 'x', at: LOOP_Z1, nodes: LOOP_PROFILE };
+const LEG_EAST: Leg = {
+  name: 'east', axis: 'z', at: LOOP_X, nodes: [[LOOP_Z0, 44], [LOOP_Z1, 44]],
+};
+const LEG_WEST: Leg = {
+  name: 'west', axis: 'z', at: -LOOP_X, nodes: [[LOOP_Z0, 20], [LOOP_Z1, 20]],
+};
+const CHORD_W = chord('chord-west', -72, 28, 21);
+const CHORD_E = chord('chord-east', 71, 41, 34);
+
 export const LINE_LEGS: Leg[] = [
-  { name: 'north', axis: 'x', at: LOOP_Z0, nodes: LOOP_PROFILE },
-  { name: 'south', axis: 'x', at: LOOP_Z1, nodes: LOOP_PROFILE },
-  { name: 'east', axis: 'z', at: LOOP_X, nodes: [[LOOP_Z0, 44], [LOOP_Z1, 44]] },
-  { name: 'west', axis: 'z', at: -LOOP_X, nodes: [[LOOP_Z0, 20], [LOOP_Z1, 20]] },
-  chord('chord-west', -72, 28, 21),
-  chord('chord-east', 71, 41, 34),
+  LEG_NORTH, LEG_SOUTH, LEG_EAST, LEG_WEST, CHORD_W, CHORD_E,
 ];
 
 /**
@@ -2619,13 +2660,36 @@ export const LINE_LEGS: Leg[] = [
  * `sgn` is which edge of the deck the bridge arrives at, across the leg.
  */
 export const LINE_GATES = [
-  /** Off the Spire's terrace, onto the north side. */
-  { leg: LINE_LEGS[0], at: 20, sgn: -1 as const },
+  /**
+   * Onto the north rim leg, and it exists because the loop moved out here.
+   *
+   * The place picks itself: at x = -109 the profile is holding its 28 m shelf
+   * and the roof of the block it passes is 28 too, with a metre of pavement
+   * between them. Dead level, and the shortest way on the map onto 1500 m of
+   * elevated road. Without something like it the rim legs would be a fence you
+   * can see over the whole way round and never climb — which is exactly the
+   * risk of putting the loop out here, and it is answered by one landing.
+   */
+  { name: 'north', leg: LEG_NORTH, at: COLS[1].c, sgn: 1 as const },
+  /**
+   * Off the Spire's terrace, onto the east chord.
+   *
+   * It used to hop onto the north leg, which passed three metres from the
+   * Spire's block when that leg ran down the z = -35 avenue. The leg is 138 m
+   * away now, so the connection moves to the thing that IS beside the Spire: the
+   * east chord runs down the 24 m avenue along its whole east face, four metres
+   * off it, four metres up. The landmark stays tied into the circuit, which
+   * matters — the Line's pitches are the way down from the crown now that the
+   * Chute is gone.
+   */
+  { name: 'spire', leg: CHORD_E, at: ROWS[1].c + 14, sgn: -1 as const },
   /** Off the spine roofs, onto the west chord where it bottoms out. */
-  { leg: LINE_LEGS[4], at: 40, sgn: 1 as const },
+  { name: 'west', leg: CHORD_W, at: 40, sgn: 1 as const },
   /** Off the tall block beside the east chord, on a long diagonal. */
-  { leg: LINE_LEGS[5], at: 75, sgn: 1 as const },
+  { name: 'east', leg: CHORD_E, at: 75, sgn: 1 as const },
 ];
+/** A gate by name, so nothing downstream depends on the order of that array. */
+const gate = (n: string) => LINE_GATES.find((g) => g.name === n)!;
 /**
  * How wide a doorway is.
  *
@@ -2982,9 +3046,10 @@ export const rails: [number, number, number][][] = [(() => {
   // Line, which is what the side frames leave a doorway for. Read from there
   // rather than typed again: a bridge that arrives where the wall has no hole in
   // it is a way on that is bricked up.
-  const [gSpire, gWest, gEast] = LINE_GATES;
-  const cw = gWest.leg;
-  const ce = gEast.leg;
+  const gNorth = gate('north');
+  const gSpire = gate('spire');
+  const gWest = gate('west');
+  const gEast = gate('east');
   /** Where a gate meets the deck, across the leg. */
   const lip = (g: typeof gSpire) => g.leg.at + g.sgn * (LINE_W / 2);
   /** A flat bridge from a roof edge to a deck edge. Both are level; a 1° ramp
@@ -2994,24 +3059,34 @@ export const rails: [number, number, number][][] = [(() => {
       [Math.max(10, Math.abs(x1 - x0) + 1), LINE_T, Math.max(10, Math.abs(z1 - z0) + 1)],
       ROAD, undefined, S_ROAD);
   };
-  // Off the Spire's terrace, which sits at 30 with the north side passing three
-  // metres away at 31.
-  bridge(gSpire.at, ROWS[1].hi, gSpire.at, lip(gSpire),
-    Math.min(TERRACE, lineY(gSpire.leg, gSpire.at)));
+  // Onto the north rim leg. The one place on the whole rim where the deck and
+  // the roof beside it are at the same height, so this is a landing rather than
+  // a ramp — the pavement between them is a metre wide and the two tops are the
+  // same 28.
+  bridge(gNorth.at, ROWS[0].lo, gNorth.at, lip(gNorth),
+    Math.min(HEIGHT[0][1], lineY(gNorth.leg, gNorth.at)));
+  // Off the Spire's terrace and onto the east chord, which passes four metres
+  // off its east face and four metres above the terrace. A long diagonal for the
+  // same reason the east one below is: four metres up over four metres across is
+  // a wall, and over twenty-eight it is a slope you carry speed down.
+  ramp({ x: COLS[3].hi, y: TERRACE, z: gSpire.at - 28 },
+    { x: lip(gSpire), y: lineY(gSpire.leg, gSpire.at), z: gSpire.at }, 10, 1.2,
+    ROAD, 3, undefined, S_ROAD);
   // Onto the west chord where it bottoms out level with the spine roofs.
   bridge(COLS[2].lo, gWest.at, lip(gWest), gWest.at,
-    Math.min(HEIGHT[2][2], lineY(cw, gWest.at)));
+    Math.min(HEIGHT[2][2], lineY(gWest.leg, gWest.at)));
   // And onto the east chord, off the tall block beside it, on a long diagonal
   // because that one is seven metres up.
   ramp({ x: COLS[4].lo, y: HEIGHT[3][4], z: 40 },
-    { x: lip(gEast), y: lineY(ce, gEast.at), z: gEast.at }, 10, 1.2, ROAD, 3,
+    { x: lip(gEast), y: lineY(gEast.leg, gEast.at), z: gEast.at }, 10, 1.2, ROAD, 3,
     undefined, S_ROAD);
 
-  // A footbridge across the north end of the same avenue. The Overpass used to
-  // run the full length of it and carried this crossing for free; the loop turns
-  // east at z = -35 and leaves the top of that avenue with a 31 m roof-to-roof
-  // jump over it, which is past the budget on both tunes. This is the smallest
-  // thing that answers it: one deck at the lower of the two roofs.
+  // A footbridge across the north end of the east chord's avenue, at the roofs'
+  // own level. The chord runs the full length of that avenue now that the loop
+  // is out on the rim, so the crossing is no longer missing — but the chord is
+  // at 34 up there and these two roofs are 30 and 34, and a crossing you have to
+  // climb onto is not the same thing as a crossing. One deck at the lower of the
+  // two, under the road.
   {
     const y = Math.min(HEIGHT[0][3], HEIGHT[0][4]);
     box([(COLS[3].hi + COLS[4].lo) / 2, y - LINE_T / 2, ROWS[0].c],
@@ -3644,9 +3719,10 @@ export const CYBER_THEME: Theme = {
 export const triggers: Trigger[] = [
   { p: [RINGS.ladder.x, RINGS.ladder.y + 3, RINGS.ladder.z], r: 13, kind: 'checkpoint', name: 'ladder' },
   { p: [RINGS.stacks.x, RINGS.stacks.y + 3, RINGS.stacks.z], r: 13, kind: 'checkpoint', name: 'stacks' },
-  // On the Line, at the top of the pitch that climbs out of the middle of the
-  // map — the one place on the circuit you arrive at from three directions.
-  { p: [60, lineY(LINE_LEGS[0], 60) + 3, LINE_LEGS[0].at], r: 11,
+  // On the Line, at the top of the 16° pitch on the north side and just short of
+  // the east chord's junction — so it is the one point on the circuit you can
+  // arrive at from three directions.
+  { p: [60, lineY(LEG_NORTH, 60) + 3, LEG_NORTH.at], r: 11,
     kind: 'checkpoint', name: 'overpass' },
   { p: [TOWER_X, SPIRE_TOP + 3, TOWER_Z + TOWER_D / 2 - 7], r: 12, kind: 'checkpoint', name: 'crown' },
   // Placed where the descent actually PUTS you, not where the Yard looks tidy.

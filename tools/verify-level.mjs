@@ -946,23 +946,37 @@ head('the lap, leg by leg');
   check(steep === 0, `no ramp is secretly a wall (${steep})`);
   check(stalls === 0, `and none is shallow enough to kill a slide on it (${stalls})`);
 
-  // Off the Line onto the Spire terrace: the hand-off into the climb.
-  const east = A.LINE_LEGS[0];
-  const opx = east.at;
-  // Sampled south of the tower and clear of the slip ramp: probing at z=-74 puts
-  // the ray straight down the on-ramp and measures that instead of the terrace.
-  const at = A.ROWS[1].c + 20;
-  const gapNote = 0;
-  void gapNote;
-  const deck = surfaceAt(opx, at, A.lineY(east, at) + 3);
-  const terr = surfaceAt(A.COLS[3].hi - 4, at, A.TERRACE + 3);
-  const gap = opx - 8 - A.COLS[3].hi;
+  // The Spire hand-off, both directions. It is derived from the GATE rather than
+  // from a pair of typed coordinates, which is the whole reason the old version
+  // of this had to be rewritten: it hard-coded `LINE_LEGS[0]` and the leg it
+  // meant, back when the loop ran down the z = -35 avenue three metres from the
+  // Spire's block. When the loop moved out to the rim, the numbers went with it
+  // and the test was measuring a point 240 m from anything.
+  const g = A.LINE_GATES.find((q) => q.name === 'spire');
+  const deckY = A.lineY(g.leg, g.at);
+  const lip = g.leg.at + g.sgn * (A.LINE_W / 2);
+  // Sampled a few metres off the tower's face and clear of the on-ramp, which
+  // lands on the terrace and would be measured instead of it.
+  const deck = surfaceAt(g.leg.at, g.at, deckY + 3);
+  const terr = surfaceAt(A.COLS[3].hi - 6, g.at + 6, A.TERRACE + 3);
+  const gap = Math.abs(lip - A.COLS[3].hi);
   note(`Line deck ${deck?.toFixed(1)} m, Spire terrace ${terr?.toFixed(1)} m, `
-    + `${gap.toFixed(0)} m apart`);
+    + `${gap.toFixed(0)} m apart across the avenue`);
   check(terr !== null && deck !== null && deck > terr,
-    'the road arrives ABOVE the terrace, so the hand-off is a drop rather than a climb');
+    'coming OFF the road onto the terrace is a drop, not a climb');
   check(gap < GAP_HOP_AT(deck - terr),
-    `and the drop across is inside a plain hop (${gap.toFixed(0)} m)`);
+    `and that drop across is inside a plain hop (${gap.toFixed(0)} m)`);
+
+  // And the way back up, which is the ramp. Rayed at its middle: something has
+  // to be there, between the two heights it joins, or the gate is a doorway onto
+  // a four-metre wall.
+  const midZ = g.at - 14;
+  const midY = (A.TERRACE + deckY) / 2;
+  const onRamp = surfaceAt((A.COLS[3].hi + lip) / 2, midZ, midY + 4);
+  note(`the on-ramp is ${onRamp?.toFixed(1)} m at its midpoint, between `
+    + `${A.TERRACE} and ${deckY}`);
+  check(onRamp !== null && onRamp > A.TERRACE - 1 && onRamp < deckY + 1,
+    'and the way back up is a ramp off the terrace, not a wall');
 }
 
 head('the Line is a CIRCUIT: no ends, and nothing to fall off');
