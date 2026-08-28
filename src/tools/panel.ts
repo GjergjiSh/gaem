@@ -4,7 +4,26 @@
 import { Pane } from 'tweakpane';
 import { T, DEFAULTS, TUNING_VERSION, inferRange, snapshot, applyProfile } from '../core/tuning';
 import { typingInAField } from '../engine/input';
+import { CLIP_NAMES } from '../engine/audio';
 import { CAN_WRITE, saveJson, beaconJson, stamp } from './devsave';
+
+/**
+ * The three sound groups, and the sub-folder title each gets. Listed here rather
+ * than derived from a name prefix so that adding a `sound*` group to T does not
+ * silently move it under this folder without a title.
+ */
+const SOUND_GROUPS: Record<string, string> = {
+  soundAssign: 'assign · clip per move',
+  soundLevel: 'levels · gain per move',
+  soundFlow: 'flow · fades, ducking, retrigger',
+};
+
+/** Built from the files actually in assets/odm-sounds-ref/, so the dropdown can
+ *  never offer a clip that is not there. Empty value = that move stays silent. */
+const CLIP_OPTIONS = [
+  { text: '— silent —', value: '' },
+  ...CLIP_NAMES.map((n) => ({ text: n, value: n })),
+];
 
 const STORE_KEY = `tuning.v${TUNING_VERSION}`;
 /** Which profile file edits are written into. Survives reloads on its own. */
@@ -106,24 +125,21 @@ export class Panel {
     host.style.overscrollBehavior = 'contain';
 
     for (const group of Object.keys(T) as (keyof typeof T)[]) {
+      if (group in SOUND_GROUPS) continue;   // built together, below
       const folder = this.pane.addFolder({ title: group, expanded: group === 'ground' });
       const obj = T[group] as Record<string, any>;
-      for (const key of Object.keys(obj)) {
-        const path = `${group}/${key}`;
-        const value = obj[key];
-        if (typeof value === 'boolean' || typeof value === 'string') {
-          // Strings get no range: tweakpane turns a '#rrggbb' value into a colour
-          // picker on its own, which is exactly what crosshair/color wants.
-          folder.addBinding(obj, key).on('change', () => this.note(path, obj[key]));
-        } else {
-          const { min, max, step, doc } = inferRange(path, value);
-          const opts: Record<string, number> = { min, max };
-          if (step !== undefined) opts.step = step;   // omitted = continuous, no quantising
-          const b = folder.addBinding(obj, key, opts);
-          b.on('change', () => this.note(path, obj[key]));
-          if (doc) b.element.title = doc;
-        }
-      }
+      for (const key of Object.keys(obj)) this.bind(folder, group, obj, key);
+    }
+
+    // Sound gets one folder rather than three top-level ones, because the three
+    // groups are one feature: which clip, how loud, and how they behave against
+    // each other. `assign` is the only one open by default — it is the one you
+    // came here for, and the other two are for after you have picked.
+    const sounds = this.pane.addFolder({ title: 'sounds', expanded: false });
+    for (const [group, title] of Object.entries(SOUND_GROUPS)) {
+      const sub = sounds.addFolder({ title, expanded: group === 'soundAssign' });
+      const obj = (T as any)[group] as Record<string, any>;
+      for (const key of Object.keys(obj)) this.bind(sub, group, obj, key);
     }
 
     const io = this.pane.addFolder({ title: 'profiles', expanded: true });
@@ -234,6 +250,34 @@ export class Panel {
   get abLabel() {
     if (!this.slotA && !this.slotB) return '';
     return this.showingB ? 'B' : 'A';
+  }
+
+  /**
+   * One control, chosen by the value's type and its path. Extracted so the
+   * generic groups and the sound sub-folders build their bindings the same way —
+   * the sound folders are a different LAYOUT, not different behaviour, and a
+   * second copy of this would be where they quietly diverge.
+   */
+  private bind(folder: any, group: string, obj: Record<string, any>, key: string) {
+    const path = `${group}/${key}`;
+    const value = obj[key];
+    if (group === 'soundAssign') {
+      // A dropdown of what is on disk, rather than a text field you have to type
+      // a filename into exactly right.
+      folder.addBinding(obj, key, { options: CLIP_OPTIONS })
+        .on('change', () => this.note(path, obj[key]));
+    } else if (typeof value === 'boolean' || typeof value === 'string') {
+      // Strings get no range: tweakpane turns a '#rrggbb' value into a colour
+      // picker on its own, which is exactly what crosshair/color wants.
+      folder.addBinding(obj, key).on('change', () => this.note(path, obj[key]));
+    } else {
+      const { min, max, step, doc } = inferRange(path, value);
+      const opts: Record<string, number> = { min, max };
+      if (step !== undefined) opts.step = step;   // omitted = continuous, no quantising
+      const b = folder.addBinding(obj, key, opts);
+      b.on('change', () => this.note(path, obj[key]));
+      if (doc) b.element.title = doc;
+    }
   }
 
   refresh() { this.pane.refresh(); }

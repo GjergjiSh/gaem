@@ -19,6 +19,7 @@ import { Weapon } from './engine/weapon';
 import { Projectiles } from './engine/projectiles';
 import { Sword } from './engine/sword';
 import { Hook } from './engine/hook';
+import { Audio } from './engine/audio';
 import { Rings } from './tools/rings';
 import { level, LEVEL_MODELS } from './levels';
 
@@ -55,6 +56,9 @@ const pause = new Pause();
 const wheel = new Wheel(input, weapon);
 const sword = new Sword(input, gfx, enemies, projectiles, (r) => weapon.markerFor(r));
 const hook = new Hook(input, gfx, enemies, world, (r) => weapon.markerFor(r));
+// Movement audio. Arms itself on the first click or key — browsers hold the
+// speaker until a gesture, and the pointer-lock click is always one.
+const audio = new Audio();
 
 const editor = new Editor(gfx, world, enemies, {
   playerPos: () => player.pos,
@@ -100,6 +104,9 @@ function restart() {
   projectiles.clear();
   sword.clear();
   hook.clear();
+  // Otherwise a respawn mid-hover leaves the jets running, and the fresh player
+  // never re-enters the state that would turn them off.
+  audio.stopAll();
   ghost.visible = bestPath !== null;
 }
 
@@ -212,6 +219,11 @@ function frame(now: number) {
   // Before the fixed steps: a grapple press aimed at a dummy is a haul, not an
   // attach, and that decision has to be made on the same click the solver would
   // otherwise consume.
+  // Captured before hook.preStep, which CONSUMES the press when it lands on a
+  // dummy — and before the fixed steps, which consume it in every other case.
+  // Audio needs it because a hook that hits nothing writes no player state.
+  const firedHook = input.intent.grapple.pressed;
+
   hook.preStep(player);
 
   // --- the clock. Three independent factors multiplied, never assigned: the
@@ -233,6 +245,7 @@ function frame(now: number) {
     // Frozen is the one moment a reload costs nothing, so a build waiting on
     // disk takes it here rather than mid-run.
     updates.applyWhenIdle(true);
+    audio.update(player, true);
     gfx.update(player, input.intent, 0, world);
     gfx.draw();
     hud.update(player, { run: run.time, splits: run.splits, best }, panel.abLabel, input.lookMode,
@@ -304,6 +317,9 @@ function frame(now: number) {
   weapon.update(dt);
   sword.update(dt, player);
   hook.update(dt, player);
+  // After the solver has stepped and before the draw: audio derives its events
+  // by diffing the player against last frame, so it has to see the settled state.
+  audio.update(player, false, firedHook);
   enemies.update(dt, player.pos, projectiles, gfx.wallMeshes);
   projectiles.update(dt, player.pos);
   rings.update(dt, {
@@ -343,6 +359,7 @@ requestAnimationFrame(frame);
   input,
   gfx,
   panel,
+  audio,
   editor,
   level,
   enemies,

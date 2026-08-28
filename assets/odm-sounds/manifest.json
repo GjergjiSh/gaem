@@ -1,0 +1,160 @@
+{
+  "sampleRate": 44100,
+  "format": "wav / 16-bit / stereo",
+  "note": "Synthesised originals - no sampled source material. Tone colour is matched to the long-term average spectrum of real ODM gear footage. Regenerate with: python tools/make-odm-sounds.py",
+  "sounds": [
+    {
+      "name": "land",
+      "file": "land.wav",
+      "seconds": 0.75,
+      "loop": false,
+      "peakDb": -2.0,
+      "rmsDb": -22.1,
+      "event": "touchdown from any airborne state"
+    },
+    {
+      "name": "super_dash",
+      "file": "super_dash.wav",
+      "seconds": 1.5,
+      "loop": false,
+      "peakDb": -2.0,
+      "rmsDb": -16.0,
+      "event": "Z - the committed launch"
+    },
+    {
+      "name": "slam",
+      "file": "slam.wav",
+      "seconds": 1.25,
+      "loop": false,
+      "peakDb": -3.0,
+      "rmsDb": -17.1,
+      "event": "C in the air - the dive, not the impact"
+    },
+    {
+      "name": "hook_fire",
+      "file": "hook_fire.wav",
+      "seconds": 1.05,
+      "loop": false,
+      "peakDb": -3.5,
+      "rmsDb": -19.1,
+      "event": "middle mouse - cable launch, hit or miss"
+    },
+    {
+      "name": "dash",
+      "file": "dash.wav",
+      "seconds": 0.95,
+      "loop": false,
+      "peakDb": -4.0,
+      "rmsDb": -20.2,
+      "event": "Shift - air or ground dash"
+    },
+    {
+      "name": "hook_hit",
+      "file": "hook_hit.wav",
+      "seconds": 0.55,
+      "loop": false,
+      "peakDb": -4.5,
+      "rmsDb": -23.7,
+      "event": "anchor bites; layers over hook_fire"
+    },
+    {
+      "name": "wing_deploy",
+      "file": "wing_deploy.wav",
+      "seconds": 0.9,
+      "loop": false,
+      "peakDb": -4.5,
+      "rmsDb": -25.6,
+      "event": "X - suit opens, starts wingsuit_loop"
+    },
+    {
+      "name": "wall_jump",
+      "file": "wall_jump.wav",
+      "seconds": 0.8,
+      "loop": false,
+      "peakDb": -5.0,
+      "rmsDb": -21.1,
+      "event": "kick off a wallrun"
+    },
+    {
+      "name": "double_jump",
+      "file": "double_jump.wav",
+      "seconds": 0.8,
+      "loop": false,
+      "peakDb": -5.5,
+      "rmsDb": -20.3,
+      "event": "air jump - the gas-assisted one"
+    },
+    {
+      "name": "vault",
+      "file": "vault.wav",
+      "seconds": 0.65,
+      "loop": false,
+      "peakDb": -6.0,
+      "rmsDb": -25.3,
+      "event": "ledge mantle"
+    },
+    {
+      "name": "hook_release",
+      "file": "hook_release.wav",
+      "seconds": 0.85,
+      "loop": false,
+      "peakDb": -6.0,
+      "rmsDb": -26.6,
+      "event": "cable detaches and retracts"
+    },
+    {
+      "name": "slide",
+      "file": "slide.wav",
+      "seconds": 1.15,
+      "loop": false,
+      "peakDb": -6.0,
+      "rmsDb": -25.0,
+      "event": "Ctrl - entry scuff and grind"
+    },
+    {
+      "name": "jump",
+      "file": "jump.wav",
+      "seconds": 0.6,
+      "loop": false,
+      "peakDb": -7.0,
+      "rmsDb": -23.3,
+      "event": "ground jump"
+    },
+    {
+      "name": "bhop",
+      "file": "bhop.wav",
+      "seconds": 0.3,
+      "loop": false,
+      "peakDb": -11.0,
+      "rmsDb": -28.2,
+      "event": "clean rehop inside the bhop window"
+    },
+    {
+      "name": "thruster_loop",
+      "file": "thruster_loop.wav",
+      "seconds": 2.5,
+      "loop": true,
+      "peakDb": -13.0,
+      "rmsDb": -22.4,
+      "event": "held Space with no jumps left - jets"
+    },
+    {
+      "name": "wingsuit_loop",
+      "file": "wingsuit_loop.wav",
+      "seconds": 2.5,
+      "loop": true,
+      "peakDb": -14.0,
+      "rmsDb": -29.7,
+      "event": "while in the wingsuit state"
+    },
+    {
+      "name": "reel_loop",
+      "file": "reel_loop.wav",
+      "seconds": 2.5,
+      "loop": true,
+      "peakDb": -15.0,
+      "rmsDb": -29.5,
+      "event": "W held on a live cable"
+    }
+  ]
+}

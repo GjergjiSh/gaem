@@ -792,6 +792,106 @@ export const T = {
     stepHeight: 0.35,
     snapToGround: 0.3,
   },
+
+  // --- SOUND. Three groups, shown together under one `sounds` folder in the
+  // panel. Split because they are three different jobs: which clip, how loud,
+  // and how the clips behave against each other. Engine in engine/audio.ts.
+
+  /**
+   * Which file in assets/odm-sounds-ref/ fires for each move. The panel turns
+   * every one of these into a dropdown of the clips actually on disk.
+   *
+   * Two kinds of default below. The ones whose clip is NAMED for the move
+   * (jump, dash, land, slide, the wingsuit and hook files) are just that file.
+   * The rest are a guess, because there is no clip on disk for them yet - they
+   * borrow the nearest verb and are marked. Assigning one clip to several moves
+   * is fine and several of these do it.
+   *
+   * Empty string = that move is silent.
+   */
+  soundAssign: {
+    jump: 'jump',
+    doubleJump: 'jump',                     // guess: no second-jump clip yet
+    wallJump: 'jump',                       // guess
+    dash: 'dash',
+    superDash: 'dash',                      // guess: the same verb, spent harder
+    slide: 'slide',
+    // Silent by default. It fires ON a landing, so anything here plays on top of
+    // `land` - which is either a nice accent or a doubled thud, and that is a
+    // decision for ears rather than a default.
+    bhop: '',
+    slam: 'dash',                           // guess: gas fired downward
+    land: 'land',
+    vault: 'slide-2',                       // guess: scrape over a lip
+    // This clip is the shot AND the bite, so `hookHit` stays silent under it or
+    // the anchor lands twice. Switch this to 'shoot-hook' and hookHit to
+    // 'hit-hook' if you want the two halves separately.
+    hookFire: 'hook-shoots-and-attaches',
+    hookHit: '',
+    hookRelease: 'pull-rope-2',             // guess
+    wingDeploy: 'deploy-wingsuit',
+    // Held while a key is down. These get rebuilt into seamless loops on load -
+    // see `soundFlow.loopXfade`.
+    thruster: 'wingsuit-loop',              // guess: no jet loop yet
+    wingsuit: 'wingsuit-loop',
+    reel: 'pull-rope-loop',
+  },
+
+  /**
+   * Per-move gain, x the bus. The clips came off footage at wildly different
+   * levels (peaks run 0.06 to 0.61), so this is the first thing to reach for
+   * when one verb is burying another - it is a straight multiplier and 0 mutes.
+   */
+  soundLevel: {
+    jump: 1,
+    doubleJump: 1,
+    wallJump: 1,
+    dash: 1,
+    superDash: 1,
+    slide: 0.8,
+    bhop: 0.5,          // fires on every clean landing in a streak; keep it under
+    slam: 1,
+    land: 1,
+    vault: 0.9,
+    hookFire: 1,
+    hookHit: 0.8,
+    hookRelease: 0.7,
+    wingDeploy: 1,
+    thruster: 0.6,      // beds play UNDER everything, for as long as they are held
+    wingsuit: 0.6,
+    reel: 0.5,
+  },
+
+  /**
+   * How the clips behave against each other. Moves here cancel into each other,
+   * so several are live at any instant - these are the five mechanisms that keep
+   * that legible, and they are sliders because the right values are a matter of
+   * taste and cannot be settled from outside the game.
+   */
+  soundFlow: {
+    enabled: true,
+    master: 0.8,
+    oneShot: 1,         // bus gain for the fired verbs
+    loops: 1,           // bus gain for the held beds
+    // Held clips are one-shot recordings, not loop material. This is how much of
+    // the tail is folded back over the head to make the join continuous; too
+    // little ticks once a pass, too much eats the clip.
+    loopXfade: 0.25,
+    loopFade: 0.12,     // ease in/out when a mode starts and stops
+    // A loud verb dips the beds so it reads through them. 0 = off.
+    duck: 0.45,
+    duckTime: 0.28,
+    // Floor on how often one slot may refire. Stops a spammed verb machine-gunning.
+    retrigger: 0.06,
+    // Refiring a slot fades the copy already playing over this rather than
+    // stacking on top of it.
+    cancelFade: 0.05,
+    // Random detune per shot, so a repeated verb is not obviously one sample.
+    pitchVary: 0.04,
+    // Landing volume tracks impact speed rather than being flat.
+    landScale: true,
+    landFullSpeed: 26,  // downward m/s that counts as a full-volume landing
+  },
 };
 
 /** Range/step/doc overrides. Anything omitted falls back to inferRange() below. */
@@ -1049,7 +1149,28 @@ export const META: Record<string, { min?: number; max?: number; step?: number; d
   'slam/minHeight': { min: 0, max: 20, step: 0.5, doc: 'Clear air needed under you before C will slam.' },
   'slam/boostTime': { min: 0, max: 4, step: 0.05, doc: 'Seconds of stronger dashes after landing.' },
   'slam/dashBoost': { min: 1, max: 3, step: 0.05, doc: 'x dash speed inside that window.' },
+
+  // --- sound. Every soundLevel/* entry gets the same 0..2 range from the loop
+  // below this table, so only the flow params need spelling out.
+  'soundFlow/master': { min: 0, max: 1.5, step: 0.01, doc: 'Everything, after the two buses.' },
+  'soundFlow/oneShot': { min: 0, max: 2, step: 0.01, doc: 'Bus gain for the fired verbs.' },
+  'soundFlow/loops': { min: 0, max: 2, step: 0.01, doc: 'Bus gain for the held beds.' },
+  'soundFlow/loopXfade': { min: 0.02, max: 1, step: 0.01, doc: 'Tail folded back over the head to make a held clip loop cleanly. Too little ticks once a pass.' },
+  'soundFlow/loopFade': { min: 0, max: 0.6, step: 0.01, doc: 'Ease in/out when a held mode starts and stops.' },
+  'soundFlow/duck': { min: 0, max: 1, step: 0.01, doc: 'How far a loud verb dips the beds. 0 = off.' },
+  'soundFlow/duckTime': { min: 0.02, max: 1.2, step: 0.01, doc: 'How long the beds take to come back.' },
+  'soundFlow/retrigger': { min: 0, max: 0.5, step: 0.005, doc: 'Floor on how often one slot may refire.' },
+  'soundFlow/cancelFade': { min: 0.005, max: 0.4, step: 0.005, doc: 'Fade applied to the copy already playing when a slot refires.' },
+  'soundFlow/pitchVary': { min: 0, max: 0.25, step: 0.005, doc: 'Random detune per shot. Past a few per cent it sounds broken.' },
+  'soundFlow/landFullSpeed': { min: 4, max: 80, step: 1, doc: 'Downward m/s that counts as a full-volume landing.' },
 };
+
+// Per-move gain is always the same dial, so the entries are generated rather
+// than typed out seventeen times - and they cannot drift out of sync with the
+// group when a move is added.
+for (const key of Object.keys(T.soundLevel)) {
+  META[`soundLevel/${key}`] = { min: 0, max: 2, step: 0.01, doc: 'x the bus. 0 mutes this move.' };
+}
 
 /**
  * The built-in defaults, captured before any saved profile is applied. Without this
