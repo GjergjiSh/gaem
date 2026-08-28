@@ -813,6 +813,7 @@ export const T = {
     jump: 'jump',
     doubleJump: 'jump',                     // guess: no second-jump clip yet
     wallJump: 'jump',                       // guess
+    wallRun: '',                            // no clip for it yet
     dash: 'dash',
     superDash: 'dash',                      // guess: the same verb, spent harder
     slide: 'slide',
@@ -846,6 +847,7 @@ export const T = {
     jump: 1,
     doubleJump: 1,
     wallJump: 1,
+    wallRun: 1,
     dash: 1,
     superDash: 1,
     slide: 0.8,

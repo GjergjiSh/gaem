@@ -20,6 +20,9 @@ import { Projectiles } from './engine/projectiles';
 import { Sword } from './engine/sword';
 import { Hook } from './engine/hook';
 import { Audio } from './engine/audio';
+import { MoveWatch } from './engine/moves';
+import { Style } from './engine/style';
+import { StyleMeter } from './tools/stylemeter';
 import { Rings } from './tools/rings';
 import { level, LEVEL_MODELS } from './levels';
 
@@ -49,7 +52,7 @@ let hitsTaken = 0;
 let laps = 0;
 const projectiles = new Projectiles(gfx, enemies, {
   onEnemyHit: (r) => weapon.markerFor(r),
-  onPlayerHit: () => { hitsTaken++; rings.flash(); },
+  onPlayerHit: () => { hitsTaken++; rings.flash(); style.onHit(); },
 });
 const weapon = new Weapon(input, gfx, enemies, projectiles);
 const pause = new Pause();
@@ -59,6 +62,11 @@ const hook = new Hook(input, gfx, enemies, world, (r) => weapon.markerFor(r));
 // Movement audio. Arms itself on the first click or key — browsers hold the
 // speaker until a gesture, and the pointer-lock click is always one.
 const audio = new Audio();
+// One derivation of "which move just happened", shared by the two systems that
+// need it. Running it twice would mean two copies of the same edge detection.
+const moves = new MoveWatch();
+const style = new Style();
+const styleMeter = new StyleMeter();
 
 const editor = new Editor(gfx, world, enemies, {
   playerPos: () => player.pos,
@@ -107,6 +115,8 @@ function restart() {
   // Otherwise a respawn mid-hover leaves the jets running, and the fresh player
   // never re-enters the state that would turn them off.
   audio.stopAll();
+  moves.reset();
+  style.reset();
   ghost.visible = bestPath !== null;
 }
 
@@ -245,7 +255,8 @@ function frame(now: number) {
     // Frozen is the one moment a reload costs nothing, so a build waiting on
     // disk takes it here rather than mid-run.
     updates.applyWhenIdle(true);
-    audio.update(player, true);
+    audio.update(moves.step(player, false), true);
+    styleMeter.update(style);
     gfx.update(player, input.intent, 0, world);
     gfx.draw();
     hud.update(player, { run: run.time, splits: run.splits, best }, panel.abLabel, input.lookMode,
@@ -319,7 +330,10 @@ function frame(now: number) {
   hook.update(dt, player);
   // After the solver has stepped and before the draw: audio derives its events
   // by diffing the player against last frame, so it has to see the settled state.
-  audio.update(player, false, firedHook);
+  const moved = moves.step(player, firedHook);
+  audio.update(moved, false);
+  style.update(moved, dt);
+  styleMeter.update(style);
   enemies.update(dt, player.pos, projectiles, gfx.wallMeshes);
   projectiles.update(dt, player.pos);
   rings.update(dt, {
@@ -360,6 +374,7 @@ requestAnimationFrame(frame);
   gfx,
   panel,
   audio,
+  style,
   editor,
   level,
   enemies,

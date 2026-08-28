@@ -2,11 +2,11 @@
 // from the panel's `sounds` folder at runtime — nothing here hardcodes which file
 // is which verb, because that is a judgement call for ears, not for code.
 //
-// DELIBERATELY OUTSIDE core/. The solver must not know that sound exists (DESIGN
-// rule 1), so there is no callback from it and no event bus in it. Instead this
-// diffs the Player struct against its own copy from last frame and derives every
-// event from what CHANGED. That costs one small snapshot per frame and buys a
-// solver that stays engine-agnostic, which is the whole point of the split.
+// Which move fired is not decided here — engine/moves.ts derives that once per
+// frame and the style meter scores the same Frame. Two copies of that edge
+// detection (a jump, a double jump and a wall jump are one charge spend, told
+// apart only by where you were standing) would drift the first time either was
+// touched. This file only turns a move into a sound.
 //
 // The other half of the file is flow. Moves here cancel into each other, so at
 // any instant several clips are live and any one can be interrupted mid-flight.
@@ -28,7 +28,7 @@
 //               into a wall of noise.
 
 import { T } from '../core/tuning';
-import type { Player, StateName } from '../core/types';
+import type { Frame } from './moves';
 
 const FILES = import.meta.glob('/assets/odm-sounds-ref/*.wav', {
   query: '?url', import: 'default', eager: true,
@@ -50,18 +50,6 @@ const DUCKERS = new Set(['land', 'slam', 'superDash', 'hookHit', 'dash']);
 
 type Slot = keyof typeof T.soundAssign;
 
-interface Snap {
-  state: StateName;
-  grounded: boolean;
-  jumpsLeft: number;
-  slamming: boolean;
-  vaultT: number;
-  grappling: boolean;
-  chain: number;
-  vy: number;
-  alive: boolean;
-}
-
 interface LoopVoice {
   src: AudioBufferSourceNode;
   gain: GainNode;
@@ -79,7 +67,6 @@ export class Audio {
   private loops = new Map<string, LoopVoice>();
   private playing = new Map<string, { gain: GainNode; src: AudioBufferSourceNode }>();
   private lastFired = new Map<string, number>();
-  private prev: Snap | null = null;
   private duckUntil = 0;
   private ready = false;
   /** Set once the browser has let us out of the autoplay gate. */
@@ -274,75 +261,37 @@ export class Audio {
       v.gain.gain.linearRampToValueAtTime(0, now + 0.05);
       this.playing.delete(slot);
     }
-    this.prev = null;
   }
 
   /**
    * One frame. `paused` freezes everything without tearing the loops down, so
    * opening the pause menu mid-hover does not restart the jets on the way out.
    *
-   * `firedHook` is the one thing that cannot be read off the Player: a hook that
-   * MISSES leaves no trace at all - fireGrapple returns before it writes any
-   * state - so without the press passed in, firing into open sky is silent.
-   * Everything else on this frame is derived from the struct.
+   * The events arrive already derived, from engine/moves.ts — the style meter
+   * scores the same Frame, and two copies of that edge detection would drift.
    */
-  update(p: Player, paused: boolean, firedHook = false) {
+  update(f: Frame, paused: boolean) {
     if (!this.ctx || !this.ready) return;
-    const f = T.soundFlow;
-    this.master.gain.setTargetAtTime(f.enabled ? f.master : 0, this.ctx.currentTime, 0.02);
-    if (paused || !f.enabled) {
+    const flow = T.soundFlow;
+    this.master.gain.setTargetAtTime(
+      flow.enabled ? flow.master : 0, this.ctx.currentTime, 0.02);
+    if (paused || !flow.enabled) {
       for (const slot of LOOP_SLOTS) this.hold(slot as Slot, false);
-      this.prev = null;
       return;
     }
 
-    const now: Snap = {
-      state: p.state, grounded: p.grounded, jumpsLeft: p.jumpsLeft,
-      slamming: p.slamming, vaultT: p.vaultT, grappling: p.grappling,
-      chain: p.chain, vy: p.vel.y, alive: p.alive,
-    };
-    const was = this.prev;
-    this.prev = now;
-    if (!was) return;                     // first frame after a reset: no edges
-
-    const entered = (s: StateName) => now.state === s && was.state !== s;
-
-    // --- the verbs, each derived from what changed rather than from a callback.
-    if (entered('dashing')) this.fire(p.dashSuper ? 'superDash' : 'dash');
-    if (entered('sliding')) this.fire('slide');
-    if (entered('wingsuit')) this.fire('wingDeploy');
-
-    // Jumps all spend a charge; WHERE you were is what tells them apart.
-    if (now.jumpsLeft < was.jumpsLeft) {
-      if (was.state === 'wallrunning') this.fire('wallJump');
-      else if (was.grounded || was.state === 'grounded') this.fire('jump');
-      else this.fire('doubleJump');
+    for (const m of f.fired) {
+      // Landing is scaled by how hard you hit, so a hop off a kerb and a drop
+      // from a tower are not the same event at the same volume.
+      const scale = m === 'land' && flow.landScale
+        ? 0.35 + 0.65 * Math.min(1, f.landSpeed / Math.max(1, flow.landFullSpeed))
+        : 1;
+      this.fire(m as Slot, scale);
     }
 
-    // Landing. Scaled by how hard you hit, so a hop off a kerb and a slam from a
-    // tower are not the same event at the same volume.
-    if (now.grounded && !was.grounded) {
-      const hard = Math.min(1, Math.abs(was.vy) / Math.max(1, f.landFullSpeed));
-      this.fire('land', f.landScale ? 0.35 + 0.65 * hard : 1);
-      // The chain tick rides ON the landing rather than replacing it — that is
-      // what makes a clean hop sound like a landing that went right.
-      if (now.chain > was.chain) this.fire('bhop');
-    }
-
-    if (now.slamming && !was.slamming) this.fire('slam');
-    if (now.vaultT > 0 && was.vaultT <= 0) this.fire('vault');
-
-    // The launch fires on the PRESS, so a miss still sounds. The bite fires on
-    // the attach, which the solver resolves on that same frame - so a hit plays
-    // both and open sky plays only the first.
-    if (firedHook) this.fire('hookFire');
-    if (now.grappling && !was.grappling) this.fire('hookHit');
-    if (!now.grappling && was.grappling) this.fire('hookRelease');
-
-    // --- the held modes.
-    this.hold('thruster', p.thrusting);
-    this.hold('wingsuit', p.state === 'wingsuit');
-    this.hold('reel', p.grappling && p.grappleReel > 0);
+    this.hold('thruster', f.thruster);
+    this.hold('wingsuit', f.wingsuit);
+    this.hold('reel', f.reel);
     this.trim('thruster'); this.trim('wingsuit'); this.trim('reel');
   }
 }
