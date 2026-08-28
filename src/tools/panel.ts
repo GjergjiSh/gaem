@@ -18,6 +18,17 @@ const SOUND_GROUPS: Record<string, string> = {
   soundFlow: 'flow · fades, ducking, retrigger',
 };
 
+/**
+ * The style meter, likewise under one folder — the master numbers and the
+ * per-move ones are one feature and splitting them across two top-level items
+ * would mean tuning it in two places at once.
+ */
+const STYLE_GROUPS: Record<string, string> = {
+  style: 'meter · drain, cooling, ranks',
+  styleValue: 'value · points per move',
+  styleSpam: 'spam · uses before a move goes stale',
+};
+
 /** Built from the files actually in assets/odm-sounds-ref/, so the dropdown can
  *  never offer a clip that is not there. Empty value = that move stays silent. */
 const CLIP_OPTIONS = [
@@ -125,21 +136,28 @@ export class Panel {
     host.style.overscrollBehavior = 'contain';
 
     for (const group of Object.keys(T) as (keyof typeof T)[]) {
-      if (group in SOUND_GROUPS) continue;   // built together, below
+      if (group in SOUND_GROUPS || group in STYLE_GROUPS) continue;  // built below
       const folder = this.pane.addFolder({ title: group, expanded: group === 'ground' });
       const obj = T[group] as Record<string, any>;
       for (const key of Object.keys(obj)) this.bind(folder, group, obj, key);
     }
 
-    // Sound gets one folder rather than three top-level ones, because the three
-    // groups are one feature: which clip, how loud, and how they behave against
-    // each other. `assign` is the only one open by default — it is the one you
-    // came here for, and the other two are for after you have picked.
-    const sounds = this.pane.addFolder({ title: 'sounds', expanded: false });
-    for (const [group, title] of Object.entries(SOUND_GROUPS)) {
-      const sub = sounds.addFolder({ title, expanded: group === 'soundAssign' });
-      const obj = (T as any)[group] as Record<string, any>;
-      for (const key of Object.keys(obj)) this.bind(sub, group, obj, key);
+    // Sound and style each get ONE top-level folder holding their groups as
+    // sub-folders, rather than three top-level items apiece. Each is one feature
+    // - for sound: which clip, how loud, how they behave together; for style:
+    // the meter, what a move is worth, and how fast it goes stale - and tuning
+    // either from two places at opposite ends of the panel is what this avoids.
+    // The first sub-folder of each is open, being the one you came for.
+    for (const [title, groups, first] of [
+      ['sounds', SOUND_GROUPS, 'soundAssign'],
+      ['style', STYLE_GROUPS, 'style'],
+    ] as const) {
+      const parent = this.pane.addFolder({ title, expanded: false });
+      for (const [group, sub] of Object.entries(groups)) {
+        const f = parent.addFolder({ title: sub, expanded: group === first });
+        const obj = (T as any)[group] as Record<string, any>;
+        for (const key of Object.keys(obj)) this.bind(f, group, obj, key);
+      }
     }
 
     const io = this.pane.addFolder({ title: 'profiles', expanded: true });

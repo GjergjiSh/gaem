@@ -892,6 +892,102 @@ export const T = {
     landScale: true,
     landFullSpeed: 26,  // downward m/s that counts as a full-volume landing
   },
+
+  // --- STYLE. Three groups, shown together under one `style` folder. Engine in
+  // engine/style.ts, and the reasoning for the whole mechanism is at the top of
+  // that file rather than repeated here.
+
+  /**
+   * The meter itself. Everything here is global; the per-move numbers are in the
+   * two groups below.
+   */
+  style: {
+    enabled: true,
+    show: true,           // the on-screen meter. Off = the scoring still runs
+    max: 1000,
+    // Points a second, once `grace` has lapsed. This is the whole pressure: it
+    // never stops, so anything that stops paying starts costing.
+    drain: 34,
+    grace: 1.1,           // seconds after a paying move before the drain starts
+    drainRamp: 1.4,       // seconds for the drain to reach full. 0 = instant
+    /**
+     * Repetition heat cooled per second. THE dial for how repetitive the game
+     * lets you be: high means a move is fresh again almost immediately and the
+     * meter stops asking for variety, low means you must range widely to hold a
+     * rank. One use adds exactly 1 heat, so this is "uses per second forgiven".
+     */
+    cool: 0.55,
+    /**
+     * Payout fraction below which a move stops counting as activity at all. A
+     * move this stale still adds its scraps to the score but no longer holds the
+     * drain off — which is what turns spamming from a plateau into a decline.
+     */
+    stallAt: 0.34,
+    hitPenalty: 120,      // docked when something hits you
+    // Rank thresholds in points. D is deliberately not 0: there is a warm-up
+    // before the meter appears at all, so opening a run does not flash a rank.
+    rankD: 60,
+    rankC: 170,
+    rankB: 320,
+    rankA: 500,
+    rankS: 680,
+    rankSS: 830,
+    rankSSS: 950,
+  },
+
+  /**
+   * Points each move is worth at full freshness. Roughly scaled by how hard the
+   * move is to produce deliberately — a landing is not an achievement, a super
+   * dash into a hook is.
+   *
+   * 0 means the move does not score. `land` and `hookHit` sit there on purpose:
+   * landing is the END of a flow rather than a move, and hookHit fires on the
+   * same frame as hookFire, so scoring both would pay twice for one press.
+   */
+  styleValue: {
+    jump: 6,
+    doubleJump: 14,
+    wallJump: 30,
+    wallRun: 26,
+    dash: 20,
+    superDash: 46,
+    slide: 18,
+    bhop: 34,           // a clean rehop is the hardest thing on this list
+    slam: 28,
+    land: 0,
+    vault: 30,
+    hookFire: 24,
+    hookHit: 0,
+    hookRelease: 16,
+    wingDeploy: 30,
+  },
+
+  /**
+   * How many times in a row a move pays before it is worth nothing, at full
+   * value. Low = gets stale fast and you must move on; high = you can lean on it.
+   *
+   * Heat cools at `style.cool` per second, so this is not a hard budget — it is
+   * how deep the well is before you have to let it refill. The cheap, spammable
+   * verbs sit low and the committed ones sit higher, because a move that costs
+   * half a tank is self-limiting already.
+   */
+  styleSpam: {
+    jump: 3,
+    doubleJump: 4,
+    wallJump: 5,
+    wallRun: 4,
+    dash: 4,
+    superDash: 3,
+    slide: 3,
+    bhop: 8,            // the one thing worth doing over and over
+    slam: 3,
+    land: 1,
+    vault: 4,
+    hookFire: 5,
+    hookHit: 1,
+    hookRelease: 5,
+    wingDeploy: 3,
+  },
 };
 
 /** Range/step/doc overrides. Anything omitted falls back to inferRange() below. */
@@ -1170,6 +1266,27 @@ export const META: Record<string, { min?: number; max?: number; step?: number; d
 // group when a move is added.
 for (const key of Object.keys(T.soundLevel)) {
   META[`soundLevel/${key}`] = { min: 0, max: 2, step: 0.01, doc: 'x the bus. 0 mutes this move.' };
+}
+
+// --- style. The two per-move groups are one dial each, so they are generated
+// for the same reason as soundLevel above.
+Object.assign(META, {
+  'style/max': { min: 100, max: 5000, step: 50, doc: 'Score ceiling. Rank thresholds are absolute, so raising this alone just adds headroom above SSS.' },
+  'style/drain': { min: 0, max: 200, step: 1, doc: 'Points lost per second once grace lapses. THE pressure — raise it to make the meter demand more.' },
+  'style/grace': { min: 0, max: 5, step: 0.05, doc: 'Seconds after a paying move before the drain starts.' },
+  'style/drainRamp': { min: 0, max: 4, step: 0.05, doc: 'Seconds for the drain to reach full. 0 = it switches on hard.' },
+  'style/cool': { min: 0.05, max: 4, step: 0.05, doc: 'Repetition heat cooled per second. One use = 1 heat, so this is uses-per-second forgiven. High = repetition is fine, low = keep moving.' },
+  'style/stallAt': { min: 0, max: 1, step: 0.01, doc: 'Payout fraction below which a move stops holding the drain off. This is what turns spamming into a decline rather than a plateau.' },
+  'style/hitPenalty': { min: 0, max: 600, step: 10, doc: 'Points docked when something hits you.' },
+});
+for (const key of ['rankD', 'rankC', 'rankB', 'rankA', 'rankS', 'rankSS', 'rankSSS']) {
+  META[`style/${key}`] = { min: 0, max: 2000, step: 10, doc: 'Points needed for this rank.' };
+}
+for (const key of Object.keys(T.styleValue)) {
+  META[`styleValue/${key}`] = { min: 0, max: 120, step: 1, doc: 'Points at full freshness. 0 = does not score.' };
+}
+for (const key of Object.keys(T.styleSpam)) {
+  META[`styleSpam/${key}`] = { min: 1, max: 20, step: 1, doc: 'Uses in a row before this move pays nothing. Low = goes stale fast.' };
 }
 
 /**
