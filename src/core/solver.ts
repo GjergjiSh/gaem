@@ -57,6 +57,9 @@ export function makePlayer(spawn: V3): Player {
     vaultDir: V.v3(),
     grappling: false,
     grappleReel: 0,
+    grappleArm: 0,
+    grappleDraw: false,
+    aim: V.v3(0, 0, -1),
     grappleAuto: false,
     grappleTime: 0,
     grappleKeep: 0,
@@ -682,6 +685,7 @@ function fireGrapple(p: Player, i: Intent, col: CollisionWorld): boolean {
 
   p.grappleTime = 0;
   p.grappleReel = 0;
+  p.grappleArm = 0;
   p.grappleAuto = false;
   syncGrappling(p);
   // Grappling is tech: it feeds the same chain bonus as a wallrun or a slide, so
@@ -706,6 +710,7 @@ export function attachGrappleTo(p: Player, at: V3, auto: boolean) {
   }
   p.grappleTime = 0;
   p.grappleReel = 0;
+  p.grappleArm = 0;
   p.grappleAuto = auto;
   syncGrappling(p);
   registerTech(p);
@@ -724,17 +729,63 @@ export function moveGrappleAnchor(p: Player, at: V3) {
  */
 export function releaseGrapple(p: Player, boosted = true) {
   if (!p.grappling) return;
+  const g = T.grapple;
+  // Read the band before the cables go, because the launch is aimed down them.
+  const draw = p.grappleArm;
+  const line = anchorDir(p);
   for (const c of p.cables) c.on = false;
   p.grappling = false;
   p.grappleReel = 0;
+  p.grappleArm = 0;
   p.grappleAuto = false;
-  p.grappleCooldown = T.grapple.cooldown;
-  p.grappleKeep = T.grapple.keepTime;
+  p.grappleCooldown = g.cooldown;
+  p.grappleKeep = g.keepTime;
   if (!boosted) return;
+
+  // --- the slingshot. A drawn band beats the ordinary pay-out-and-go.
+  if (draw >= g.slingMin && line) {
+    // Where it throws you: somewhere between the cable and the crosshair.
+    // Down the cable alone is a launch you cannot aim, and down the crosshair
+    // alone is a jetpack that happens to need a wall — the band has to matter.
+    // `slingAim` is the whole argument, and it is a slider for that reason.
+    const w = V.clamp(g.slingAim, 0, 1);
+    const mix = V.add(V.scale(line, 1 - w), V.scale(p.aim, w));
+    const len = V.len(mix);
+    // Crosshair dead against the cable at exactly half and half. Nothing to
+    // normalise, so fall back to the cable rather than to a zero vector.
+    const dir = len > 1e-4 ? V.scale(mix, 1 / len) : line;
+    const kept = V.scale(p.vel, V.clamp(g.slingKeep, 0, 1));
+    p.vel = V.add(kept, V.scale(dir, g.slingPower * draw));
+    p.vel.y += g.slingUp * draw;
+    const sp = V.len(p.vel);
+    const cap = T.momentum.hardCap * g.slingCap;
+    if (sp > cap) p.vel = V.scale(p.vel, cap / sp);
+    registerTech(p);
+    return;
+  }
+
   const h = V.lenH(p.vel);
-  if (h > 1e-3) p.vel = V.setLenH(p.vel, Math.min(T.momentum.hardCap, h * T.grapple.releaseBoost));
-  if (T.grapple.releaseUp > 0) p.vel.y = Math.max(p.vel.y, p.vel.y + T.grapple.releaseUp);
+  if (h > 1e-3) p.vel = V.setLenH(p.vel, Math.min(T.momentum.hardCap, h * g.releaseBoost));
+  if (g.releaseUp > 0) p.vel.y = Math.max(p.vel.y, p.vel.y + g.releaseUp);
   registerTech(p);
+}
+
+/**
+ * Unit vector from the body to the middle of the live anchors, or null when
+ * there are none. The line the band would throw you down.
+ */
+function anchorDir(p: Player): V3 | null {
+  const from = ropeOrigin(p);
+  let mean = V.v3();
+  let n = 0;
+  for (const c of p.cables) {
+    if (!c.on) continue;
+    mean = V.add(mean, V.sub(c.anchor, from));
+    n++;
+  }
+  if (!n) return null;
+  const len = V.len(mean);
+  return len > 1e-4 ? V.scale(mean, 1 / len) : null;
 }
 
 /** One cable's distance constraint. Returns false when that cable should let go. */
@@ -748,7 +799,13 @@ function holdCable(p: Player, c: Cable, from: V3, dt: number): boolean {
   // Past the cable's length, kill the velocity heading away from the anchor and
   // pull the stretch back in. Removing that radial component is the single line
   // that turns a fall into a swing.
-  const stretch = dist - c.len;
+  //
+  // A drawn band is the one thing allowed to lengthen it. Without that the
+  // draw is invisible and the move is a timer you hold: with it you actually
+  // sink out to the end of the cable as it loads, and the launch fires from a
+  // rope you can see is stretched.
+  const give = p.grappleArm > 0 ? g.slingStretch * p.grappleArm : 0;
+  const stretch = dist - (c.len + give);
   if (stretch <= g.slack) return true;
 
   const away = -V.dot(p.vel, dir);          // >0 means moving away from the anchor
@@ -785,15 +842,32 @@ function updateGrapple(p: Player, i: Intent, col: CollisionWorld, dt: number) {
   // --- WASD. Forward reels in, back pays out; left and right are left alone,
   // because ordinary air control already steers the arc. `grappleAuto` is the
   // meathook holding the reel down for you: hooking a body is a commitment.
-  p.grappleReel = (p.grappleAuto || i.moveY > 0.1) ? 1 : i.moveY < -0.1 ? -1 : 0;
+  p.grappleReel = (p.grappleAuto || i.moveY > 0.1) ? 1 : 0;
   if (p.grappleReel !== 0) {
     const speed = p.grappleAuto ? g.hookSpeed : g.reelSpeed;
     for (const c of p.cables) {
       if (!c.on) continue;
-      c.len = p.grappleReel > 0
-        ? Math.max(g.minLen, c.len - speed * dt)
-        : Math.min(g.maxLen, c.len + g.payOutSpeed * dt);
+      c.len = Math.max(g.minLen, c.len - speed * dt);
     }
+  }
+
+  // --- BACK on the rope: draw the band.
+  //
+  // Held, so the draw is how long you hold it, and it is deliberately NOT the
+  // meathook’s business — a haul is already a commitment and reeling in on a
+  // drawn band is two moves fighting over the same cable.
+  //
+  // Drawing costs you the swing you came in with. That is the point: the band
+  // gives back more than it took, but only if you let go of the hook, so the
+  // move is a decision rather than something you hold down out of habit.
+  if (p.grappleDraw) {
+    p.grappleArm = Math.min(1, p.grappleArm + dt / Math.max(0.05, g.slingArm));
+    if (g.slingBrake > 0) p.vel = V.scale(p.vel, Math.max(0, 1 - g.slingBrake * dt));
+  } else if (p.grappleArm > 0) {
+    // Let S go and it bleeds off, so a draw is something you hold rather than
+    // a thing you armed once and forgot. At 0 it latches instead, which is the
+    // other reading of "arm" and costs one slider to have both.
+    p.grappleArm = Math.max(0, p.grappleArm - g.slingDecay * dt);
   }
 
   // --- C on the rope: dive. Down AND out, together. Driving down alone just
@@ -1320,6 +1394,13 @@ function tickTimers(p: Player, dt: number) {
 /** One fixed physics tick. */
 export function step(p: Player, i: Intent, col: CollisionWorld, dt: number) {
   tickTimers(p, dt);
+  // Before anything can let go of a rope: the launch reads the crosshair, and
+  // it has to be THIS tick’s crosshair or a flick right before the release is
+  // a flick the launch never saw.
+  p.aim = aimDir(i);
+  // And whether S means "draw" this tick, which has to be decided BEFORE the
+  // state machine because the answer changes what the movement keys are.
+  p.grappleDraw = T.grapple.enabled && p.grappling && !p.grappleAuto && i.moveY < -0.1;
 
   if (i.jump.pressed) p.bufJump = T.jump.bufferTime;
   if (i.dash.pressed) p.bufDash = T.dash.bufferTime;
@@ -1337,7 +1418,12 @@ export function step(p: Player, i: Intent, col: CollisionWorld, dt: number) {
     releaseGrapple(p);
   }
 
-  const wish = wishDir(i);
+  // Drawing the band eats the forward axis. Without this, holding S to load
+  // also drives air control backwards — into the cable, against the swing —
+  // which is the "encumbered" half of what pay-out used to feel like, and it
+  // walks you off the line the launch is about to fire down. Strafe survives:
+  // A and D steer the arc and were never the problem.
+  const wish = wishDir(p.grappleDraw ? { ...i, moveY: 0 } : i);
   const wasGrounded = p.grounded;
 
   // Jump out of a slam. This has to happen BEFORE the state machine: the slam

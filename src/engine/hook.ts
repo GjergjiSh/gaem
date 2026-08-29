@@ -283,12 +283,18 @@ export class Hook {
       );
       // Thicker and hotter under load, so a pull is something you can see on the
       // cable rather than something you infer from the world moving.
+      //
+      // A drawn band gets its own read, and it has to be the loudest one on the
+      // rope: the launch is worth several times an ordinary release and the only
+      // thing telling you it is ready is this cable. It thickens with the draw
+      // rather than switching at some threshold, so a half draw looks like half.
+      const arm = player.grappleArm;
       const loaded = this.haul !== null || player.grappleReel > 0;
-      const thick = loaded ? 0.05 : 0.032;
+      const thick = arm > 0 ? 0.05 + 0.055 * arm : loaded ? 0.05 : 0.032;
       rope.scale.set(thick, len, thick);
       (rope.material as THREE.MeshBasicMaterial).color.setHex(
-        this.haul ? 0xf87171 : player.grappleReel > 0 ? 0xfde047
-          : player.grappleReel < 0 ? 0x94a3b8 : 0x7dd3fc,
+        arm > 0 ? (arm >= 1 ? 0xffffff : 0xfb923c)
+          : this.haul ? 0xf87171 : player.grappleReel > 0 ? 0xfde047 : 0x7dd3fc,
       );
     }
   }

@@ -456,7 +456,6 @@ export const T = {
     reelAccel: 95,      // accel along the rope while holding forward
     reelSpeed: 14,      // metres/sec the rope itself shortens while reeling
     reelCap: 42,        // speed ceiling the reel accelerates toward
-    payOutSpeed: 11,    // metres/sec the rope lengthens while holding back
     // --- diving, on the slam key
     // C on the rope is NOT the ground slam. It drives you down and pays cable
     // out at the same time, which drops you under the anchor and makes the arc
@@ -470,6 +469,25 @@ export const T = {
     // --- letting go
     releaseBoost: 1.06, // speed multiplier on release — a swing should pay out
     releaseUp: 2.5,     // upward kick on release, so you leave the arc climbing
+    // --- the slingshot, on BACK
+    // S used to pay cable out. That was the same thing letting go already did,
+    // and diving did it better, so the one movement key the rope had spare was
+    // spent making you slower. It draws the band instead.
+    //
+    // The move: hook something, turn round so it is in front of you and your
+    // momentum is behind you, hold S to load, then let go of the hook. You go
+    // where the crosshair and the cable agree — `slingAim` is which of the two
+    // gets the last word.
+    slingArm: 0.55,     // seconds of holding S to reach a full draw
+    slingPower: 46,     // metres/sec of launch at a full draw
+    slingAim: 0.55,     // 0 = fire straight down the cable, 1 = straight down the crosshair
+    slingUp: 6,         // extra metres/sec upward at a full draw, so it arcs
+    slingKeep: 0.35,    // how much of the speed you came in with survives the launch
+    slingBrake: 1.4,    // per-second bleed while loading — the draw costs you the swing
+    slingStretch: 3.2,  // metres the cable is allowed to give at a full draw
+    slingDecay: 1.1,    // charge lost per second once S is let go. 0 = it latches
+    slingMin: 0.15,     // below this the release is an ordinary one, not a launch
+    slingCap: 1.35,     // launch ceiling, x momentum.hardCap
     keepTime: 1.4,      // seconds after release where overspeed doesn't bleed
     cooldown: 0.12,     // between shots. Just enough to stop a flicker-spam
     toggle: false,      // false = hold to hang, release to let go
@@ -1074,10 +1092,19 @@ export const META: Record<string, { min?: number; max?: number; step?: number; d
   'grapple/reelAccel': { min: 0, max: 300, step: 5, doc: 'Accel along the rope on forward.' },
   'grapple/reelSpeed': { min: 0, max: 50, step: 0.5, doc: 'How fast the rope itself shortens.' },
   'grapple/reelCap': { min: 5, max: 60, step: 1, doc: 'Speed the reel accelerates toward.' },
-  'grapple/payOutSpeed': { min: 0, max: 50, step: 0.5, doc: 'How fast holding back lengthens it.' },
   'grapple/reelLift': { min: 0, max: 40, step: 0.5, doc: 'Upward accel while reeling — clears ledges.' },
   'grapple/releaseBoost': { min: 1, max: 1.6, step: 0.01, doc: 'Speed multiplier when you let go.' },
   'grapple/releaseUp': { min: 0, max: 15, step: 0.5, doc: 'Upward kick on release.' },
+  'grapple/slingArm': { min: 0.05, max: 3, step: 0.05, doc: 'Seconds holding S for a full draw.' },
+  'grapple/slingPower': { min: 0, max: 120, step: 1, doc: 'Launch speed at a full draw, m/s.' },
+  'grapple/slingAim': { min: 0, max: 1, step: 0.01, doc: 'How much the crosshair steers the launch. 0 = down the cable, 1 = down the crosshair.' },
+  'grapple/slingUp': { min: 0, max: 30, step: 0.5, doc: 'Upward kick at a full draw.' },
+  'grapple/slingKeep': { min: 0, max: 1, step: 0.05, doc: 'Fraction of your incoming speed the launch keeps.' },
+  'grapple/slingBrake': { min: 0, max: 6, step: 0.05, doc: 'Speed bled per second while drawing. 0 = drawing is free.' },
+  'grapple/slingStretch': { min: 0, max: 12, step: 0.1, doc: 'Metres the cable gives at a full draw.' },
+  'grapple/slingDecay': { min: 0, max: 4, step: 0.05, doc: 'Charge lost per second after S. 0 = stays armed.' },
+  'grapple/slingMin': { min: 0, max: 1, step: 0.01, doc: 'Draw needed before a release launches at all.' },
+  'grapple/slingCap': { min: 1, max: 2.5, step: 0.05, doc: 'Launch ceiling, x momentum.hardCap.' },
   'grapple/keepTime': { min: 0, max: 5, step: 0.1, doc: 'Grace after release before overspeed bleeds.' },
   'grapple/cooldown': { min: 0, max: 3, step: 0.02 },
   'grapple/toggle': { doc: 'On = click to attach, click again to let go.' },

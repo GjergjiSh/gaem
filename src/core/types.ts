@@ -94,7 +94,35 @@ export interface Player {
   // already doing, so you can grapple out of a dash, a wallrun or a slide.
   cables: Cable[];      // exactly two, left then right
   grappling: boolean;   // derived: at least one cable is live
-  grappleReel: number;  // -1 paying out, 0 hanging, +1 reeling — for the HUD/visual
+  grappleReel: number;  // 0 hanging, +1 reeling — for the HUD/visual
+  /**
+   * Slingshot charge, 0..1. Above zero means the band is drawn.
+   *
+   * S used to pay cable out, which was a worse way to do what letting go or
+   * diving already did and cost you your speed to do it. It draws the band
+   * now: charge builds while it is held, the cable stretches with it, and
+   * letting go of the hook fires you along it. See T.grapple.sling*.
+   */
+  grappleArm: number;
+  /**
+   * S is down and it means DRAW, not "walk backwards".
+   *
+   * Held on a rope it used to do both, and the movement half is most of why
+   * the old pay-out felt like being encumbered: air control pushed you back
+   * along the very axis the cable was trying to hold, so the swing fought the
+   * key. Read once per tick here and the movement half is dropped for the
+   * duration — A and D still steer the arc, because those never fought it.
+   */
+  grappleDraw: boolean;
+  /**
+   * Where the camera pointed on the last tick, as a unit vector.
+   *
+   * The launch needs the crosshair, and it happens inside releaseGrapple,
+   * which is reached from six places — including the engine, which has no
+   * Intent to hand it. Keeping the aim on the player is what lets every one
+   * of those doors fire the same launch.
+   */
+  aim: V3;
   grappleAuto: boolean; // reel with no input asked for — the meathook hauling you in
   grappleTime: number;  // seconds attached, drives the rope's extend animation
   grappleKeep: number;  // post-release grace where overspeed doesn't bleed

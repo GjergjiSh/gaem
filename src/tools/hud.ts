@@ -101,9 +101,16 @@ export class Hud {
         + `${p.superCooldown <= 0 && p.gas >= T.superdash.gas ? '  [Z]' : ''}`,
       `cables   ${p.grappling
         ? `${p.cables.map((c) => (c.on ? c.len.toFixed(1).padStart(5) : '    -')).join(' ')}`
-          + `  ${p.grappleReel > 0 ? 'REEL' : p.grappleReel < 0 ? 'PAY' : 'hang'}`
+          + `  ${p.grappleArm > 0 ? 'DRAW' : p.grappleReel > 0 ? 'REEL' : 'hang'}`
           + `${p.thrusting ? '  GAS' : ''}`
         : `--   ${p.grappleKeep > 0 ? `keep ${bar(p.grappleKeep, T.grapple.keepTime)}` : ''}`}`,
+      // Only while there is a band to draw. A permanently empty bar is a line
+      // of the readout spent on nothing.
+      ...(p.grappling || p.grappleArm > 0
+        ? [`sling    ${bar(p.grappleArm, 1)}`
+          + `${p.grappleArm >= T.grapple.slingMin ? '  LAUNCH READY' : ''}`
+          + `${p.grappleArm >= 1 ? '  FULL' : ''}`]
+        : []),
       // The one resource line. Every move except running, the wing and the rope
       // comes out of it, so the useful thing to show beside the bar is what the
       // tank is currently worth in moves.
@@ -140,9 +147,11 @@ export class Hud {
         `hold E = weapon wheel (slows time, drag to pick) · Q last gun`,
         `M4 sword · M5 getsuga · Esc pauses · F2 level editor`,
         `M3 (middle mouse) ODM gear: BOTH cables fire, hold to hang,`,
-        `  W reel in, S pay out, + hold Space = gas (the two together IS the gear)`,
+        `  W reel in, + hold Space = gas (the two together IS the gear)`,
         `  A/D swing the arc · C dives (drops you, lengthens the swing)`,
-        `  let go to launch out of it`,
+        `  hold S to draw the band — turn to face the anchor, then let go of M3`,
+        `  and it slingshots you between the cable and your crosshair`,
+        `  let go without drawing and it's an ordinary launch out of the arc`,
         `  aimed at a target it's a meathook — you fly to THEM, at sword range`,
         `view     ${viewMode}   [V to switch]`,
         `camera: ${lookMode}`,
