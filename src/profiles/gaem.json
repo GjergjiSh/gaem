@@ -155,5 +155,9 @@
     "doubleJump": 1.26,
     "dash": 1.22,
     "land": 0.52
+  },
+  "style": {
+    "grace": 0.65,
+    "hitPenalty": 600
   }
 }
