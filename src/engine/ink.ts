@@ -181,8 +181,15 @@ void main() {
   // nothing for the same reason. Everything therefore arrives here in the same
   // space, gets the line drawn on it in that space, and goes through the pair
   // of steps once, on the way to the canvas.
+  //
+  // Unless this is not the last pass. When the Rush pass is on, the line goes
+  // into ITS target rather than onto the canvas, and the pair of steps belongs
+  // at the real end of the chain — done here too they would happen twice, which
+  // on a filmic curve is not a subtle mistake.
+#if LAST == 1
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
+#endif
 }
 `;
 
@@ -221,7 +228,7 @@ export class Ink {
     this.mat = new THREE.ShaderMaterial({
       vertexShader: VERT,
       fragmentShader: FRAG,
-      defines: { SS: 2 },
+      defines: { SS: 2, LAST: 1 },
       depthTest: false,
       depthWrite: false,
       uniforms: {
@@ -310,19 +317,37 @@ export class Ink {
     this.mat.uniforms.width.value = this.width * this.ss;
   }
 
-  render(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera) {
+  /**
+   * Scene into a target, then the line onto `dest` — or onto the canvas when
+   * `dest` is null, which is the case whenever nothing runs after this.
+   */
+  render(
+    renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera,
+    dest: THREE.WebGLRenderTarget | null = null,
+  ) {
     this.fit(renderer);
     if (!this.rt) return;
     renderer.setRenderTarget(this.rt);
     renderer.clear();
     renderer.render(scene, camera);
-    renderer.setRenderTarget(null);
+
+    // Recompiles on the frame the chain changes shape and not one after, so
+    // this must never be driven by anything that flickers — the renderer keys
+    // it off the on/off flag, not off the speed.
+    const last = dest ? 0 : 1;
+    if (this.mat.defines.LAST !== last) {
+      this.mat.defines.LAST = last;
+      this.mat.needsUpdate = true;
+    }
 
     const u = this.mat.uniforms;
     u.tColor.value = this.rt.texture;
     u.tDepth.value = this.rt.depthTexture;
     u.invProjection.value.copy(camera.projectionMatrixInverse);
+    renderer.setRenderTarget(dest);
+    if (dest) renderer.clear();
     renderer.render(this.quadScene, this.quadCam);
+    renderer.setRenderTarget(null);
   }
 
   dispose() {

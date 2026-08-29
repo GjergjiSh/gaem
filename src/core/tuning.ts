@@ -757,6 +757,48 @@ export const T = {
     speedDistance: 3.0,   // extra arm length at hard cap — wider view when fast
   },
 
+  // RUSH. What the top end LOOKS like.
+  //
+  // Every one of these is a function of one number: `ratio`, which is how
+  // close to the cap you are, shaped by `from`/`full` and damped once. Nothing
+  // downstream re-reads velocity and nothing downstream has a threshold of its
+  // own — which is why the FOV, the smear, the streaks and the vignette all
+  // arrive together instead of each turning up at its own speed. Retune the
+  // ratio and the whole look moves with it.
+  //
+  // The pass itself is engine/rush.ts, and it is the LAST thing in the frame.
+  rush: {
+    enabled: true,     // the whole system, off = the pipeline you had before
+    // --- the one number
+    // Fractions of momentum.hardCap. Nothing happens below `from`, everything
+    // is at maximum at `full`, and the curve between them is a smoothstep so
+    // the effect eases in rather than starting the instant you cross a line.
+    from: 0.7,
+    full: 1.0,
+    rate: 7,           // damping. `0.14 s to catch up, and the same on the way down
+    // --- FOV, on top of whatever the camera block is already doing
+    fov: 17,           // degrees added at a full ratio. 75 base -> 92
+    // --- the pass
+    blur: 0.11,        // how far the radial smear reaches at the edge, in screen widths
+    streaks: 0.55,     // streak brightness
+    streakCount: 90,   // how many wedges the screen is cut into
+    streakSpeed: 2.2,  // how fast they come and go
+    aberration: 0.32,  // channel split, as a fraction of the smear. 0 = none
+    vignette: 0.32,    // edge darkening
+    inner: 0.36,       // radius it all starts at. Higher = a cleaner middle
+    // --- the kick, on hard acceleration only
+    // Not a function of speed: a function of CHANGE in speed, so it fires when
+    // something throws you and stays quiet while you hold a top speed. High
+    // frequency and gone in a few tenths, or it reads as a wobble rather than
+    // as a hit.
+    kickFrom: 55,      // m/s/s of acceleration before it triggers at all
+    kickGain: 1.0,     // scales the whole thing
+    kickDecay: 9,      // how fast it dies. Higher = snappier
+    kickShake: 0.022,  // radians of jitter at a full kick
+    kickFov: 7,        // degrees of FOV punch at a full kick
+    kickRate: 55,      // jitter frequency, Hz-ish
+  },
+
   // Automatic mantle. Anything between a step and a chest-high ledge used to be
   // a full stop; this turns it into a hop that keeps your speed. Nothing is bound
   // to it — it fires off the ledge itself, because the moment you have to press a
@@ -1071,6 +1113,24 @@ export const META: Record<string, { min?: number; max?: number; step?: number; d
   'sprint/minForward': { min: 0, max: 1, step: 0.05 },
   'sprint/fovAdd': { min: 0, max: 30, step: 0.5 },
   'camera/fovDashAim': { min: 0, max: 1, step: 0.01, doc: '1 = FOV punch only on camera-forward dashes.' },
+  'rush/enabled': { doc: 'The speed feedback system. Off = no extra pass at all.' },
+  'rush/from': { min: 0, max: 1, step: 0.01, doc: 'Fraction of hardCap where it starts.' },
+  'rush/full': { min: 0.1, max: 1.5, step: 0.01, doc: 'Fraction of hardCap where it is at maximum.' },
+  'rush/rate': { min: 1, max: 30, step: 0.5, doc: 'Smoothing. 7 is about 0.14 s, both directions.' },
+  'rush/fov': { min: 0, max: 45, step: 0.5, doc: 'Degrees of FOV added at a full ratio.' },
+  'rush/blur': { min: 0, max: 0.4, step: 0.005, doc: 'Radial smear reach at the edge. 0 = no smear.' },
+  'rush/streaks': { min: 0, max: 2, step: 0.01, doc: 'Speed line brightness. 0 = no lines.' },
+  'rush/streakCount': { min: 8, max: 300, step: 1, doc: 'How many lines around the circle.' },
+  'rush/streakSpeed': { min: 0, max: 12, step: 0.1, doc: 'How fast lines come and go.' },
+  'rush/aberration': { min: 0, max: 1, step: 0.01, doc: 'Colour split, as a fraction of the smear.' },
+  'rush/vignette': { min: 0, max: 1, step: 0.01, doc: 'Edge darkening at a full ratio.' },
+  'rush/inner': { min: 0, max: 0.9, step: 0.01, doc: 'Radius it all starts at. Higher = cleaner middle.' },
+  'rush/kickFrom': { min: 5, max: 300, step: 5, doc: 'Acceleration (m/s/s) before the kick triggers.' },
+  'rush/kickGain': { min: 0, max: 3, step: 0.05, doc: 'Kick size. 0 = no shake at all.' },
+  'rush/kickDecay': { min: 1, max: 30, step: 0.5, doc: 'How fast the kick dies.' },
+  'rush/kickShake': { min: 0, max: 0.12, step: 0.001, doc: 'Radians of camera jitter at a full kick.' },
+  'rush/kickFov': { min: 0, max: 25, step: 0.5, doc: 'Degrees of FOV punch at a full kick.' },
+  'rush/kickRate': { min: 5, max: 120, step: 1, doc: 'Jitter frequency. High = a buzz, low = a wobble.' },
   'slide/ledgeBoost': { min: 0, max: 15, step: 0.5, doc: 'Speed added when a slide leaves a ledge. 0 = off.' },
   'slide/ledgeDrop': { min: 0, max: 15, step: 0.5, doc: 'Downward kick when a slide leaves a ledge.' },
   'weapon/projSpeed': { min: 10, max: 300, step: 1, doc: 'Muzzle velocity.' },

@@ -6,6 +6,7 @@ import type { CollisionWorld, Intent, Player } from '../core/types';
 import { level } from '../levels';
 import type { Theme } from '../levels/types';
 import { Ink } from './ink';
+import { Rush, speedRatio, kickAmount } from './rush';
 import { instance, warm } from './models';
 import { boxFor, DEFAULT_SURFACE, materialFor, useAnisotropy } from './surfaces';
 
@@ -202,6 +203,24 @@ export class Renderer {
   private theme: Required<Theme> = BASE_THEME;
   /** The outline pass. Idle unless a theme asks for a line. */
   private ink = new Ink();
+  /** The speed pass, and the last thing in the frame. See engine/rush.ts. */
+  private rush = new Rush();
+  /**
+   * How fast you are, 0..1, shaped and damped — the ONE number the whole speed
+   * feedback system is a function of. FOV, smear, streaks and vignette all read
+   * this and nothing re-derives it, which is what keeps them in step.
+   */
+  private rushT = 0;
+  /** Speed last frame, for the acceleration the kick triggers on. */
+  private lastSpeed = 0;
+  /** The kick: 0..1, spikes on hard acceleration and decays fast. */
+  private kick = 0;
+  /** Jitter offsets for this frame, in radians. Rebuilt every tick. */
+  private shakeYaw = 0;
+  private shakePitch = 0;
+  private shakeTime = 0;
+  /** Seconds this frame, so `draw` can advance the pass without being handed dt. */
+  private lastDt = 0;
   private levelGroup = new THREE.Group();
   private dome!: THREE.Mesh;
   private sky!: THREE.HemisphereLight;
@@ -640,8 +659,36 @@ export class Renderer {
     // The sky rides with the eye. Position only — turning it with the camera
     // would take the sunset round the sky with you.
     this.dome.position.copy(this.camera.position);
-    if (this.ink.enabled) this.ink.render(this.renderer, this.scene, this.camera);
-    else this.renderer.render(this.scene, this.camera);
+    // The chain, and its shape is decided by the FLAG rather than by the ratio:
+    // ink compiles a different shader depending on whether it is last, so a pass
+    // that came and went with your speed would recompile it mid-run. On at zero
+    // ratio the pass is one fullscreen copy, which is the price of never
+    // stuttering when you cross the threshold.
+    if (T.rush.enabled) {
+      // Pushed per frame rather than at level load: these are all F1 sliders and
+      // a uniform written once at configure time is a slider that does nothing
+      // until you reload. Eight assignments, against a fullscreen pass.
+      this.rush.configure({
+        blur: T.rush.blur, streaks: T.rush.streaks, streakCount: T.rush.streakCount,
+        streakSpeed: T.rush.streakSpeed, aberration: T.rush.aberration,
+        vignette: T.rush.vignette, inner: T.rush.inner,
+      });
+      this.rush.amount = this.rushT;
+      const dest = this.rush.target(this.renderer);
+      if (this.ink.enabled) {
+        this.ink.render(this.renderer, this.scene, this.camera, dest);
+      } else {
+        this.renderer.setRenderTarget(dest);
+        this.renderer.clear();
+        this.renderer.render(this.scene, this.camera);
+        this.renderer.setRenderTarget(null);
+      }
+      this.rush.composite(this.renderer, this.lastDt);
+    } else if (this.ink.enabled) {
+      this.ink.render(this.renderer, this.scene, this.camera);
+    } else {
+      this.renderer.render(this.scene, this.camera);
+    }
   }
 
   resize() {
@@ -658,7 +705,13 @@ export class Renderer {
    * @param col world query for camera collision pull-in
    */
   update(p: Player, i: Intent, dt: number, col: CollisionWorld) {
-    const yaw = i.yaw, pitch = i.pitch;
+    this.lastDt = dt;
+    this.updateRush(p, dt);
+    // The jitter goes on the ANGLES rather than on the camera afterwards, so it
+    // reaches both rigs: first person turns these straight into the eye rotation
+    // and third person builds the arm off them, and a kick that only shook one
+    // of the two would be a bug the moment you pressed V.
+    const yaw = i.yaw + this.shakeYaw, pitch = i.pitch + this.shakePitch;
     const pos = new THREE.Vector3(p.pos.x, p.pos.y, p.pos.z);
     const sliding = p.state === 'sliding';
     const fp = T.camera.firstPerson;
@@ -723,6 +776,10 @@ export class Renderer {
       + (p.state === 'wallrunning' ? T.camera.fovDash * 0.5 : 0)
       + (p.sprinting ? T.sprint.fovAdd : 0)
       + over * T.camera.fovSpeed
+      // The speed punch, and the kick on top of it. `over` above is OVERSPEED —
+      // it only exists past the current cap — so this is the one that covers the
+      // whole approach to it.
+      + (T.rush.enabled ? this.rushT * T.rush.fov + this.kick * T.rush.kickFov : 0)
       + T.weapon.adsFov * this.adsT;
     this.fov = V.damp(this.fov, wantFov, T.camera.fovRate, dt);
     if (Math.abs(this.camera.fov - this.fov) > 0.01) {
@@ -732,6 +789,55 @@ export class Renderer {
 
     // No render here on purpose — see `draw`. The camera is final as of this
     // line, and everything that reads it gets to run before the frame is drawn.
+  }
+
+  /**
+   * The speed ratio, the kick, and this frame’s jitter — computed once, here.
+   *
+   * Everything visual downstream is a function of what this writes, which is the
+   * point: one threshold, one curve, one smoothing constant. An effect that
+   * re-read the velocity would drift out of step with the rest the first time
+   * anyone touched a slider.
+   */
+  private updateRush(p: Player, dt: number) {
+    const r = T.rush;
+    if (!r.enabled) {
+      // Fall back to rest rather than freezing wherever it was, or switching the
+      // system off mid-run leaves the FOV punched out until you touch it again.
+      this.rushT = 0;
+      this.kick = 0;
+      this.shakeYaw = 0;
+      this.shakePitch = 0;
+      this.lastSpeed = V.len(p.vel);
+      return;
+    }
+
+    // Full 3D speed, not the horizontal one the movement code caps: a dive is
+    // the fastest thing in the game and it is almost entirely vertical.
+    const speed = V.len(p.vel);
+    this.rushT = V.damp(
+      this.rushT, speedRatio(speed, T.momentum.hardCap, r.from, r.full), r.rate, dt,
+    );
+
+    // The kick is acceleration, not speed. It fires when something throws you —
+    // a dash, a launch, a slam landing — and stays quiet while you simply hold a
+    // top speed, which is exactly the difference between "fast" and "hit".
+    const accel = dt > 1e-5 ? (speed - this.lastSpeed) / dt : 0;
+    this.lastSpeed = speed;
+    const burst = kickAmount(accel, r.kickFrom);
+    // Decay first, then take whichever is bigger: a new burst can only ever add
+    // to the kick, so two hits in quick succession do not cancel each other.
+    this.kick = Math.max(this.kick * Math.exp(-r.kickDecay * dt), burst * r.kickGain);
+
+    // Jitter. Two incommensurable sine rates rather than a random number per
+    // frame, so it is frame-rate independent and reads as a shudder instead of
+    // as noise — and the two axes run at different rates so it never traces a
+    // line. Squared, because a kick should be felt at the top of its life and
+    // essentially gone by the middle of it.
+    const amp = this.kick * this.kick * r.kickShake;
+    this.shakeTime += dt;
+    this.shakeYaw = Math.sin(this.shakeTime * r.kickRate) * amp;
+    this.shakePitch = Math.sin(this.shakeTime * r.kickRate * 1.37 + 1.1) * amp;
   }
 
   /** Eyes at the capsule, orientation straight from yaw/pitch. */
