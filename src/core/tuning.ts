@@ -472,20 +472,27 @@ export const T = {
     // --- the slingshot, on BACK
     // S used to pay cable out. That was the same thing letting go already did,
     // and diving did it better, so the one movement key the rope had spare was
-    // spent making you slower. It draws the band instead.
+    // spent making you slower. It holds the band open instead.
     //
-    // The move: hook something, turn round so it is in front of you and your
-    // momentum is behind you, hold S to load, then let go of the hook. You go
-    // where the crosshair and the cable agree — `slingAim` is which of the two
-    // gets the last word.
-    slingArm: 0.55,     // seconds of holding S to reach a full draw
+    // THE DRAW IS DISTANCE, NOT TIME. Holding S does not charge a meter and it
+    // does not slow you down — it stops the cable being rigid, and what loads
+    // the band is you moving away from the anchor. So the draw is something you
+    // do with the movement you already have:
+    //
+    //   1. Mid-swing, hold S and keep flowing. Your own momentum carries you
+    //      out past the cable, and every metre of that is draw.
+    //   2. Standing, hook something, hold S and walk backwards. The band pulls
+    //      harder the further you get, so a full draw is "walk back until you
+    //      cannot" — and then you point where you want to go and let go.
+    //
+    // The first version charged on a timer and braked you to load it, which is
+    // the opposite of both: it punished the flow it was supposed to extend.
+    slingRange: 10,     // metres of stretch that make a full draw, and the band’s whole travel
+    slingPull: 5,       // pull-back accel per metre of stretch. x slingRange must stay under ground.accel
     slingPower: 46,     // metres/sec of launch at a full draw
     slingAim: 0.55,     // 0 = fire straight down the cable, 1 = straight down the crosshair
     slingUp: 6,         // extra metres/sec upward at a full draw, so it arcs
     slingKeep: 0.35,    // how much of the speed you came in with survives the launch
-    slingBrake: 1.4,    // per-second bleed while loading — the draw costs you the swing
-    slingStretch: 3.2,  // metres the cable is allowed to give at a full draw
-    slingDecay: 1.1,    // charge lost per second once S is let go. 0 = it latches
     slingMin: 0.15,     // below this the release is an ordinary one, not a launch
     slingCap: 1.35,     // launch ceiling, x momentum.hardCap
     keepTime: 1.4,      // seconds after release where overspeed doesn't bleed
@@ -1095,14 +1102,12 @@ export const META: Record<string, { min?: number; max?: number; step?: number; d
   'grapple/reelLift': { min: 0, max: 40, step: 0.5, doc: 'Upward accel while reeling — clears ledges.' },
   'grapple/releaseBoost': { min: 1, max: 1.6, step: 0.01, doc: 'Speed multiplier when you let go.' },
   'grapple/releaseUp': { min: 0, max: 15, step: 0.5, doc: 'Upward kick on release.' },
-  'grapple/slingArm': { min: 0.05, max: 3, step: 0.05, doc: 'Seconds holding S for a full draw.' },
+  'grapple/slingRange': { min: 1, max: 40, step: 0.5, doc: 'Metres of stretch for a full draw. Also how far the band gives before it goes taut.' },
+  'grapple/slingPull': { min: 0, max: 40, step: 0.5, doc: 'Band pull-back per metre of stretch. Keep x slingRange under ground.accel or you cannot walk a full draw.' },
   'grapple/slingPower': { min: 0, max: 120, step: 1, doc: 'Launch speed at a full draw, m/s.' },
   'grapple/slingAim': { min: 0, max: 1, step: 0.01, doc: 'How much the crosshair steers the launch. 0 = down the cable, 1 = down the crosshair.' },
   'grapple/slingUp': { min: 0, max: 30, step: 0.5, doc: 'Upward kick at a full draw.' },
-  'grapple/slingKeep': { min: 0, max: 1, step: 0.05, doc: 'Fraction of your incoming speed the launch keeps.' },
-  'grapple/slingBrake': { min: 0, max: 6, step: 0.05, doc: 'Speed bled per second while drawing. 0 = drawing is free.' },
-  'grapple/slingStretch': { min: 0, max: 12, step: 0.1, doc: 'Metres the cable gives at a full draw.' },
-  'grapple/slingDecay': { min: 0, max: 4, step: 0.05, doc: 'Charge lost per second after S. 0 = stays armed.' },
+  'grapple/slingKeep': { min: 0, max: 1, step: 0.05, doc: 'Fraction of your speed at release the launch keeps.' },
   'grapple/slingMin': { min: 0, max: 1, step: 0.01, doc: 'Draw needed before a release launches at all.' },
   'grapple/slingCap': { min: 1, max: 2.5, step: 0.05, doc: 'Launch ceiling, x momentum.hardCap.' },
   'grapple/keepTime': { min: 0, max: 5, step: 0.1, doc: 'Grace after release before overspeed bleeds.' },

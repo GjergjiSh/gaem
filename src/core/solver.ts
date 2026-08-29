@@ -641,9 +641,20 @@ function aimDir(i: Intent): V3 {
   return V.v3(-Math.sin(i.yaw) * cp, Math.sin(i.pitch), -Math.cos(i.yaw) * cp);
 }
 
-/** The point the cables leave the body from — also where they are fired from. */
+/**
+ * The point the cables leave the body from — also where they are fired from.
+ *
+ * Never below the soles. `eyeOffset` is a slider and it goes negative, so it
+ * can be dialled under the floor: at -0.9 on a 1.8 m body the launchers are at
+ * ground level, and any lower puts them INSIDE it. The world ray is cast solid,
+ * so a shot starting inside the ground reports a hit at zero distance — the
+ * anchor lands on your own feet, the cable is born shorter than `minLen`, and
+ * it lets go on the same tick. Which reads, exactly, as "the grapple only works
+ * in the air".
+ */
 function ropeOrigin(p: Player): V3 {
-  return V.v3(p.pos.x, p.pos.y + T.grapple.eyeOffset, p.pos.z);
+  const soles = 0.3 - T.character.height / 2;
+  return V.v3(p.pos.x, p.pos.y + Math.max(soles, T.grapple.eyeOffset), p.pos.z);
 }
 
 /** At least one cable live. Every consumer asks this, never the array. */
@@ -737,6 +748,7 @@ export function releaseGrapple(p: Player, boosted = true) {
   p.grappling = false;
   p.grappleReel = 0;
   p.grappleArm = 0;
+  p.grappleDraw = false;
   p.grappleAuto = false;
   p.grappleCooldown = g.cooldown;
   p.grappleKeep = g.keepTime;
@@ -760,13 +772,20 @@ export function releaseGrapple(p: Player, boosted = true) {
     const sp = V.len(p.vel);
     const cap = T.momentum.hardCap * g.slingCap;
     if (sp > cap) p.vel = V.scale(p.vel, cap / sp);
-    registerTech(p);
-    return;
+  } else {
+    const h = V.lenH(p.vel);
+    if (h > 1e-3) p.vel = V.setLenH(p.vel, Math.min(T.momentum.hardCap, h * g.releaseBoost));
+    if (g.releaseUp > 0) p.vel.y = Math.max(p.vel.y, p.vel.y + g.releaseUp);
   }
 
-  const h = V.lenH(p.vel);
-  if (h > 1e-3) p.vel = V.setLenH(p.vel, Math.min(T.momentum.hardCap, h * g.releaseBoost));
-  if (g.releaseUp > 0) p.vel.y = Math.max(p.vel.y, p.vel.y + g.releaseUp);
+  // Standing when it fires: leave the ground with it.
+  //
+  // The release is handled at the top of the tick and `updateGrounded` runs
+  // after it, where `vel.y = min(vel.y, 0)` deletes every bit of the climb —
+  // so a launch off the floor came out perfectly flat. Which is the whole of
+  // "hook something, walk backwards and go up": the one case where the draw
+  // is easiest to load is the one case the launch was being thrown away in.
+  if (p.vel.y > 0.1 && p.state === 'grounded') enter(p, 'airborne');
   registerTech(p);
 }
 
@@ -796,15 +815,28 @@ function holdCable(p: Player, c: Cable, from: V3, dt: number): boolean {
   if (dist < g.minLen || dist > g.maxLen) return false;
   const dir = V.scale(to, 1 / dist);
 
-  // Past the cable's length, kill the velocity heading away from the anchor and
-  // pull the stretch back in. Removing that radial component is the single line
-  // that turns a fall into a swing.
+  // --- the band, while S holds it open.
   //
-  // A drawn band is the one thing allowed to lengthen it. Without that the
-  // draw is invisible and the move is a timer you hold: with it you actually
-  // sink out to the end of the cable as it loads, and the launch fires from a
-  // rope you can see is stretched.
-  const give = p.grappleArm > 0 ? g.slingStretch * p.grappleArm : 0;
+  // A SPRING, and specifically not the clamp below: nothing of yours is
+  // deleted, you are only pulled back in proportion to how far out you are.
+  // That is the whole difference between a draw you can flow through and the
+  // brake the first pass was — the clamp removes the velocity heading away
+  // from the anchor, and while you are loading a slingshot that velocity IS
+  // the load.
+  //
+  // It runs out at `slingRange`, where the rope below takes over and the band
+  // is fully drawn. So the far end of the give is a hard stop you can feel,
+  // and it is the same number the draw is measured against.
+  const give = p.grappleDraw ? g.slingRange : 0;
+  const drawn = dist - c.len;
+  if (give > 0 && drawn > g.slack && drawn < give) {
+    p.vel = V.add(p.vel, V.scale(dir, g.slingPull * drawn * dt));
+    return true;
+  }
+
+  // Past the cable's length — or past the end of the band — kill the velocity
+  // heading away from the anchor and pull the stretch back in. Removing that
+  // radial component is the single line that turns a fall into a swing.
   const stretch = dist - (c.len + give);
   if (stretch <= g.slack) return true;
 
@@ -851,23 +883,28 @@ function updateGrapple(p: Player, i: Intent, col: CollisionWorld, dt: number) {
     }
   }
 
-  // --- BACK on the rope: draw the band.
+  // --- BACK on the rope: hold the band open, and MEASURE the draw.
   //
-  // Held, so the draw is how long you hold it, and it is deliberately NOT the
-  // meathook’s business — a haul is already a commitment and reeling in on a
-  // drawn band is two moves fighting over the same cable.
-  //
-  // Drawing costs you the swing you came in with. That is the point: the band
-  // gives back more than it took, but only if you let go of the hook, so the
-  // move is a decision rather than something you hold down out of habit.
+  // Nothing here charges anything. The draw is how far the cable is actually
+  // stretched right now, so it answers to where you are and not to how long
+  // you have held a key — swing out and it climbs, drift back in and it drops.
+  // Deliberately not the meathook’s business: a haul is already a commitment.
   if (p.grappleDraw) {
-    p.grappleArm = Math.min(1, p.grappleArm + dt / Math.max(0.05, g.slingArm));
-    if (g.slingBrake > 0) p.vel = V.scale(p.vel, Math.max(0, 1 - g.slingBrake * dt));
+    let drawn = 0;
+    for (const c of p.cables) {
+      if (!c.on) continue;
+      drawn = Math.max(drawn, V.len(V.sub(c.anchor, from)) - c.len);
+    }
+    p.grappleArm = V.clamp(drawn / Math.max(0.5, g.slingRange), 0, 1);
   } else if (p.grappleArm > 0) {
-    // Let S go and it bleeds off, so a draw is something you hold rather than
-    // a thing you armed once and forgot. At 0 it latches instead, which is the
-    // other reading of "arm" and costs one slider to have both.
-    p.grappleArm = Math.max(0, p.grappleArm - g.slingDecay * dt);
+    // Letting S go closes the band on whatever length it has been pulled to,
+    // rather than leaving the rope holding ten metres of stretch it is about
+    // to fire back at you. You spend the draw instead of being punished by it.
+    for (const c of p.cables) {
+      if (!c.on) continue;
+      c.len = Math.min(g.maxLen, Math.max(c.len, V.len(V.sub(c.anchor, from))));
+    }
+    p.grappleArm = 0;
   }
 
   // --- C on the rope: dive. Down AND out, together. Driving down alone just
@@ -1418,12 +1455,12 @@ export function step(p: Player, i: Intent, col: CollisionWorld, dt: number) {
     releaseGrapple(p);
   }
 
-  // Drawing the band eats the forward axis. Without this, holding S to load
-  // also drives air control backwards — into the cable, against the swing —
-  // which is the "encumbered" half of what pay-out used to feel like, and it
-  // walks you off the line the launch is about to fire down. Strafe survives:
-  // A and D steer the arc and were never the problem.
-  const wish = wishDir(p.grappleDraw ? { ...i, moveY: 0 } : i);
+  // S keeps its movement while the band is open, and that is the point of the
+  // whole rework: backwards is how you LOAD it. On the ground you walk out
+  // against the spring; in the air the momentum you already had carries you
+  // out. Taking the axis away — which the first pass did — is what left you
+  // with a key that charged a meter and did nothing you could feel.
+  const wish = wishDir(i);
   const wasGrounded = p.grounded;
 
   // Jump out of a slam. This has to happen BEFORE the state machine: the slam

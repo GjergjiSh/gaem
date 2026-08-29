@@ -107,9 +107,9 @@ export class Hud {
       // Only while there is a band to draw. A permanently empty bar is a line
       // of the readout spent on nothing.
       ...(p.grappling || p.grappleArm > 0
-        ? [`sling    ${bar(p.grappleArm, 1)}`
+        ? [`sling    ${bar(p.grappleArm, 1)} ${(p.grappleArm * T.grapple.slingRange).toFixed(1)}m`
           + `${p.grappleArm >= T.grapple.slingMin ? '  LAUNCH READY' : ''}`
-          + `${p.grappleArm >= 1 ? '  FULL' : ''}`]
+          + `${p.grappleArm >= 1 ? '  FULL DRAW' : ''}`]
         : []),
       // The one resource line. Every move except running, the wing and the rope
       // comes out of it, so the useful thing to show beside the bar is what the
@@ -149,9 +149,9 @@ export class Hud {
         `M3 (middle mouse) ODM gear: BOTH cables fire, hold to hang,`,
         `  W reel in, + hold Space = gas (the two together IS the gear)`,
         `  A/D swing the arc · C dives (drops you, lengthens the swing)`,
-        `  hold S to draw the band — turn to face the anchor, then let go of M3`,
-        `  and it slingshots you between the cable and your crosshair`,
-        `  let go without drawing and it's an ordinary launch out of the arc`,
+        `  hold S to open the band, then MOVE to load it — swing out on your own`,
+        `  speed, or stand still and walk backwards. Distance stretched = power.`,
+        `  point where you want to go, let go of M3, and it fires you there`,
         `  aimed at a target it's a meathook — you fly to THEM, at sword range`,
         `view     ${viewMode}   [V to switch]`,
         `camera: ${lookMode}`,

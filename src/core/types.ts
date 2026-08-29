@@ -96,22 +96,22 @@ export interface Player {
   grappling: boolean;   // derived: at least one cable is live
   grappleReel: number;  // 0 hanging, +1 reeling — for the HUD/visual
   /**
-   * Slingshot charge, 0..1. Above zero means the band is drawn.
+   * Slingshot draw, 0..1 — and it is READ OFF THE ROPE, not counted up.
    *
-   * S used to pay cable out, which was a worse way to do what letting go or
-   * diving already did and cost you your speed to do it. It draws the band
-   * now: charge builds while it is held, the cable stretches with it, and
-   * letting go of the hook fires you along it. See T.grapple.sling*.
+   * It is how far the cable is stretched past its own length as a fraction of
+   * `slingRange`, recomputed every tick from the geometry. Nothing charges it
+   * and nothing bleeds it: pull further and it rises, drift back and it falls,
+   * which is what makes the draw a thing you do with movement rather than a
+   * meter you hold a key to fill. See T.grapple.sling*.
    */
   grappleArm: number;
   /**
-   * S is down and it means DRAW, not "walk backwards".
+   * S is down on a live rope: the band is open.
    *
-   * Held on a rope it used to do both, and the movement half is most of why
-   * the old pay-out felt like being encumbered: air control pushed you back
-   * along the very axis the cable was trying to hold, so the swing fought the
-   * key. Read once per tick here and the movement half is dropped for the
-   * duration — A and D still steer the arc, because those never fought it.
+   * It does NOT take the movement key away — walking backwards IS the draw on
+   * the ground, and keeping your speed through it IS the draw in the air. All
+   * it changes is the cable: open, it gives `slingRange` metres against a
+   * spring instead of holding you to a fixed radius.
    */
   grappleDraw: boolean;
   /**
