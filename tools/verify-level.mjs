@@ -209,18 +209,40 @@ head('what got built');
   // primitive count once per cell it appears in, NOT once per copy: the
   // hundredth building on a street is a matrix, and the first one in a new cell
   // is thirteen calls.
+  //
+  // Plain brushes batch on the same rule, and for the same reason: `boxFor`
+  // keys its geometry on the surface and the size quantised to 25 cm, and
+  // `materialFor` is one material per (surface, colour), so any two brushes
+  // that agree on all three already share a geometry and a material and differ
+  // in nothing but a matrix. A district is full of those -- every kerb, every
+  // window mullion, every member of the Line's girder -- so the price of a
+  // brush is its DISTINCT (surface, size, colour, cell), not the brush.
   const CELL = 128;
   const cells = new Map();
+  const groups = new Map();
   let calls = 0;
   for (const b of A.brushes) {
-    if (!b.m) { calls++; continue; }
-    const key = `${b.m}|${Math.round(b.p[0] / CELL)},${Math.round(b.p[2] / CELL)}`;
+    const cell = `${Math.round(b.p[0] / CELL)},${Math.round(b.p[2] / CELL)}`;
+    if (!b.m) {
+      // Same quantisation `boxFor` uses. A pyramid is unit geometry at any size,
+      // so its size is not part of the key.
+      const q = (v) => Math.round(Math.abs(v) * 4) / 4;
+      const geo = b.kind === 'pyramid' ? 'pyramid'
+        : `${q(b.s[0])}|${q(b.s[1])}|${q(b.s[2])}`;
+      const key = `${b.t ?? 'panel'}|${geo}|${b.c ?? 0x6b7280}|${!b.d}|${cell}`;
+      if (groups.has(key)) continue;
+      groups.set(key, true);
+      calls++;
+      continue;
+    }
+    const key = `${b.m}|${cell}`;
     if (cells.has(key)) continue;
     cells.set(key, true);
     calls += prims[b.m] ?? 1;
   }
-  note(`~${calls} draw calls (${cells.size} instanced batches over ${
-    A.brushes.filter((b) => b.m).length} model brushes)`);
+  note(`~${calls} draw calls (${cells.size} model batches over ${
+    A.brushes.filter((b) => b.m).length} model brushes, ${groups.size} brush batches over ${
+    A.brushes.filter((b) => !b.m).length} plain ones)`);
 
   // Every model the level names has to be a file on disk. A name that is in the
   // measured table but no longer in the pack loads as nothing and leaves a hole
@@ -749,6 +771,7 @@ const btn = () => ({ pressed: false, held: false });
 const intent = (over = {}) => ({
   moveX: 0, moveY: 0, yaw: 0, pitch: 0,
   jump: btn(), dash: btn(), slide: btn(), slam: btn(), thrust: btn(), grapple: btn(),
+  wing: btn(), super: btn(),
   ...over,
 });
 /** Camera yaw that makes moveY = 1 push along (dx, dz). */
@@ -923,23 +946,37 @@ head('the lap, leg by leg');
   check(steep === 0, `no ramp is secretly a wall (${steep})`);
   check(stalls === 0, `and none is shallow enough to kill a slide on it (${stalls})`);
 
-  // Off the Line onto the Spire terrace: the hand-off into the climb.
-  const east = A.LINE_LEGS[0];
-  const opx = east.at;
-  // Sampled south of the tower and clear of the slip ramp: probing at z=-74 puts
-  // the ray straight down the on-ramp and measures that instead of the terrace.
-  const at = A.ROWS[1].c + 20;
-  const gapNote = 0;
-  void gapNote;
-  const deck = surfaceAt(opx, at, A.lineY(east, at) + 3);
-  const terr = surfaceAt(A.COLS[3].hi - 4, at, A.TERRACE + 3);
-  const gap = opx - 8 - A.COLS[3].hi;
+  // The Spire hand-off, both directions. It is derived from the GATE rather than
+  // from a pair of typed coordinates, which is the whole reason the old version
+  // of this had to be rewritten: it hard-coded `LINE_LEGS[0]` and the leg it
+  // meant, back when the loop ran down the z = -35 avenue three metres from the
+  // Spire's block. When the loop moved out to the rim, the numbers went with it
+  // and the test was measuring a point 240 m from anything.
+  const g = A.LINE_GATES.find((q) => q.name === 'spire');
+  const deckY = A.lineY(g.leg, g.at);
+  const lip = g.leg.at + g.sgn * (A.LINE_W / 2);
+  // Sampled a few metres off the tower's face and clear of the on-ramp, which
+  // lands on the terrace and would be measured instead of it.
+  const deck = surfaceAt(g.leg.at, g.at, deckY + 3);
+  const terr = surfaceAt(A.COLS[3].hi - 6, g.at + 6, A.TERRACE + 3);
+  const gap = Math.abs(lip - A.COLS[3].hi);
   note(`Line deck ${deck?.toFixed(1)} m, Spire terrace ${terr?.toFixed(1)} m, `
-    + `${gap.toFixed(0)} m apart`);
+    + `${gap.toFixed(0)} m apart across the avenue`);
   check(terr !== null && deck !== null && deck > terr,
-    'the road arrives ABOVE the terrace, so the hand-off is a drop rather than a climb');
+    'coming OFF the road onto the terrace is a drop, not a climb');
   check(gap < GAP_HOP_AT(deck - terr),
-    `and the drop across is inside a plain hop (${gap.toFixed(0)} m)`);
+    `and that drop across is inside a plain hop (${gap.toFixed(0)} m)`);
+
+  // And the way back up, which is the ramp. Rayed at its middle: something has
+  // to be there, between the two heights it joins, or the gate is a doorway onto
+  // a four-metre wall.
+  const midZ = g.at - 14;
+  const midY = (A.TERRACE + deckY) / 2;
+  const onRamp = surfaceAt((A.COLS[3].hi + lip) / 2, midZ, midY + 4);
+  note(`the on-ramp is ${onRamp?.toFixed(1)} m at its midpoint, between `
+    + `${A.TERRACE} and ${deckY}`);
+  check(onRamp !== null && onRamp > A.TERRACE - 1 && onRamp < deckY + 1,
+    'and the way back up is a ramp off the terrace, not a wall');
 }
 
 head('the Line is a CIRCUIT: no ends, and nothing to fall off');
@@ -1049,6 +1086,43 @@ head('the Line is a CIRCUIT: no ends, and nothing to fall off');
       + `(${worst.gap.toFixed(0)} m, ${worst.where})`);
   }
 
+  // --- the ways ON. The frames between the deck and the rail are a wall, and a
+  // wall is a thing a bridge can arrive at the back of. So every gate gets rayed
+  // through, at chest height, from outside the deck edge to the centreline: the
+  // gap in the web has to line up with the bridge that lands in it, and the two
+  // are declared in one place precisely so this can check that they still do.
+  {
+    let walled = 0;
+    const out = A.LINE_W / 2 + 2;
+    for (const g of A.LINE_GATES) {
+      for (const along of [-3, 0, 3]) {
+        const at = g.at + along;
+        // The deck height HERE, not at the gate's centre. A pitch runs at 16 deg,
+        // so three metres along one is half a metre of drop, and a ray aimed off
+        // the gate's own height finds the kerb rather than the frame.
+        const deck = A.lineY(g.leg, at);
+        // Above the kerb, which is 0.9 m and is meant to be there -- you step
+        // over it. What is being asked about is the WEB: posts and diagonals run
+        // the full fourteen metres, so either height finds one if it is there.
+        for (const h of [2.2, 7]) {
+          const off = g.sgn * out;
+          const from = g.leg.axis === 'z'
+            ? v(g.leg.at + off, deck + h, at) : v(at, deck + h, g.leg.at + off);
+          const dir = g.leg.axis === 'z' ? v(-g.sgn, 0, 0) : v(0, 0, -g.sgn);
+          const d = world.ray(from, dir, out);
+          if (d !== null && d < out) {
+            walled++;
+            note(`the gate at ${g.leg.name} ${g.at} is blocked ${d.toFixed(1)} m in, `
+              + `${h} m over the deck`);
+          }
+        }
+      }
+    }
+    note(`${A.LINE_GATES.length} ways onto the Line, each rayed across three lines `
+      + 'at two heights');
+    check(walled === 0, `every one of them has a doorway in the frame (${walled} walled up)`);
+  }
+
   // --- the chords leave the loop and rejoin it, so they get the same walk.
   let spurHole = 0, spurRail = 0;
   for (const leg of A.LINE_LEGS) {
@@ -1069,6 +1143,13 @@ head('the Line is a CIRCUIT: no ends, and nothing to fall off');
   check(spurRail === 0, `and carries its rail the whole way (${spurRail})`);
 
   // --- and there is still air under all of it.
+  //
+  // Measured from the BOTTOM OF THE GIRDER, not from the deck. The girder used
+  // to be a 1.6 m slab and the difference did not matter; it is a 5.5 m truss
+  // now, and a ray started under the deck hits the truss's own chords and ties
+  // and reports a constant five metres, whatever the Line happens to be flying
+  // over. A check that cannot see a building is not checking for one.
+  const UNDER = A.LINE_UNDER;
   let buried = 0;
   let worst = { clear: 1e9, where: '' };
   for (const leg of A.LINE_LEGS) {
@@ -1080,14 +1161,14 @@ head('the Line is a CIRCUIT: no ends, and nothing to fall off');
       for (const off of [0, 4, -4]) {
         const x = leg.axis === 'z' ? leg.at + off : at;
         const z = leg.axis === 'z' ? at : leg.at + off;
-        const g = surfaceAt(x, z, y - 4.2);
-        clear = Math.max(clear, g === null ? 1e3 : y - 1.6 - g);
+        const g = surfaceAt(x, z, y - UNDER - 0.6);
+        clear = Math.max(clear, g === null ? 1e3 : y - UNDER - g);
       }
       if (clear < 2) buried++;
       if (clear < worst.clear) worst = { clear, where: `${leg.name} at ${at.toFixed(0)}` };
     }
   }
-  note(`tightest clearance under the deck is ${worst.clear.toFixed(1)} m (${worst.where})`);
+  note(`tightest clearance under the girder is ${worst.clear.toFixed(1)} m (${worst.where})`);
   check(buried === 0, `no leg dives into a building on its way across (${buried} buried)`);
 }
 
@@ -1095,7 +1176,7 @@ head('the Line is a CIRCUIT: no ends, and nothing to fall off');
 head('the Spire: three ways up, and each one is inside its own budget');
 {
   useTune('shipped');
-  const tank = (T.thruster.fuelMax / T.thruster.burnRate) * T.thruster.maxRise;
+  const tank = (T.gas.max / T.thruster.burnRate) * T.thruster.maxRise;
   const cx = A.COLS[3].c, cz = A.ROWS[1].c;
 
   // Ray each balcony the level says it built. Sweeping the four faces blind

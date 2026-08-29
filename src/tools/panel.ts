@@ -4,7 +4,37 @@
 import { Pane } from 'tweakpane';
 import { T, DEFAULTS, TUNING_VERSION, inferRange, snapshot, applyProfile } from '../core/tuning';
 import { typingInAField } from '../engine/input';
+import { CLIP_NAMES } from '../engine/audio';
 import { CAN_WRITE, saveJson, beaconJson, stamp } from './devsave';
+
+/**
+ * The three sound groups, and the sub-folder title each gets. Listed here rather
+ * than derived from a name prefix so that adding a `sound*` group to T does not
+ * silently move it under this folder without a title.
+ */
+const SOUND_GROUPS: Record<string, string> = {
+  soundAssign: 'assign · clip per move',
+  soundLevel: 'levels · gain per move',
+  soundFlow: 'flow · fades, ducking, retrigger',
+};
+
+/**
+ * The style meter, likewise under one folder — the master numbers and the
+ * per-move ones are one feature and splitting them across two top-level items
+ * would mean tuning it in two places at once.
+ */
+const STYLE_GROUPS: Record<string, string> = {
+  style: 'meter · drain, cooling, ranks',
+  styleValue: 'value · points per move',
+  styleSpam: 'spam · uses before a move goes stale',
+};
+
+/** Built from the files actually in assets/odm-sounds-ref/, so the dropdown can
+ *  never offer a clip that is not there. Empty value = that move stays silent. */
+const CLIP_OPTIONS = [
+  { text: '— silent —', value: '' },
+  ...CLIP_NAMES.map((n) => ({ text: n, value: n })),
+];
 
 const STORE_KEY = `tuning.v${TUNING_VERSION}`;
 /** Which profile file edits are written into. Survives reloads on its own. */
@@ -44,10 +74,23 @@ function baseFor(name: string): any {
   return base;
 }
 
+/**
+ * Groups that are switches rather than tuning, and are never persisted anywhere:
+ * not into a profile file, not into localStorage. A cheat that survived a reload
+ * would be a cheat you forget is on, and then an afternoon spent wondering why
+ * the gas meter never moves. Worse, `cheats` written into titanfall.json would
+ * ship the cheat to everyone who loads that profile.
+ *
+ * The cost of the rule is that infinite gas is off again after a refresh, which
+ * is the right side to err on.
+ */
+const EPHEMERAL = new Set(['cheats']);
+
 /** How T differs from code defaults — the shape a profile file is stored in. */
 function profileDiff(): any {
   const out: any = {};
   for (const group of Object.keys(T)) {
+    if (EPHEMERAL.has(group)) continue;
     const obj = (T as any)[group], def = (DEFAULTS as any)[group];
     for (const key of Object.keys(obj)) {
       if (obj[key] !== def[key]) (out[group] ??= {})[key] = obj[key];
@@ -93,23 +136,27 @@ export class Panel {
     host.style.overscrollBehavior = 'contain';
 
     for (const group of Object.keys(T) as (keyof typeof T)[]) {
+      if (group in SOUND_GROUPS || group in STYLE_GROUPS) continue;  // built below
       const folder = this.pane.addFolder({ title: group, expanded: group === 'ground' });
       const obj = T[group] as Record<string, any>;
-      for (const key of Object.keys(obj)) {
-        const path = `${group}/${key}`;
-        const value = obj[key];
-        if (typeof value === 'boolean' || typeof value === 'string') {
-          // Strings get no range: tweakpane turns a '#rrggbb' value into a colour
-          // picker on its own, which is exactly what crosshair/color wants.
-          folder.addBinding(obj, key).on('change', () => this.note(path, obj[key]));
-        } else {
-          const { min, max, step, doc } = inferRange(path, value);
-          const opts: Record<string, number> = { min, max };
-          if (step !== undefined) opts.step = step;   // omitted = continuous, no quantising
-          const b = folder.addBinding(obj, key, opts);
-          b.on('change', () => this.note(path, obj[key]));
-          if (doc) b.element.title = doc;
-        }
+      for (const key of Object.keys(obj)) this.bind(folder, group, obj, key);
+    }
+
+    // Sound and style each get ONE top-level folder holding their groups as
+    // sub-folders, rather than three top-level items apiece. Each is one feature
+    // - for sound: which clip, how loud, how they behave together; for style:
+    // the meter, what a move is worth, and how fast it goes stale - and tuning
+    // either from two places at opposite ends of the panel is what this avoids.
+    // The first sub-folder of each is open, being the one you came for.
+    for (const [title, groups, first] of [
+      ['sounds', SOUND_GROUPS, 'soundAssign'],
+      ['style', STYLE_GROUPS, 'style'],
+    ] as const) {
+      const parent = this.pane.addFolder({ title, expanded: false });
+      for (const [group, sub] of Object.entries(groups)) {
+        const f = parent.addFolder({ title: sub, expanded: group === first });
+        const obj = (T as any)[group] as Record<string, any>;
+        for (const key of Object.keys(obj)) this.bind(f, group, obj, key);
       }
     }
 
@@ -223,6 +270,34 @@ export class Panel {
     return this.showingB ? 'B' : 'A';
   }
 
+  /**
+   * One control, chosen by the value's type and its path. Extracted so the
+   * generic groups and the sound sub-folders build their bindings the same way —
+   * the sound folders are a different LAYOUT, not different behaviour, and a
+   * second copy of this would be where they quietly diverge.
+   */
+  private bind(folder: any, group: string, obj: Record<string, any>, key: string) {
+    const path = `${group}/${key}`;
+    const value = obj[key];
+    if (group === 'soundAssign') {
+      // A dropdown of what is on disk, rather than a text field you have to type
+      // a filename into exactly right.
+      folder.addBinding(obj, key, { options: CLIP_OPTIONS })
+        .on('change', () => this.note(path, obj[key]));
+    } else if (typeof value === 'boolean' || typeof value === 'string') {
+      // Strings get no range: tweakpane turns a '#rrggbb' value into a colour
+      // picker on its own, which is exactly what crosshair/color wants.
+      folder.addBinding(obj, key).on('change', () => this.note(path, obj[key]));
+    } else {
+      const { min, max, step, doc } = inferRange(path, value);
+      const opts: Record<string, number> = { min, max };
+      if (step !== undefined) opts.step = step;   // omitted = continuous, no quantising
+      const b = folder.addBinding(obj, key, opts);
+      b.on('change', () => this.note(path, obj[key]));
+      if (doc) b.element.title = doc;
+    }
+  }
+
   refresh() { this.pane.refresh(); }
 
   /** Switch to a built-in profile: it becomes the tune AND the file edits go to. */
@@ -265,6 +340,7 @@ export class Panel {
   private captureOverrides() {
     this.overrides = {};
     for (const group of Object.keys(T)) {
+      if (EPHEMERAL.has(group)) continue;
       const obj = (T as any)[group], base = (BASE as any)[group];
       for (const key of Object.keys(obj)) {
         if (obj[key] !== base[key]) this.overrides[`${group}/${key}`] = obj[key];
@@ -284,6 +360,7 @@ export class Panel {
 
   /** Record one changed param and schedule a save. */
   private note(path: string, value: number | boolean | string) {
+    if (EPHEMERAL.has(path.split('/')[0])) return;
     this.overrides[path] = value;
     this.save();
   }

@@ -3724,3 +3724,644 @@ The fix is to hold the target linear and half-float, and put the two includes at
 the end of the composite shader instead. The line gets drawn in scene-referred
 light, and the frame goes through tone mapping and encoding exactly once, on its
 way to the canvas.
+
+## 47. The girder becomes a truss
+
+The Line's girder was one box per span: 6 m wide, 1.6 m deep, slung under the
+deck and lapping past the bend into the next span's (§44). That is the shape a
+girder has in a *drawing*. In the world it was a mile of blank slab under the
+road — a kerbstone the size of a street, telling you nothing about how the road
+is held up. Everything else on the Line was already the thing it was: the deck a
+road, the rail a rail, the columns columns. The one part carrying all of it was
+the one part that still looked like a placeholder.
+
+So it is a truss. Two chords under the deck **edges** — the same two lines the
+piers stand on, so the girder lands on its columns instead of near them — and a
+web of posts and diagonals between them in each side plane. A post at every
+joint and one diagonal in every panel, the diagonals alternating, which is the
+pattern that leaves nothing but triangles. A tie across the bottom every other
+joint, which is what makes two side trusses one box girder rather than two
+ladders standing near each other.
+
+`TRUSS_D` is 5.5 m to the bottom chord's centreline. Over spans up to 78 m that
+is about 1:14, which is what a real truss of this reach is, and it is also what
+keeps the diagonals at 34° instead of lying down. Panels are 8 m, near enough to
+divide each span evenly — a truss with one odd bay at the end is a truss built by
+a script.
+
+### The triangles are the point, not the decoration
+
+At 8 x 5.5 m every opening is bigger than a dash. The underside of the Line
+stops being a ceiling and becomes something you go *through*, and it is reachable
+geometry rather than scenery: the Line runs 18 m clear over roofs that reach 30.
+
+### The order a bridge is actually built in
+
+The pier cap used to sit 1.2 m under the deck, because the thing above it was a
+slab and a slab needs holding at its own level. It is at the bottom chord now,
+and the columns stop there: column, cap, girder, deck. The junction squares get
+the same — a ring of chord at that level, so the four girders arriving at a
+crossing land on one thing instead of four.
+
+Two braces came with it, both for the same reason. **Knee braces** at the top of
+each column, in the plane of the truss above it, so the column flares out into
+the girder rather than meeting it at a point — that is the join you actually see
+from the street, because it is where the two heaviest things on the Line touch.
+And **portal bracing** across the two columns of a pier: a tie and an X above it,
+in the top half so nothing new arrives in the street. A pair of columns is two
+objects; a pair with an X between them is one frame. The same knee brace repeats
+above the deck under the end of the rail's cross beam, where two 14 m posts
+holding a rail up on nothing were a pair of sticks.
+
+Everything stays clear of the centreline, because that is the cargo's. The
+carriers hang 5.8 m under the rail and are 5.2 m wide; the chord line is 6.8 m
+off centre.
+
+### It cost 880 brushes, and no draw calls
+
+A truss is many small members and the district had 158 draw calls of headroom, so
+the first version of this did not fit — by about six times. The note on the
+budget in `verify:level` says what to do about that, and it is not raising the
+number: **make the renderer submit fewer calls**.
+
+Which it could, for free. `boxFor` keys its geometry on the surface and the size
+quantised to 25 cm, and `materialFor` is one material per (surface, colour) — so
+any two brushes agreeing on all three *already* share a geometry and a material
+and differ in nothing but a matrix. That is the same condition §40 found for kit
+models, arrived at without anything new, and a district is full of it: every
+kerb, every window mullion, and now every member of a mile of girder. So
+`batchModels` became `batchDraws` and takes the brushes' own boxes as well,
+grouped by the same (geometry, material, shadow, 128 m cell) key, hidden behind
+the same `HIDDEN` material that keeps them raycastable for the sword and the
+Getsuga. Batches of one are left alone: an `InstancedMesh` of a single matrix
+costs the same draw and a little more state.
+
+3227 brushes at ~2442 calls became 4109 at ~2211. The raw variant — no kit
+models at all, so every brush is its own draw — went from 1606 calls to 1076 on
+2488 brushes.
+
+### And the clearance check had to start lower
+
+`no leg dives into a building on its way across` rayed down from under the deck.
+With a 1.6 m slab there that was fine; with a 5.5 m truss the ray hits the
+truss's own chords and ties and reports a constant five metres, whatever the Line
+happens to be flying over. A check that cannot see a building is not checking for
+one, so it starts below the girder now — `LINE_UNDER` is exported for it — and
+the tightest real clearance on the map is 2.5 m, over a 10 m roof on the west
+side.
+
+## 48. The other half of the frame
+
+§47 trussed the girder and stopped at the deck, which turned out to be trussing
+the half you *look* at and leaving the half you *stand in*. Fourteen metres
+between the deck and the rail, and in them two posts every sixty metres and
+nothing else — a road with some sticks over it, not the top of a gantry. It is
+also the half that matters, because it is the one the player is inside.
+
+So the section is one frame all the way through. The DECK is the bottom chord of
+the truss above and the top chord of the truss below; the posts continue through
+it on the same joints; the two webs are the same web with the diagonals leaning
+opposite ways, so a joint has a post through it and a V either side. A chord
+along each side at the rail's level closes the top, in the rail's own band so the
+cross beam at every pier meets it without a step.
+
+Everything stays on the 6.8 m chord line, which is where the masts already stood.
+That leaves 12.9 m of clear road down the middle — the deck is 16 m — so running
+the Line is running down the middle of a colonnade rather than threading posts.
+And it is all outside the cargo: the carriers are 5.2 m wide on the centreline.
+
+### A wall needs doors, and the doors have to be where the bridges are
+
+The frames are a wall with holes in it, and the three places the roofscape
+reaches the Line are exactly the places a wall must not be. That was a real way
+to break the level: a bridge landing at the back of a lattice is a way on that is
+bricked up, and nothing in the geometry would have said so.
+
+`LINE_GATES` declares the three, once, and **both halves read it**: the web skips
+its post and the two diagonals either side across a 12 m doorway, and the bridges
+in the ways-on block are built at the gate's own position rather than at a number
+that happens to match. Move a gate and the doorway moves with it.
+
+Then `verify:level` rays through each one — outside the deck edge to the
+centreline, three lines along, two heights. Two things had to be right about that
+ray and neither was obvious:
+
+- **The deck height at the probe, not at the gate.** A pitch runs at 16°, so
+  three metres along one is half a metre of drop. Aimed off the gate's own height
+  the ray finds the kerb.
+- **Above the kerb.** The kerb is 0.9 m and is *meant* to be there — you step
+  over it. The first version of this check probed at 1.2 m and reported two gates
+  walled up; both were the kerb, and the frames had been open all along. What is
+  being asked about is the web, and a post or a diagonal runs the full fourteen
+  metres, so 2.2 m and 7 m both find one if it is there.
+
+Closing the gates by hand (`GATE_W = 0`) makes the check fail, which is the only
+way to know it is a check and not decoration.
+
+4109 brushes became 4732, and ~2211 draw calls became ~2280 — the frames are one
+post and one diagonal repeated a few hundred times, which is the case §47's
+batcher was built for. The raw variant is 3111 brushes at ~1141 calls.
+
+## 49. Eighteen towers is not a city
+
+The backdrop was eighteen towers on a circle. From the crown you looked out and
+saw five of them per bearing with sky between, and behind the sky the far edge of
+the ground plate drawn as a hard line across the view. That is not a district
+inside a city, it is scenery placed near a level — and the fix is not better
+towers, it is *enough* of them, because a silhouette only encloses you when the
+gaps in it are filled by something further back.
+
+### Three rings, and each one has a job
+
+- **near**, 34–78 m, close in. This is the one whose absence you actually
+  noticed: the outer city's masses stop at 26 m and the towers started at 26 m
+  plus a long way up, so the skyline jumped from two storeys to thirty with a
+  hole at exactly the height every roof on the map looks out at.
+- **mid**, 66–150 m. The wall — the ring the eye reads as "the city".
+- **far**, 110–230 m, out in the fog. Tallest and least detailed, because its
+  whole job is to stand behind the gaps in the mid ring.
+
+### Rectangles, not circles
+
+A circle round a rectangular plate has to be pushed out at the corners to clear
+it, and everything pushed out along a corner bearing arrives in much the same
+place — the old ring clumped towers into two corners and left the long sides
+bare. These walk the *perimeter of a rectangle*, evenly spaced with a bounded
+jitter, so they are evenly spaced in the world, which is where they are seen
+from.
+
+The perimeter of a rectangle given its HALF-extents is `4(hx + hz)`. The first
+cut used `2(hx + hz)`, which is half of it, so `t` never left the first two
+sides: all a hundred towers piled into the north-west and three sides of the map
+were open sky. It is now a named function with the reason written on it.
+
+### Detail is spent by distance, coverage is bought with width
+
+A plain brush is a draw call, so a ring costs count × detail and the budget is
+not elastic. What survives at each range is measurable, so:
+
+- **No ring gets a cornice.** A 1.4 m band is two pixels at 300 m, and the old
+  eighteen were paying for one each.
+- **A beacon is one box** and the best thing per call on a night horizon, so
+  everything tall enough carries one.
+- **Signs** go on the near two rings only — a saturated colour at 600 m through
+  haze is a grey smudge. They are also sized in METRES now: as a fraction of the
+  tower they were fine on a 30 m mass and became a 50 m emissive panel once the
+  rings widened, and an emissive that big tone-maps to flat white, which reads as
+  a hole in the building rather than a lit sign. Same reason the sign palette
+  dropped the periwinkle and kept the warm end.
+
+And the cheap half: **a wider tower covers more horizon for the same one draw
+call**, so coverage is bought with width before it is bought with count. The fog
+ring is 92–168 m wide, which is what closed the last hole — thirty towers over
+its perimeter is one every 160 m, and that left a band of bare ground plate
+showing wherever a mid-ring gap lined up with a far-ring one. At 700 m through
+haze a superblock and three towers are the same silhouette anyway.
+
+### The plate's own edge
+
+The ground under all of this went from 1500 m across to 2600. It is one box
+either way, so it costs nothing, and it moves the plate's far edge from 750 m —
+where a third of `fogFar` is on it and it draws a line across the view — out to
+1300 m, where it is inside the last tenth and reads as haze. Which is what a
+horizon is.
+
+100 towers now instead of 18. 4732 brushes → 4965, ~2280 draw calls → ~2505 of
+2600. Measured against `renderer.info.render.calls`, the worst real view of the
+district costs 2921 and the crown of the Spire costs 1129 — the rings are
+backdrop in a handful of far cells, so the frustum throws most of them away from
+any one camera, which is exactly what the 128 m cells are for.
+
+## 50. Windows that are where the wall is
+
+Six complaints about the white district, and five of them turned out to be one
+mistake made in five places: a texture was deciding something only the level
+knows.
+
+### The windows were painted into the cladding
+
+`plate` drew two dark rectangles per repeat, at a fixed height *up that repeat*.
+The repeat is 22 m of BRUSH measured from the bottom of a face, so the window row
+sat 12.3 m up whatever it landed on. Every building shorter than that had **no
+windows at all** — which is most of a district whose roofs run 12 to 30 m — and
+the taller ones had a row at a height with no relationship to the building. That
+is the whole of "windows either missing or misplaced", and it is not fixable in a
+texture, because a wall texture does not know how tall the wall is.
+
+So glazing is geometry. Openings placed off the same 8.5 m storey pitch
+`facade` uses, offset half a storey so a window is never sitting on a service
+band, and filled with a `glass` material. Two sizes, which is the variety a
+painted window can never have:
+
+- the **first floor** gets one panoramic strip: a single brush wrapping all four
+  faces, the length of the wall. That is the storey a building of this kind
+  actually glazes — it is where the floor is used, and it is the band your eye
+  lands on from the street — and on a shed it is a continuous run of glass
+  rather than a set of openings. One brush for a whole building.
+- **every floor above it** gets a row of short punched lights instead, one every
+  thirteen metres, which on this district's 50 m blocks is four to a face, spread
+  over 86% of the width so the end ones stay off the corner.
+
+The contrast is the point. A long run of glass low down with small openings over
+it reads as a working floor with offices above; the same window repeated up the
+wall reads as a spreadsheet. This was the other way up in the first cut — strip
+high, lights low — which is a building nobody builds.
+
+The rows cost almost nothing to draw, and that is the batcher from §47 paying for
+itself: 631 glazing brushes come to **one** draw call more than 225 did, because
+every small light on the map is the same two sizes and they collapse per 128 m
+cell.
+
+The storey ladder starts at `PLINTH + 2.2` rather than a full storey up. The
+first cut started at `PLINTH + 8.5`, which clears the top of everything under
+22 m — and glazed six buildings out of fifty.
+
+Cyberedge only, appended after the mapped list so it cannot shift an index
+`RAMP_BRUSHES_CYBER` holds. The dusk level still paints its own windows and still
+should: they carry its night skyline and they cost it nothing. This costs the
+white district 60 draw calls, and that variant wears no kit models at all, so it
+runs at 1426 of 2600.
+
+### Glass is a mirror, not a dark thing
+
+The first colour here was a dark slate, on the reasoning that glass is dark, and
+every window came out as a black rectangle punched in a white wall. From outside
+in daylight a pane sends back the **sky**, which at noon is the brightest thing
+in the scene; dark is what glass looks like at night, or from indoors. So: a
+light blue-grey, a base map carrying a strong head-to-cill gradient, mullions,
+and a hard-edged diagonal sheen. Roughness 0.16 rather than a mirror 0.09 —
+tighter than that and you only catch the specular at the exact mirror angle, so
+every other pane on the street is its flat base colour, which is the difference
+between glass and dark paint.
+
+### The road markings were painted onto the whole street plan
+
+The district's streets are ONE brush covering the entire plan. The blacktop
+tiles every 9 m, so its "centre line" was a grid of dashes laid across the
+district irrespective of where a road ran — including under the buildings, and
+never down the middle of anything. Same mistake: a marking has to know where its
+road is.
+
+Markings are geometry now. One continuous yellow line down each of the four
+avenues — alleys get none, an 8 m alley is one lane — as a 3 cm strip, which is a
+tenth of `character.stepHeight`. Four brushes. `S_LANE` is its own surface rather
+than `paint`, because `paint` is in `LIT_SURFACES` (the map's word for "this
+glows") and a lane line is not a light; keeping it separate is also what lets
+cyberedge pick it back out of `RAW_SRC` by name and paint it yellow instead of
+sorting it into one of the three material families.
+
+The Line's deck is the exception, and it gets to keep its line in the texture:
+it is the one road on the map with a **constant width**, so `blacktopDeck` tiles
+at 16 m — exactly one repeat across the deck — which puts the line exactly down
+the middle, and because the deck brushes are rotated with the road it follows
+every pitch and bend for free.
+
+The asphalt itself went from a mid-grey to `#3f4247`. Blacktop under a hard noon
+key is darker than people draw it, and it has to be dark for the paint on it to
+read as paint rather than as a lighter grey.
+
+### The roofs were the pavement
+
+`mass()` has always emitted its roof as its own brush — it just wore `deck`, the
+same poured concrete as the footways. On the white district that made every
+rooftop the brightest surface in the frame, and fifty of them read as fifty
+blank lids. They are `roofdeck` now: loose stone ballast over the membrane,
+dense aggregate with worn patches and **no joints of any kind**, which is the
+strongest tell that it is not concrete. `sideUV`, because what you see of a
+40 cm deck edge is a fascia and not a section through the gravel. Zero new
+geometry, and a catwalk is still a steel tread — that is why this is a new
+surface name and not a change to `deck`.
+
+### And the steel was bland
+
+`girder` had flanges, a bolt row and a splice line. It now has the things that
+make a section read as fabricated rather than extruded: a graded web, a
+highlight along each flange, bolts drawn as a shadow and a lit crown instead of
+a dot, splice plates with their own bolt groups and a seam up the middle, and
+lengthwise roller streaks — paint on steel is sprayed over mill scale and never
+comes out even. Nothing here costs a draw call; it is the same one texture.
+
+## 51. The wingsuit
+
+X in the air. A **mode**, not a move — every other verb in this solver is
+something you do for a moment, and this is something you *are* until you stop —
+so it is a state, and deploying it ends the dash, the slide, the wallrun, the
+slam, the vault and the rope. Half a dash still running inside it would own the
+velocity the glide is trying to steer.
+
+The jets are the one exception, and deliberately: they are a modifier rather
+than a state, they are what turns the glide into flight, and cancelling them
+would make the two verbs exclusive when the whole point is that they combine.
+
+### Three terms, and the trade falls out
+
+No line of this says "convert speed to height". It is three forces, each doing
+exactly one job:
+
+| | acts | changes |
+|---|---|---|
+| **gravity** | on the velocity vector | speed *along* the path, direction *across* it |
+| **lift** | across the path, toward where you look | direction only — so it is free |
+| **drag** | along the path | speed only, and it is the one irreversible term |
+
+Because turning is free and gravity is signed, aiming down buys speed and
+raising the mouse spends it. That is the whole mechanic, and `verify-wing.mjs`
+proves the trade cannot be run at a profit: four dive-and-climb loops come out
+lower and slower every time, because drag is the only term that does not reverse.
+
+### Two things I got wrong first
+
+**Gravity along the path only.** Modelling it as a pure energy term — `speed +=
+-g·dir.y` — means that aiming *exactly* level makes `dir.y` zero and gravity does
+nothing whatsoever. You could hold the nose flat and fly forever, and a climb
+could bleed to a dead stop and hang there. A wingsuit that was secretly a hover.
+On the *vector* it does both of its jobs at once, as it does in the world.
+
+**A constant turn rate.** Lift goes as v², so the rate it can bend a path goes as
+v²/v — which is **v**. Rate proportional to speed is the difference between a
+wing and a steering wheel: fast is agile, slow is floppy, out of one number. It
+also puts the stall exactly where the arithmetic says, because gravity bends the
+path down at `g/v` and lift bends it up at `lift·v`.
+
+### Three knobs, four numbers you can feel
+
+That is the payoff of the model being the real one — every quantity is one line
+of arithmetic instead of a thing you fiddle with:
+
+```
+terminal dive   sqrt(gravity / drag)    68 m/s   — 1.5x the hard cap
+stall           sqrt(gravity / lift)    26 m/s   — past a run, inside a dash
+glide ratio     lift / drag             6.9 : 1
+agility at v    lift * v                2.9 rad/s at terminal
+```
+
+The glide ratio is the one to watch, because it decides how much of the map one
+rooftop is worth. The first numbers gave 9.7:1, which carries you 290 m off a
+30 m roof — the entire district, in one press, which takes the traversal out of a
+traversal game. Just under seven crosses 180 m: further than any other verb here
+can reach, and still a choice about which way to go.
+
+### And its own gravity
+
+`world.gravityFall` is 62, about six times real, and correctly so — it is tuned
+to make a two-metre jump feel snappy. Flying under it is a different question,
+and the first version used it: a 66 m/s dive bought **sixteen metres** of climb,
+because at 62 m/s² a climb costs more than it can ever be worth. That is not
+momentum-based, it is falling with a cape.
+
+A wing holds some of your weight; `wing.gravity` is what is left over. At 24 the
+same dive is worth sixty metres. One value for both directions, whatever it is,
+or a dive would gain more than a climb costs and the loop would make energy.
+
+### The stance is read, not animated
+
+The body lies along its own flight path. The head is the +Y axis and yaw has
+already pointed +Z down the horizontal course, so the pitch that puts the head on
+the velocity is a quarter turn less the flight angle: level comes out prone, a
+vertical dive comes out head-down, a zoom climb stands you back up. All of it off
+the velocity, so the pose can never lie about where you are going.
+
+The player group's Euler order moved to `YXZ` for it. The default `XYZ` pitches
+about the *world* x axis, which on a yawed body is a roll — and the suit does
+both at once, so the order has to mean what it reads like.
+
+## 52. One tank, and a price list
+
+Two resource bars became one. There was **stamina** (100, regen 30, and the dash
+cost 25 of it) and there was **thruster fuel** (120, burn 42/s), and they were
+kept apart on an argument that is in the comment on the old `Player` struct:
+*hovering must never cost you a dash, or the two verbs fight over one pool.*
+
+That is true. It is also exactly why neither pool meant anything. A resource that
+gates precisely one verb is that verb's cooldown with a bar drawn on it — the
+dash already had a cooldown and a charge count, so stamina was a third copy of
+the same gate, and the bar it drew never moved except in lockstep with the other
+two. Meanwhile the whole rest of the kit — jumps, slides, slams, wall jumps — was
+free, so there was nothing for a budget to be *about*.
+
+Now there is one tank, `T.gas`, and everything draws on it. What that buys is not
+scarcity; it is that **every cost is an exchange rate between two verbs**. Gas
+spent on a dash is gas not spent hovering. Half a tank on a launch is two seconds
+of jets you no longer have. None of those trades existed when the pools were
+separate, and none of them needed a rule to say so.
+
+### The rule is blunt, and one thing makes it safe
+
+A move you cannot afford **does not come out**. Not a weaker one, not one on
+credit — nothing, and a buffered press waits on the tank exactly the way it waits
+on a cooldown. One rule, no special cases.
+
+That rule is only survivable because of what is *free*:
+
+- **running**, on the ground and on a wall — the run along a wall is running, and
+  charging for it is charging for existing
+- **the wingsuit** — a shape, not an engine
+- **the ropes** — the cable holds you up; the jets you fire on it are the jets
+- **the vault** — `vault.gas` exists and is **0**, because nothing is bound to a
+  vault. It fires off the ledge itself, so a cost on it is the level geometry
+  billing you, and an empty tank would turn a lip you have cleared a hundred
+  times into a wall
+
+Plus the ground refuels at `gas.groundRefuel` × the normal rate, so an empty tank
+on the deck is affordable again in **0.4s**. That is measured in
+`verify-gas.mjs`, and it is the test that licenses the blunt rule: the worst an
+empty tank can do is make you walk for a moment.
+
+### Where the costs live
+
+Not in `T.gas` — that group is only the tank. Each price lives with the move that
+pays it, because that is where you are looking when you want to know what a move
+is worth:
+
+| | | on a 120 tank |
+|---|---|---|
+| `jump.gas` | 6 | 20 hops |
+| `jump.gasAir` | 12 | the double jump is the one you feel |
+| `wall.gasJump` | 8 | the kick, not the run |
+| `slide.gas` | 8 | charged on **entry** |
+| `slam.gas` | 10 | it used to be free |
+| `dash.gas` | 25 | ~5 |
+| `superdash.gas` | 55 | 2, and they cannot be chained |
+| `thruster.burnRate` | 42/s | ~2.9s of hover |
+
+Two of those are worth their reasoning. **The slide bills on entry, not per
+second**: charging for the time would mean the longest slide — the one down a
+ramp that you set up for — is the one that costs most, which is backwards. You
+are paying for the boost. And **the slam used to cost nothing**, with the old
+comment offering that as a virtue; against one shared tank "free" is not neutral,
+because a free reset is the answer to every situation.
+
+`gasIdle` counts from the last **spend**, not the last burn, so a jump delays the
+refill the same way a hover does. Without that the tank refills between two hops
+and every number above is fiction.
+
+`gasDry` — the lockout after burning the tank out — stays the **jets' alone**. It
+exists so that burning the last drop costs you the thing that emptied it; a
+lockout that also took your jump would leave you on a rooftop with a part-full
+bar and nothing to press. There is a test for exactly that window: at 17 gas,
+under `gas.restart` of 20, the jets refuse and a jump comes out.
+
+### The cheat, and why it does not persist
+
+`T.cheats.infiniteGas`. It lives in `T` because the panel is generated from the
+shape of `T`, so a flag there is a checkbox with no edit to `panel.ts` at all.
+
+But `cheats` is in `EPHEMERAL` in panel.ts and is persisted **nowhere** — not
+into a profile file, not into localStorage. Two reasons, and the second is the
+real one: a cheat that survives a reload is a cheat you forget is on, and then an
+afternoon wondering why the meter never moves; and `profileDiff()` writes into
+the *shipped* `titanfall.json`, so one stray click would have shipped infinite
+gas to everyone who loads the default profile. The cost is that it is off again
+after a refresh, which is the right side to err on.
+
+## 53. Z, and one missing clamp
+
+The super dash. Everything about it is a dash — the same `dashing` state, so
+every cancel, every link and every bit of tech already known still applies,
+because there is nothing new to know. `p.dashSuper` is only which set of numbers
+the state is reading.
+
+Two things are different, and only two.
+
+**One missing clamp.** An ordinary dash exits with its vertical pinned to
+`jump.speed` and its horizontal to `momentum.hardCap`. That clamp is what keeps a
+dash a *reposition*: a dash that could fling you would make every other verb in
+the kit optional. This is the launch, so the clamp is off and `superdash.maxSpeed`
+is the only ceiling. 70 × 0.85 leaves you at 59 m/s, and straight up that is
+another ~49 m of coasting on top of the ~24 m the window already covered — **73 m
+off flat ground on code defaults, 87 m on the shipped tune.** Which is what makes
+it a wingsuit launcher: Z, wait, X, and you are gliding.
+
+**A spherical direction.** The dash builds its aim by setting `dir.y` on a
+full-length horizontal vector and normalising, which is right for a dash and
+quietly wrong here: with W held, a fully vertical aim comes out at **45°**,
+because `(0, 1, -1)` normalised is a diagonal. "Aim at the sky and press Z" has
+to mean the sky. So the launch scales the horizontal by `cos(pitch)` and sets
+`y = sin(pitch)` — the stick picks the compass bearing, the pitch picks the
+elevation, and looking straight up goes straight up whatever the stick says.
+There is a test on `dashDir.y > 0.99` with `moveY: 1` held, because that is the
+bug I would otherwise have shipped.
+
+### Its own `enabled`, and this one is not fussiness
+
+`superdash` is its own tuning group with its own `enabled`, not `dash.superX`
+fields. The shipped `titanfall.json` sets **`dash.enabled: false`** — Shift is
+sprint in that tune — so a launch gated on `dash.enabled` would have silently
+vanished in the profile the game actually boots into, and that is a bug with no
+symptom to search for. Verified against the real Rapier world under that profile:
+Z still launches, 87 m, `dash.enabled` false the whole time.
+
+### Where it fires from
+
+In `step()`, before the state machine, ahead of the wingsuit — the same place and
+for the same reason as the slam and the wing. Handling it once buys every entry
+at no cost: ground, air, slide, dash, wallrun, wingsuit, Z works out of all of
+them without a single one of those states knowing the move exists.
+
+Ahead of the wingsuit specifically, because Z out of a glide should be a launch
+and X on the next press should be a glide off the top of it. That ordering makes
+the pair a loop; the other way round the two presses cancel out.
+
+It cancels the rope, which the ordinary dash does not. `updateGrapple` gets the
+last word on velocity every tick, so a live cable would clamp a 70 m/s launch
+back to its radius — and that reads as Z doing nothing at all, which is worse
+than any rule it breaks.
+
+## 54. The Line moves to the rim
+
+The conveyor was a closed loop before this and it stays one. What changed is
+where the loop *is*.
+
+Two of its four legs ran down **interior** avenues — z = -35 and z = 101, the
+district's two wide east–west streets. That put 824 m of elevated deck and
+fourteen metres of gantry across the middle of the map, at eye level from every
+roof in it, in both directions. A district whose whole first rule is that you can
+cross it in any direction had a bridge through the view.
+
+All four legs now run the **rim**: the 18 m of pavement between the outermost
+blocks and the plate's edge. And the position is not a chosen number — it is the
+same answer on both axes:
+
+```
+LOOP_X  = (EXTENT.x1 - EXTENT.x0) / 2 + PAVE / 2   →  ±206
+LOOP_Z1 = (EXTENT.z1 - EXTENT.z0) / 2 + PAVE / 2   →  ±173
+```
+
+The middle of that band. A 16 m deck down the centre of an 18 m pavement leaves a
+metre inside and a metre out. The east and west legs were already there at ±206
+and nobody had noticed that the z pair was answering a different question; now
+both are derived, so a change to the block grid moves the Line with it.
+
+### Two things cross the middle, and only two
+
+The chords, down the north–south avenues at x = -72 and x = 71. They leave the
+loop at one rim leg, dip through the district, and rejoin it at the other — so a
+lap is either round the edge or a figure across the centre. Two crossings you
+choose between reads as a network; six read as scaffolding.
+
+They also keep the property the whole structure was built around: a 16 m deck
+down a 22 m avenue with daylight either side to fall through. `AVENUE_OP` — the
+one street widened to 24 m specifically for the Line — is the east chord's, and
+that is now the *only* thing it carries rather than one of six.
+
+### What it cost, and what it bought
+
+| | before | after |
+|---|---|---|
+| deck | 1368 m | 2208 m |
+| piers | 18 | 30 |
+| brushes | 4969 | 6069 |
+| draw calls (dusk) | 2509 | 2576 of 2600 |
+
+The deck grew 61% and the draw calls grew **2.7%**, which is worth understanding
+rather than being lucky about: the estimate prices a plain brush per distinct
+*(surface, quantised size, colour, 128 m cell)*, so a longer leg is nearly free —
+it is the same handful of member lengths repeated, and the only new cost is the
+cells it reaches into. The expensive parts of the Line are the *bends*, because
+each span's bay length is different and so is each span's diagonal. Extending a
+leg does not add a bend.
+
+24 calls of headroom is tight, and worth saying out loud rather than discovering
+later.
+
+The thing it bought that was not asked for: the rim legs pass **within a metre of
+the outer blocks the whole way round**. The roofscape and the Line are neighbours
+now instead of separate maps.
+
+### The gates had to move with it
+
+`LINE_GATES` is the single declaration the frames and the bridges both read — the
+web skips its members across a gate, and the bridge is built at the gate's own
+position. That is what made this survivable: moving a leg 138 m moved the doorway
+and the bridge together, and the only thing that broke was a gate whose *reason*
+had gone.
+
+- **north** (new). At x = -109 the profile holds its 28 m shelf and the roof it
+  passes is 28 too, a metre away. Dead level, so this is a landing and not a ramp.
+  It exists because without something like it the rim legs are a fence you can see
+  over for 1500 m and never climb — the specific risk of putting the loop out
+  here, answered by one slab.
+- **spire** (moved). It used to hop three metres onto the north leg, back when
+  that leg ran down the z = -35 avenue beside the Spire's block. The leg is 138 m
+  away now, so the connection goes to the thing that *is* beside the Spire: the
+  east chord runs down the avenue along its whole east face, four metres off it
+  and four metres up. A 28 m diagonal, because four metres up over four across is
+  a wall.
+- **west**, **east** — unchanged. Both are on chords, and the chords did not move.
+
+The legs are named consts now (`LEG_NORTH`, `CHORD_E`, …) and the gates carry a
+`name`. `LINE_LEGS[0]` was fine with four legs and is a trap with six.
+
+### One stale test, and what it was really measuring
+
+`verify:level` had a hand-written Spire hand-off check that indexed
+`LINE_LEGS[0]` and treated its `at` as an x coordinate. That is wrong for an
+x-axis leg — `at` is the z it runs down — and the check that used it,
+`gap < GAP_HOP_AT(...)`, was comparing a *negative* number and therefore passing
+on anything at all. Moving the loop turned the negative from -102 into -240 and
+the sign-blindness became visible.
+
+Rewritten off `LINE_GATES.find(name === 'spire')`, so it measures the gate that
+exists rather than the coordinates someone typed, and it now checks the direction
+that was actually missing: that the way back **up** is a ramp. A doorway onto a
+four-metre wall passes every other test in the file.

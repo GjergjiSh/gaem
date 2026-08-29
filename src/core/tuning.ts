@@ -5,7 +5,7 @@
 // structure automatically, so adding a param here is all it takes to get a slider.
 
 /** Bump when defaults change meaningfully — invalidates saved localStorage tunes. */
-export const TUNING_VERSION = 15;
+export const TUNING_VERSION = 16;
 
 export const T = {
   world: {
@@ -54,6 +54,12 @@ export const T = {
     coyoteTime: 0.12,
     bufferTime: 0.12,
     slideExitBonus: 1.28, // speed MULTIPLIER when jumping out of a slide
+    // Gas. Two numbers, because the two jumps are not the same purchase: the
+    // first one off the floor is how you get anywhere and is nearly free, the
+    // second one is a genuine extra metre of reach and should be felt. Set the
+    // ground one to 0 if a tight tank ever makes walking around feel taxed.
+    gas: 6,
+    gasAir: 12,         // the double jump, and any jump not off the ground
   },
 
   dash: {
@@ -74,6 +80,48 @@ export const T = {
     refundJumpOnDash: true,
     verticalAim: 0.35,    // how much camera pitch tilts an air dash (third person)
     verticalAimFP: 1.0,   // in first person you expect to dash exactly where you look
+    // Gas, spent on entry. This used to be `stamina.dashCost` against a pool
+    // nothing else touched, which made it a second cooldown; against the shared
+    // tank it is a real choice, because the gas you dash with is the gas you do
+    // not hover, slam or super-dash with.
+    gas: 25,
+  },
+
+  // Z. A dash, and every word of that is load-bearing: same state, same cancels,
+  // same tech, so everything you already know about a dash is still true. What is
+  // different is the size of it, and one clamp being off.
+  //
+  // The regular dash exits capped — `momentum.hardCap` horizontally and
+  // `jump.speed` vertically — because a dash is a REPOSITION and letting one
+  // launch you would make every other verb optional. This one is the launch. It
+  // exits at its own ceiling with the vertical clamp lifted, which is the whole
+  // difference: aim at the sky, press Z, and you leave with enough height to
+  // deploy the wing and go somewhere.
+  //
+  // Its own group, and its own `enabled`, deliberately: the shipped tune has
+  // `dash.enabled` false (Shift is sprint there), and a launch that quietly
+  // vanished with the dash would be a bug nobody could find.
+  superdash: {
+    enabled: true,
+    speed: 70,          // during the launch window
+    duration: 0.34,     // → ~24m of travel, before gravity gets a say
+    cooldown: 1.6,
+    gravityScale: 0,    // floaty for the window, like the dash. 1 = full weight
+    // Exit speed as a fraction of `speed`, and NOT clamped to hardCap or
+    // jump.speed. 70 x 0.85 = 59 m/s straight up, which is another ~49m of
+    // coasting on top of the 24 above — call it 70m of altitude from flat ground.
+    exitKeep: 0.85,
+    maxSpeed: 92,       // the one ceiling it does respect
+    /**
+     * How much of the camera pitch the launch honours, 0..1.
+     *
+     * At 1 the direction is spherical rather than the dash's tilted horizontal:
+     * the stick sets the compass bearing, the pitch sets the elevation, and
+     * aiming straight up goes straight up no matter what the stick says. Which
+     * is what "aim at the sky and press Z" has to mean.
+     */
+    aim: 1,
+    gas: 55,            // two per tank, and you cannot chain them. That is the cost
   },
 
   slide: {
@@ -98,6 +146,10 @@ export const T = {
     // ledge): boost on exit, then the coyote jump converts it. 0 = off.
     ledgeBoost: 0,      // flat speed added when a slide leaves a ledge
     ledgeDrop: 0,       // downward kick at the same moment — the fast GR drop
+    // Gas, on entry only. A slide is charged for the BOOST, not for the time:
+    // billing it per second would mean the longest slide — the one down a ramp
+    // that you set up for — is the one that costs most, which is backwards.
+    gas: 8,
   },
 
   wall: {
@@ -128,6 +180,10 @@ export const T = {
     refillJumps: true,
     refillDash: true,
     stickAssist: 14,      // pull toward the wall, keeps you glued through corners
+    // Gas for the EJECTION, and nothing for the run. Wallrunning is running —
+    // it is free by the same rule the ground is — but the kick off the wall is
+    // an impulse the size of a jump and is priced like one.
+    gasJump: 8,
   },
 
   bhop: {
@@ -436,12 +492,6 @@ export const T = {
     pullStagger: 1.2,   // seconds a hooked target can't shoot
   },
 
-  stamina: {
-    max: 100,
-    regen: 30,          // per second
-    dashCost: 25,       // dashing is gated on this, not just charges
-  },
-
   thruster: {
     // Hover jets on the jump button. Still not flight — the tank is short and
     // `maxRise` caps the climb — but responsive: the first pass felt like wading
@@ -450,7 +500,7 @@ export const T = {
     // it is the first knob to reach for if the jets ever feel heavy again.
     enabled: true,
     // Hold jump once your jumps are spent (jump, double jump, then hold). With
-    // this off the jets light on any held jump, which eats fuel on every hop.
+    // this off the jets light on any held jump, which eats gas on every hop.
     requireEmptyJumps: true,
     thrust: 62,         // upward accel while burning — snappy enough to kill a fall
     maxRise: 5,         // vertical speed ceiling under thrust — this is the knob
@@ -468,7 +518,7 @@ export const T = {
     gasCap: 38,         // ceiling the gas alone reaches — swing for more than this
     // --- afterburner: hold the dash key WHILE the jets are lit. The hover is for
     // holding a position and shooting; this is for crossing the arena. It costs
-    // multiples of the fuel, which is the only thing stopping it being the answer
+    // multiples of the gas, which is the only thing stopping it being the answer
     // to everything. Point and go: the stick if you're steering it, otherwise
     // wherever you're looking, pitch included.
     boost: true,
@@ -476,14 +526,115 @@ export const T = {
     boostCap: 34,       // horizontal ceiling under boost — THE ironman number
     boostRise: 13,      // vertical ceiling under boost (replaces maxRise while lit)
     boostAim: 1,        // how much camera pitch tilts the boost; 0 = flat only
-    boostBurn: 2.4,     // fuel burn multiplier while boosting
+    boostBurn: 2.4,     // gas burn multiplier while boosting
     boostDrag: 0.12,    // near-zero damping — a burn keeps what it builds
-    fuelMax: 120,
-    burnRate: 42,       // fuel/sec while burning
-    refuelRate: 40,     // fuel/sec once refuelling starts
-    refuelDelay: 0.35,  // seconds after releasing before refuel starts
+    burnRate: 42,       // gas/sec while burning
+  },
+
+  gas: {
+    // THE movement resource. One tank, and everything in the kit that is not
+    // running, gliding or roping draws on it: jumps, dashes, slides, slams, wall
+    // jumps, the jets.
+    //
+    // It used to be two pools — stamina for the dash, fuel for the jets — kept
+    // apart on the theory that hovering must never cost you a dash. Which was
+    // true, and also why neither pool ever meant anything: a resource that gates
+    // exactly one verb is that verb's cooldown wearing a bar. One tank makes the
+    // whole kit a budget you spend, and every cost below is an exchange rate
+    // between two verbs rather than a number in isolation.
+    //
+    // The COSTS are not here. They live with the move that pays them —
+    // `dash.gas`, `jump.gas`, `slam.gas` — because that is where you are looking
+    // when you want to know what a move is worth. This group is only the tank.
+    max: 120,
+    refuelRate: 40,     // gas/sec once refuelling starts
+    refuelDelay: 0.35,  // seconds after the last SPEND before refuel starts
     groundRefuel: 2.5,  // refuel multiplier while grounded — landing tops you up
-    restartFuel: 20,    // fuel needed to re-ignite after running the tank dry
+    // Gas needed to re-light the JETS after burning the tank dry. Only the jets:
+    // running the tank out is meant to cost you the thing that emptied it, and a
+    // lockout that also took your jump would strand you on a rooftop.
+    restart: 20,
+  },
+
+  wing: {
+    // The wingsuit. X in the air, press again to stow it, and it is a MODE
+    // rather than a move: everything else here is something you do for a moment,
+    // this is something you are until you stop.
+    //
+    // Three terms, each doing exactly one job, and between them they produce the
+    // trade the verb exists for without a line of code that mentions it:
+    //
+    //   gravity  acts on the velocity VECTOR. Along the path it is the speed you
+    //            gain diving and pay climbing; across the path it bends you down
+    //            whatever you are aiming at.
+    //   lift     the only thing that fights that bend, and your hand is on it:
+    //            the velocity swings toward where you look. Across the path, so
+    //            it changes direction and never speed — free, which is why a
+    //            dive can be spent on a climb.
+    //   drag     along the path, and the only irreversible term in here. It sets
+    //            the terminal dive and it is what stops dive-and-climb being a
+    //            closed loop you could pump for height.
+    enabled: true,
+    /**
+     * The suit's OWN gravity, and much lighter than the world's.
+     *
+     * `world.gravityFall` is 62 — about six times real, and correctly so: it is
+     * tuned to make a two-metre jump feel snappy. Flying under it is a different
+     * question, and the first version of this used it: a 66 m/s dive bought
+     * sixteen metres of climb, because at 62 m/s² a climb costs more than it can
+     * ever be worth. Which is not "momentum based", it is falling with a cape.
+     *
+     * A wing HOLDS some of your weight. This number is what is left over, and
+     * dropping it to 24 turns the same dive into sixty metres of climb — the
+     * trade is still exact, it is just worth making.
+     */
+    gravity: 24,
+    /**
+     * How hard the wing bites, in rad/s of path rotation per m/s of speed.
+     *
+     * Per m/s, not a constant — that is the whole of it. Lift goes as v², so the
+     * rate it can bend a path goes as v²/v, which is v. So one number gives both
+     * halves of how a wing behaves: fast is agile and slow is floppy.
+     *
+     * It also sets the stall outright. Gravity bends the path down at g/v, lift
+     * bends it up at lift·v, so level flight is sustainable exactly above
+     * sqrt(gravity / lift) — 26 m/s here, which is well past a run and inside
+     * what a dash reaches. Below it the nose falls whatever you do.
+     */
+    lift: 0.036,
+    turnMax: 3.2,       // ceiling on that rate, so terminal is not twitchy
+    /**
+     * Along-path drag, and the third leg of the tripod. THREE numbers set four
+     * things you can feel, and every one of them is one line of arithmetic —
+     * which is the only reason this is tunable rather than fiddled with:
+     *
+     *   terminal dive   sqrt(gravity / drag)     68 m/s
+     *   stall           sqrt(gravity / lift)     26 m/s
+     *   glide ratio     lift / drag              6.9 : 1
+     *   agility at v    lift * v                 2.9 rad/s at terminal
+     *
+     * The glide ratio is the one to watch, because it decides how much of the
+     * map one rooftop is worth. At the 9.7:1 this started on, a 30 m roof
+     * carried you 290 m — the whole district, in one press, which takes the
+     * traversal out of a traversal game. Just under seven crosses 180 m: still
+     * further than any other verb here can reach, and still a choice about which
+     * way to go.
+     */
+    drag: 0.0052,
+    maxSpeed: 96,       // hard ceiling, so a long dive cannot outrun collision
+    // A dash drops you out of the suit rather than trapping you in it. Off means
+    // X and the ground are the only ways out.
+    cancelOnDash: true,
+    // --- with the jets lit, the glide becomes flight. The suit already points
+    // where you look, so the jets do not steer, they only push — which is what
+    // makes the pair read as one thing rather than a hover with a cape on.
+    jetAccel: 50,       // accel along the aim while the jets burn
+    jetCap: 78,         // ceiling under jets
+    jetBurn: 1.35,      // gas multiplier against an ordinary hover
+    // --- the look of it. The body lies along its flight path; these two say how
+    // far out of it the shoulders sit, and how hard it banks into a turn.
+    lean: 0.16,         // radians of nose-up out of the flight path
+    roll: 2.2,          // radians of bank per rad/s of turn, clamped to a right angle
   },
 
   crosshair: {
@@ -522,8 +673,11 @@ export const T = {
   },
 
   meters: {
-    // Four flat bars stacked in the top-right corner: fuel, stamina, sword,
-    // getsuga. They used to be big arcs flanking the crosshair, which put them
+    // Three flat bars stacked in the top-right corner: gas, sword, getsuga.
+    // There were four — stamina sat between gas and the sword — and it went with
+    // the pool it was reading. A bar that is always full is not information.
+    //
+    // They used to be big arcs flanking the crosshair, which put them
     // in the one place you are always looking. A resource meter is a thing you
     // GLANCE at — it belongs in a corner, small and quiet, and readable by the
     // colour that moved rather than by the number.
@@ -591,6 +745,11 @@ export const T = {
     push: 6,            // forward speed held through the hop, so you land ON it
     hold: 0.35,         // seconds that push is re-asserted while you rise
     cooldown: 0.2,      // no second vault until this expires
+    // Zero, and here so you can change your mind rather than because it is a
+    // knob worth turning. Nothing is bound to a vault — it fires off the ledge
+    // itself — so a cost on it is the level geometry billing you, and an empty
+    // tank would turn a lip you have cleared a hundred times into a wall.
+    gas: 0,
   },
 
   // C in the air: stop everything and go straight down. It is an escape and a
@@ -607,6 +766,21 @@ export const T = {
     minHeight: 2.5,     // metres of clear air needed under you before C will slam
     boostTime: 1.1,     // seconds after landing that dashes come out harder
     dashBoost: 1.3,     // x dash speed inside that window
+    // It used to cost nothing, and the comment above said so as a virtue. Against
+    // one shared tank "free" is not neutral: a free reset is the answer to every
+    // situation, and the landing window it hands you is worth paying for.
+    gas: 10,
+  },
+
+  // Not tuning — a switchboard, and the last folder in the panel because that is
+  // where you go looking for one. It lives in T because the panel is generated
+  // from the shape of T, so a flag here is a checkbox with no edit to panel.ts.
+  //
+  // Deliberately NOT persisted, unlike every other group: see panel.ts. A cheat
+  // that survives a reload is a cheat you forget is on, and then a tuning session
+  // spent wondering why the tank never moves.
+  cheats: {
+    infiniteGas: false,
   },
 
   character: {
@@ -617,6 +791,204 @@ export const T = {
     maxSlopeAngle: 0.87,  // ~50deg, above this counts as a wall
     stepHeight: 0.35,
     snapToGround: 0.3,
+  },
+
+  // --- SOUND. Three groups, shown together under one `sounds` folder in the
+  // panel. Split because they are three different jobs: which clip, how loud,
+  // and how the clips behave against each other. Engine in engine/audio.ts.
+
+  /**
+   * Which file in assets/odm-sounds-ref/ fires for each move. The panel turns
+   * every one of these into a dropdown of the clips actually on disk.
+   *
+   * Two kinds of default below. The ones whose clip is NAMED for the move
+   * (jump, dash, land, slide, the wingsuit and hook files) are just that file.
+   * The rest are a guess, because there is no clip on disk for them yet - they
+   * borrow the nearest verb and are marked. Assigning one clip to several moves
+   * is fine and several of these do it.
+   *
+   * Empty string = that move is silent.
+   */
+  soundAssign: {
+    jump: 'jump',
+    doubleJump: 'jump',                     // guess: no second-jump clip yet
+    wallJump: 'jump',                       // guess
+    wallRun: '',                            // no clip for it yet
+    dash: 'dash',
+    superDash: 'dash',                      // guess: the same verb, spent harder
+    slide: 'slide',
+    // Silent by default. It fires ON a landing, so anything here plays on top of
+    // `land` - which is either a nice accent or a doubled thud, and that is a
+    // decision for ears rather than a default.
+    bhop: '',
+    slam: 'dash',                           // guess: gas fired downward
+    land: 'land',
+    vault: 'slide-2',                       // guess: scrape over a lip
+    // This clip is the shot AND the bite, so `hookHit` stays silent under it or
+    // the anchor lands twice. Switch this to 'shoot-hook' and hookHit to
+    // 'hit-hook' if you want the two halves separately.
+    hookFire: 'hook-shoots-and-attaches',
+    hookHit: '',
+    hookRelease: 'pull-rope-2',             // guess
+    wingDeploy: 'deploy-wingsuit',
+    // Held while a key is down. These get rebuilt into seamless loops on load -
+    // see `soundFlow.loopXfade`.
+    thruster: 'wingsuit-loop',              // guess: no jet loop yet
+    wingsuit: 'wingsuit-loop',
+    reel: 'pull-rope-loop',
+  },
+
+  /**
+   * Per-move gain, x the bus. The clips came off footage at wildly different
+   * levels (peaks run 0.06 to 0.61), so this is the first thing to reach for
+   * when one verb is burying another - it is a straight multiplier and 0 mutes.
+   */
+  soundLevel: {
+    jump: 1,
+    doubleJump: 1,
+    wallJump: 1,
+    wallRun: 1,
+    dash: 1,
+    superDash: 1,
+    slide: 0.8,
+    bhop: 0.5,          // fires on every clean landing in a streak; keep it under
+    slam: 1,
+    land: 1,
+    vault: 0.9,
+    hookFire: 1,
+    hookHit: 0.8,
+    hookRelease: 0.7,
+    wingDeploy: 1,
+    thruster: 0.6,      // beds play UNDER everything, for as long as they are held
+    wingsuit: 0.6,
+    reel: 0.5,
+  },
+
+  /**
+   * How the clips behave against each other. Moves here cancel into each other,
+   * so several are live at any instant - these are the five mechanisms that keep
+   * that legible, and they are sliders because the right values are a matter of
+   * taste and cannot be settled from outside the game.
+   */
+  soundFlow: {
+    enabled: true,
+    master: 0.8,
+    oneShot: 1,         // bus gain for the fired verbs
+    loops: 1,           // bus gain for the held beds
+    // Held clips are one-shot recordings, not loop material. This is how much of
+    // the tail is folded back over the head to make the join continuous; too
+    // little ticks once a pass, too much eats the clip.
+    loopXfade: 0.25,
+    loopFade: 0.12,     // ease in/out when a mode starts and stops
+    // A loud verb dips the beds so it reads through them. 0 = off.
+    duck: 0.45,
+    duckTime: 0.28,
+    // Floor on how often one slot may refire. Stops a spammed verb machine-gunning.
+    retrigger: 0.06,
+    // Refiring a slot fades the copy already playing over this rather than
+    // stacking on top of it.
+    cancelFade: 0.05,
+    // Random detune per shot, so a repeated verb is not obviously one sample.
+    pitchVary: 0.04,
+    // Landing volume tracks impact speed rather than being flat.
+    landScale: true,
+    landFullSpeed: 26,  // downward m/s that counts as a full-volume landing
+  },
+
+  // --- STYLE. Three groups, shown together under one `style` folder. Engine in
+  // engine/style.ts, and the reasoning for the whole mechanism is at the top of
+  // that file rather than repeated here.
+
+  /**
+   * The meter itself. Everything here is global; the per-move numbers are in the
+   * two groups below.
+   */
+  style: {
+    enabled: true,
+    show: true,           // the on-screen meter. Off = the scoring still runs
+    max: 1000,
+    // Points a second, once `grace` has lapsed. This is the whole pressure: it
+    // never stops, so anything that stops paying starts costing.
+    drain: 34,
+    grace: 1.1,           // seconds after a paying move before the drain starts
+    drainRamp: 1.4,       // seconds for the drain to reach full. 0 = instant
+    /**
+     * Repetition heat cooled per second. THE dial for how repetitive the game
+     * lets you be: high means a move is fresh again almost immediately and the
+     * meter stops asking for variety, low means you must range widely to hold a
+     * rank. One use adds exactly 1 heat, so this is "uses per second forgiven".
+     */
+    cool: 0.55,
+    /**
+     * Payout fraction below which a move stops counting as activity at all. A
+     * move this stale still adds its scraps to the score but no longer holds the
+     * drain off — which is what turns spamming from a plateau into a decline.
+     */
+    stallAt: 0.34,
+    hitPenalty: 120,      // docked when something hits you
+    // Rank thresholds in points. D is deliberately not 0: there is a warm-up
+    // before the meter appears at all, so opening a run does not flash a rank.
+    rankD: 60,
+    rankC: 170,
+    rankB: 320,
+    rankA: 500,
+    rankS: 680,
+    rankSS: 830,
+    rankSSS: 950,
+  },
+
+  /**
+   * Points each move is worth at full freshness. Roughly scaled by how hard the
+   * move is to produce deliberately — a landing is not an achievement, a super
+   * dash into a hook is.
+   *
+   * 0 means the move does not score. `land` and `hookHit` sit there on purpose:
+   * landing is the END of a flow rather than a move, and hookHit fires on the
+   * same frame as hookFire, so scoring both would pay twice for one press.
+   */
+  styleValue: {
+    jump: 6,
+    doubleJump: 14,
+    wallJump: 30,
+    wallRun: 26,
+    dash: 20,
+    superDash: 46,
+    slide: 18,
+    bhop: 34,           // a clean rehop is the hardest thing on this list
+    slam: 28,
+    land: 0,
+    vault: 30,
+    hookFire: 24,
+    hookHit: 0,
+    hookRelease: 16,
+    wingDeploy: 30,
+  },
+
+  /**
+   * How many times in a row a move pays before it is worth nothing, at full
+   * value. Low = gets stale fast and you must move on; high = you can lean on it.
+   *
+   * Heat cools at `style.cool` per second, so this is not a hard budget — it is
+   * how deep the well is before you have to let it refill. The cheap, spammable
+   * verbs sit low and the committed ones sit higher, because a move that costs
+   * half a tank is self-limiting already.
+   */
+  styleSpam: {
+    jump: 3,
+    doubleJump: 4,
+    wallJump: 5,
+    wallRun: 4,
+    dash: 4,
+    superDash: 3,
+    slide: 3,
+    bhop: 8,            // the one thing worth doing over and over
+    slam: 3,
+    land: 1,
+    vault: 4,
+    hookFire: 5,
+    hookHit: 1,
+    hookRelease: 5,
+    wingDeploy: 3,
   },
 };
 
@@ -691,7 +1063,6 @@ export const META: Record<string, { min?: number; max?: number; step?: number; d
   'sword/arc': { min: 0.3, max: 3.14, step: 0.02, doc: 'Frontal cone width, radians.' },
   'sword/combo': { min: 1, max: 6, step: 1 },
   'sword/reflectSpeed': { min: 0.5, max: 4, step: 0.05 },
-  'stamina/dashCost': { min: 0, max: 100, step: 1, doc: '0 = dashing is free again.' },
   'grapple/range': { min: 5, max: 200, step: 1, doc: 'How far the hooks reach.' },
   'grapple/spread': { min: 0, max: 0.4, step: 0.005, doc: 'How far apart the two anchors land. 0 = both on one point.' },
   'grapple/minLen': { min: 0.5, max: 12, step: 0.1, doc: 'Arrive this close and it lets go.' },
@@ -735,6 +1106,16 @@ export const META: Record<string, { min?: number; max?: number; step?: number; d
   'shotgun/projDrop': { min: 0, max: 80, step: 0.5 },
   'shotgun/projSize': { min: 0.03, max: 0.6, step: 0.01 },
   'shotgun/damage': { min: 0, max: 2, step: 0.05, doc: 'Per pellet, x the shared head/body damage.' },
+  'wing/gravity': { min: 4, max: 62, step: 0.5, doc: "The suit's own gravity. Lower = a climb is worth making." },
+  'wing/lift': { min: 0.004, max: 0.2, step: 0.001, doc: 'rad/s of turn per m/s of speed. Stall = sqrt(gravity/lift). THE wingsuit knob.' },
+  'wing/turnMax': { min: 0.5, max: 8, step: 0.05, doc: 'Ceiling on the turn rate, so terminal is not twitchy.' },
+  'wing/drag': { min: 0.0005, max: 0.03, step: 0.0002, doc: 'Along-path drag. Terminal dive = sqrt(gravity/drag).' },
+  'wing/maxSpeed': { min: 20, max: 160, step: 1 },
+  'wing/jetAccel': { min: 0, max: 200, step: 1, doc: 'Accel along the aim with the jets lit.' },
+  'wing/jetCap': { min: 10, max: 160, step: 1 },
+  'wing/jetBurn': { min: 0.2, max: 4, step: 0.05 },
+  'wing/lean': { min: -0.8, max: 0.8, step: 0.01, doc: 'Radians of nose-up out of the flight path. Visual only.' },
+  'wing/roll': { min: 0, max: 6, step: 0.05, doc: 'Bank per rad/s of turn. Visual only.' },
   'thruster/thrust': { min: 0, max: 150, step: 1, doc: 'Upward accel while burning.' },
   'thruster/maxRise': { min: 0, max: 25, step: 0.5, doc: 'Vertical ceiling under thrust.' },
   'thruster/gravityScale': { min: 0, max: 1, step: 0.01, doc: '0 = weightless hover, 1 = full gravity.' },
@@ -745,17 +1126,35 @@ export const META: Record<string, { min?: number; max?: number; step?: number; d
   'thruster/boostCap': { min: 0, max: 70, step: 0.5, doc: 'Horizontal ceiling under boost.' },
   'thruster/boostRise': { min: 0, max: 40, step: 0.5, doc: 'Vertical ceiling under boost.' },
   'thruster/boostAim': { min: 0, max: 1.5, step: 0.01, doc: '1 = the burn goes exactly where you look.' },
-  'thruster/boostBurn': { min: 1, max: 8, step: 0.1, doc: 'Fuel multiplier. This is the only cost.' },
   'thruster/boostDrag': { min: 0, max: 6, step: 0.02 },
   'thruster/hoverDrag': { min: 0, max: 12, step: 0.1, doc: 'Horizontal damping. 0 = you fly away.' },
   'thruster/gasAccel': { min: 0, max: 250, step: 5, doc: 'Jet accel while on a cable. The ODM burst.' },
   'thruster/gasCap': { min: 5, max: 60, step: 1, doc: 'Ceiling the gas alone reaches. Swing to beat it.' },
-  'thruster/fuelMax': { min: 10, max: 300, step: 5 },
-  'thruster/burnRate': { min: 1, max: 150, step: 1, doc: 'Fuel/sec. fuelMax / this = hover seconds.' },
-  'thruster/refuelRate': { min: 1, max: 150, step: 1 },
-  'thruster/refuelDelay': { min: 0, max: 3, step: 0.05 },
-  'thruster/groundRefuel': { min: 1, max: 6, step: 0.1, doc: 'Refuel multiplier while grounded.' },
-  'thruster/restartFuel': { min: 0, max: 100, step: 1, doc: 'Fuel needed to re-ignite after running dry.' },
+  'thruster/burnRate': { min: 1, max: 150, step: 1, doc: 'Gas/sec while hovering. gas.max / this = hover seconds.' },
+  'thruster/boostBurn': { min: 1, max: 8, step: 0.1, doc: 'Gas multiplier while the burner is lit.' },
+
+  // --- the tank, and the price list. Every cost is in the same units, so these
+  // sliders read against each other: gas.max / dash.gas is how many dashes.
+  'gas/max': { min: 10, max: 300, step: 5, doc: 'The tank. Every cost below is in these units.' },
+  'gas/refuelRate': { min: 1, max: 150, step: 1 },
+  'gas/refuelDelay': { min: 0, max: 3, step: 0.05, doc: 'Seconds after the last spend before refuel starts.' },
+  'gas/groundRefuel': { min: 1, max: 6, step: 0.1, doc: 'Refuel multiplier while grounded.' },
+  'gas/restart': { min: 0, max: 100, step: 1, doc: 'Gas needed to re-light the JETS after running dry.' },
+  'jump/gas': { min: 0, max: 60, step: 1, doc: 'Gas for a jump off the ground. 0 = walking is untaxed.' },
+  'jump/gasAir': { min: 0, max: 60, step: 1, doc: 'Gas for the double jump.' },
+  'dash/gas': { min: 0, max: 120, step: 1, doc: 'Gas per dash. gas.max / this = dashes on a tank.' },
+  'slide/gas': { min: 0, max: 60, step: 1, doc: 'Gas to enter a slide. Charged once, not per second.' },
+  'wall/gasJump': { min: 0, max: 60, step: 1, doc: 'Gas to kick off a wall. The run itself is free.' },
+  'vault/gas': { min: 0, max: 40, step: 1, doc: 'Gas per vault. Leave at 0 — nothing is bound to it.' },
+  'slam/gas': { min: 0, max: 60, step: 1, doc: 'Gas per slam.' },
+  'superdash/speed': { min: 20, max: 140, step: 1, doc: 'Speed held through the launch window.' },
+  'superdash/duration': { min: 0.05, max: 1, step: 0.01 },
+  'superdash/cooldown': { min: 0, max: 8, step: 0.05 },
+  'superdash/gravityScale': { min: 0, max: 1, step: 0.01, doc: '0 = floaty through the window, like a dash.' },
+  'superdash/exitKeep': { min: 0, max: 1.5, step: 0.01, doc: 'Fraction of speed kept on exit. NOT clamped to hardCap.' },
+  'superdash/maxSpeed': { min: 20, max: 160, step: 1, doc: 'The one ceiling the launch respects.' },
+  'superdash/aim': { min: 0, max: 1, step: 0.01, doc: '1 = straight up when you look straight up. THE super-dash knob.' },
+  'superdash/gas': { min: 0, max: 120, step: 1, doc: 'Gas per launch. gas.max / this = launches on a tank.' },
   'crosshair/spreadScale': { min: 0, max: 800, step: 10, doc: 'Px of bloom per radian of the equipped gun spread.' },
   'weapon/adsFov': { min: -60, max: 0, step: 1, doc: 'The whole scope: an FOV pull, no overlay.' },
   'weapon/adsSensScale': { min: 0.1, max: 1, step: 0.01 },
@@ -848,7 +1247,49 @@ export const META: Record<string, { min?: number; max?: number; step?: number; d
   'slam/minHeight': { min: 0, max: 20, step: 0.5, doc: 'Clear air needed under you before C will slam.' },
   'slam/boostTime': { min: 0, max: 4, step: 0.05, doc: 'Seconds of stronger dashes after landing.' },
   'slam/dashBoost': { min: 1, max: 3, step: 0.05, doc: 'x dash speed inside that window.' },
+
+  // --- sound. Every soundLevel/* entry gets the same 0..2 range from the loop
+  // below this table, so only the flow params need spelling out.
+  'soundFlow/master': { min: 0, max: 1.5, step: 0.01, doc: 'Everything, after the two buses.' },
+  'soundFlow/oneShot': { min: 0, max: 2, step: 0.01, doc: 'Bus gain for the fired verbs.' },
+  'soundFlow/loops': { min: 0, max: 2, step: 0.01, doc: 'Bus gain for the held beds.' },
+  'soundFlow/loopXfade': { min: 0.02, max: 1, step: 0.01, doc: 'Tail folded back over the head to make a held clip loop cleanly. Too little ticks once a pass.' },
+  'soundFlow/loopFade': { min: 0, max: 0.6, step: 0.01, doc: 'Ease in/out when a held mode starts and stops.' },
+  'soundFlow/duck': { min: 0, max: 1, step: 0.01, doc: 'How far a loud verb dips the beds. 0 = off.' },
+  'soundFlow/duckTime': { min: 0.02, max: 1.2, step: 0.01, doc: 'How long the beds take to come back.' },
+  'soundFlow/retrigger': { min: 0, max: 0.5, step: 0.005, doc: 'Floor on how often one slot may refire.' },
+  'soundFlow/cancelFade': { min: 0.005, max: 0.4, step: 0.005, doc: 'Fade applied to the copy already playing when a slot refires.' },
+  'soundFlow/pitchVary': { min: 0, max: 0.25, step: 0.005, doc: 'Random detune per shot. Past a few per cent it sounds broken.' },
+  'soundFlow/landFullSpeed': { min: 4, max: 80, step: 1, doc: 'Downward m/s that counts as a full-volume landing.' },
 };
+
+// Per-move gain is always the same dial, so the entries are generated rather
+// than typed out seventeen times - and they cannot drift out of sync with the
+// group when a move is added.
+for (const key of Object.keys(T.soundLevel)) {
+  META[`soundLevel/${key}`] = { min: 0, max: 2, step: 0.01, doc: 'x the bus. 0 mutes this move.' };
+}
+
+// --- style. The two per-move groups are one dial each, so they are generated
+// for the same reason as soundLevel above.
+Object.assign(META, {
+  'style/max': { min: 100, max: 5000, step: 50, doc: 'Score ceiling. Rank thresholds are absolute, so raising this alone just adds headroom above SSS.' },
+  'style/drain': { min: 0, max: 200, step: 1, doc: 'Points lost per second once grace lapses. THE pressure — raise it to make the meter demand more.' },
+  'style/grace': { min: 0, max: 5, step: 0.05, doc: 'Seconds after a paying move before the drain starts.' },
+  'style/drainRamp': { min: 0, max: 4, step: 0.05, doc: 'Seconds for the drain to reach full. 0 = it switches on hard.' },
+  'style/cool': { min: 0.05, max: 4, step: 0.05, doc: 'Repetition heat cooled per second. One use = 1 heat, so this is uses-per-second forgiven. High = repetition is fine, low = keep moving.' },
+  'style/stallAt': { min: 0, max: 1, step: 0.01, doc: 'Payout fraction below which a move stops holding the drain off. This is what turns spamming into a decline rather than a plateau.' },
+  'style/hitPenalty': { min: 0, max: 600, step: 10, doc: 'Points docked when something hits you.' },
+});
+for (const key of ['rankD', 'rankC', 'rankB', 'rankA', 'rankS', 'rankSS', 'rankSSS']) {
+  META[`style/${key}`] = { min: 0, max: 2000, step: 10, doc: 'Points needed for this rank.' };
+}
+for (const key of Object.keys(T.styleValue)) {
+  META[`styleValue/${key}`] = { min: 0, max: 120, step: 1, doc: 'Points at full freshness. 0 = does not score.' };
+}
+for (const key of Object.keys(T.styleSpam)) {
+  META[`styleSpam/${key}`] = { min: 1, max: 20, step: 1, doc: 'Uses in a row before this move pays nothing. Low = goes stale fast.' };
+}
 
 /**
  * The built-in defaults, captured before any saved profile is applied. Without this

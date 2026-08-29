@@ -24,7 +24,7 @@
 //   the gaps      two holes in the road with a gantry overhead. Grapple across,
 //                 or gas across; the road will not carry you
 //   the spiral    thruster pads ~11m apart, which is inside one tank
-//                 (thruster.fuelMax / burnRate = 2.86s of hover, ~14m of climb),
+//                 (gas.max / thruster.burnRate = 2.86s of hover, ~14m of climb),
 //                 with ground between them to top up
 //
 // Everything is generated from the path, so the whole track is a handful of
@@ -537,7 +537,7 @@ for (const [ox, oz, yaw] of [[28, 23, 2.44], [14, 23, 2.44]] as const) {
 }
 
 // --- the thruster spiral -----------------------------------------------------
-// Pads climbing around the low crossing, each hop inside one tank — fuelMax /
+// Pads climbing around the low crossing, each hop inside one tank — gas.max /
 // burnRate is 2.86s of hover and maxRise is 5 u/s, so a tank buys about 14m of
 // climb and the steps are 10.5m. Solid ground at every one, because groundRefuel
 // makes "land, top up, go again" the loop rather than hanging in the air waiting.

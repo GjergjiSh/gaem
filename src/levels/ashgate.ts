@@ -54,13 +54,15 @@
 //                 the 16 m roof arrives in three stages. Those landings are why
 //                 this is a feature and not a gate: miss the timing and you
 //                 land on one, not in the street.
-//   the Line      ~1200 m of elevated deck over every wide avenue in the
-//                 district — two legs north–south, two east–west, four
-//                 junctions — falling from 38 m at the north-east end to 5 m at
-//                 the south-west. Long runs at 2.5–3° keep the speed you
-//                 arrive with; three pitches at 8, 12 and 17.5° are where it is
-//                 found, and those are the marked ones. Every gap in it is a
-//                 jump priced at one of the tiers.
+//   the Line      ~2200 m of elevated deck, and it runs the RIM: a closed loop
+//                 round the outside of the district, out on the pavement
+//                 between the last blocks and the plate's edge, climbing from
+//                 20 m at the west end to 44 at the east. Two chords cross the
+//                 middle — down the north–south avenues at x = ±72 — and only
+//                 two, so a lap is either round the edge or a figure across the
+//                 centre. Long runs at 2.5–3° keep the speed you arrive with;
+//                 the pitches at 8, 14 and 16° are where it is found. Every gap
+//                 in it is a jump priced at one of the tiers.
 //   the Spire     76 m. Balconies one thruster tank apart on three faces, a
 //                 shaft up the fourth — the full-depth gap between the tower
 //                 and its service core — and masts on top for the grapple.
@@ -173,7 +175,7 @@ export const GAP = {
 };
 
 /** One thruster tank, in metres of climb. Sets the Spire's balcony spacing. */
-const TANK = (D.thruster.fuelMax / D.thruster.burnRate) * D.thruster.maxRise;
+const TANK = (D.gas.max / D.thruster.burnRate) * D.thruster.maxRise;
 
 /**
  * How far a wall jump ACTUALLY carries you sideways before you are back at the
@@ -259,6 +261,14 @@ const ACCENT = [
   0x6f8fd6,   // periwinkle
 ];
 
+/**
+ * What a billboard on the backdrop is painted. The warm end of ACCENT and the
+ * two greens, and NOT the periwinkle: a sign is an emissive surface, and a cool
+ * emissive at three hundred metres tone-maps to flat white — which against a
+ * dusk sky does not read as a lit sign, it reads as a hole in the building.
+ */
+const SIGN_C = [0xe86a6a, 0xd94f7a, 0xd6d05f, 0x74c07a, 0x2e8f6f];
+
 /** Window light, warm — the common one, because most of this place is offices. */
 const LIT_WARM = 0xffb765;
 /** Window light, cold. A few buildings on a different shift. */
@@ -306,6 +316,15 @@ const S_MASS2 = 'facade2';
 /** The footway every building stands on, which is what makes the road a road. */
 const S_PAVING = 'paving';
 const S_DECK = 'deck';
+/**
+ * The top of a building, which is NOT the same thing as a catwalk.
+ *
+ * Both were `deck` — poured concrete — and on the white district that made
+ * every rooftop the brightest surface in the frame and fifty of them read as
+ * fifty blank lids. A roof is loose stone ballast; a catwalk is a steel tread.
+ * They are two materials and they get two names.
+ */
+const S_ROOF = 'roofdeck';
 const S_TRIM = 'trim';
 const S_PLINTH = 'plinth';
 const S_ROAD = 'road';
@@ -317,6 +336,14 @@ const S_MARKED = 'marked';
 const S_LAMP = 'lamp';
 /** Colour that keeps reading when the sun cannot reach it — see surfaces.ts. */
 const S_PAINT = 'paint';
+/**
+ * Road markings. Its own surface rather than `paint`, because `paint` is in
+ * `LIT_SURFACES` — it is the map's language for "this thing glows" — and a lane
+ * line is not a light. It also has to stay recognisable through both
+ * derivations, which is what `RAW_SRC` is for: the greybox flattens it with
+ * everything else, and cyberedge picks it back out by name and paints it yellow.
+ */
+const S_LANE = 'lane';
 
 const HALF_PI = Math.PI / 2;
 
@@ -524,6 +551,29 @@ function ramp(
   const brush = m ? skinned(p, [w, thick, len], c, m, q) : box(p, [w, thick, len], c, q, t);
   RAMP_BRUSHES.push(brushes.length - 1);
   return { yaw, climb, len, q, brush };
+}
+
+/**
+ * A steel member: one box laid along the line from `a` to `b`, centred on it.
+ *
+ * `ramp` puts its TOP SURFACE on the line, because a ramp is a floor and a floor
+ * belongs where you asked for it. A truss member is not a floor, it is a stick
+ * between two joints, and it belongs ON the line rather than under it — so these
+ * are two functions instead of one with a flag, and neither has to explain
+ * itself at the call site.
+ *
+ * Square section, because every member of a lattice is the same section turned a
+ * different way, and a rectangular one would need a roll angle to say which way.
+ */
+function member(a: P3, b: P3, w: number, c: number, t?: string) {
+  const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
+  const flat = Math.hypot(dx, dz);
+  const len = Math.hypot(flat, dy);
+  // A joint that lands on top of another joint is not a member. Rounding in a
+  // profile can produce one, and a 2 cm box is a brush the verifier rejects.
+  if (len < 0.4) return;
+  box([(a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2], [w, w, len], c,
+    orient(Math.atan2(dx, dz), -Math.atan2(dy, flat)), t);
 }
 
 /** A prop standing on `y`, at the model's own size. */
@@ -806,7 +856,7 @@ function mass(cx: number, cz: number, w: number, d: number, top: number): Roof {
   // above you can tell which roof belongs to which building, which is the one
   // view where this map is read as a plan.
   box([cx, top - DECK_T / 2, cz], [w, DECK_T, d], shade(mix(DECK, tint, 0.42), 0.94),
-    undefined, S_DECK);
+    undefined, S_ROOF);
   const r = { cx, cz, w, d, top };
   roofs.push(r);
   return r;
@@ -1941,6 +1991,44 @@ box([0, -BASE / 2, 0],
   [EXTENT.x1 - EXTENT.x0 + PAVE * 2, BASE, EXTENT.z1 - EXTENT.z0 + PAVE * 2], STREET,
   undefined, S_STREET);
 
+// --- lane markings ------------------------------------------------------------
+// One line down the middle of every avenue, and GEOMETRY rather than texture.
+//
+// They used to be painted into the blacktop, and that is why the district's
+// roads looked wrong: the whole street plan above is ONE brush, so a marking
+// tiled onto it comes out as a grid of dashes laid across the district
+// irrespective of where a road actually runs — including under the buildings,
+// and never down the middle of anything. A marking has to know where its road
+// is. A texture cannot; the plan can.
+//
+// Avenues only. An alley is 8 m, which is one lane, and a centre line down one
+// lane is a line down a corridor.
+/** Road-marking yellow. Matches `LANE_Y` in engine/surfaces.ts by hand. */
+const LANE = 0xe8b21e;
+{
+  const LANE_W = 0.42;
+  // Thin enough to be paint. Nothing under character.stepHeight was ever
+  // holding anything up, and 3 cm is a tenth of that.
+  const LANE_T = 0.03;
+  const x0 = EXTENT.x0 - PAVE, x1 = EXTENT.x1 + PAVE;
+  const z0 = EXTENT.z0 - PAVE, z1 = EXTENT.z1 + PAVE;
+  for (let i = 0; i < COL_GAP.length; i++) {
+    if (COL_GAP[i] < AVENUE) continue;
+    const x = (COLS[i].hi + COLS[i + 1].lo) / 2;
+    box([x, LANE_T / 2 + 0.004, (z0 + z1) / 2], [LANE_W, LANE_T, z1 - z0],
+      LANE, undefined, S_LANE);
+  }
+  for (let i = 0; i < ROW_GAP.length; i++) {
+    if (ROW_GAP[i] < AVENUE) continue;
+    const z = (ROWS[i].hi + ROWS[i + 1].lo) / 2;
+    // A hair lower than the north–south ones, so the two do not fight for the
+    // same millimetre where they cross. The one that runs THROUGH wins, which
+    // is also what a road authority would do.
+    box([(x0 + x1) / 2, LANE_T / 2, z], [x1 - x0, LANE_T, LANE_W],
+      LANE, undefined, S_LANE);
+  }
+}
+
 // --- the edge of the world ----------------------------------------------------
 // The district sits on a plate, and a plate has a rim.
 //
@@ -1994,7 +2082,11 @@ for (const s of [-1, 1]) {
 // The ground the rest of the city stands on. The district's floor stops at the
 // rim, so without this every building past it is a model hanging over nothing —
 // and it is the gaps BETWEEN them, seen from the crown, where you would notice.
-box([0, -0.05 - BASE / 2, 0], [1500, BASE, 1500], shade(STREET, 0.34), undefined, S_STREET);
+// 2600 m across rather than 1500, which costs nothing — it is one box either
+// way — and buys the horizon. At 750 m the old plate's own far edge was a hard
+// line across the view with a third of the fog on it; at 1300 m it is inside
+// the last tenth of `fogFar` and reads as haze, which is what a horizon is.
+box([0, -0.05 - BASE / 2, 0], [2600, BASE, 2600], shade(STREET, 0.34), undefined, S_STREET);
 
 /**
  * One building of the outer city, on the ground, turned to face the district.
@@ -2059,99 +2151,164 @@ function outerBlock(m: string, x: number, z: number, inx: number, inz: number, k
   }
 }
 
+// The skyline, which is a RING and has to close.
+//
+// This was eighteen towers spread round a circle, and eighteen is not a city —
+// it is eighteen towers. From the crown you looked out and saw five of them per
+// bearing with sky between, and behind the sky the far edge of the ground plate
+// drawn as a hard line. That reads as scenery placed near a level rather than a
+// district inside a city, and the answer is not better towers, it is ENOUGH of
+// them: a silhouette only encloses you when the gaps in it are filled by
+// something further back.
+//
+// So three rings, and each one does a different job.
+//
+//   near   34–78 m, close in. Fills the band between the outer city's 14–26 m
+//          masses and the towers, which is the gap you actually noticed — a
+//          skyline that jumps straight from two storeys to thirty has a hole in
+//          it at exactly the height every roof on the map looks out at.
+//   mid    66–150 m. The wall. This is the ring the eye reads as "the city".
+//   far    110–230 m, out in the fog. Tallest and least detailed, because it is
+//          a silhouette and nothing else — its whole job is to stand behind the
+//          gaps in the mid ring.
+//
+// They are RECTANGULAR rings, not circular ones. A circle round a rectangular
+// plate has to be pushed out at the corners to clear it, and everything pushed
+// out along a corner bearing arrives in much the same place — the old ring
+// clumped towers into the corners and left the long sides bare. Walking the
+// perimeter of a rectangle spaces them evenly in the world, which is where they
+// are seen from.
 {
-  const RING_IN = 250;
-  const RING_OUT = 380;
   /**
    * The rectangle nothing out here may stand inside: the district, its rim, and
-   * now the two rows of buildings against it. That last clearance is why this
-   * is 75 m rather than the 30 it was — the far ring used to start where the
-   * near city now stands, and a backdrop tower growing out of a rooftop is the
-   * same bug whether the roof belongs to the map or to the city behind it.
+   * the two rows of buildings against it. 75 m of clearance, because a backdrop
+   * tower growing out of a rooftop is the same bug whether the roof belongs to
+   * the map or to the city behind it.
    */
   const CLEAR_X = (EXTENT.x1 - EXTENT.x0) / 2 + PAVE + 75;
   const CLEAR_Z = (EXTENT.z1 - EXTENT.z0) / 2 + PAVE + 75;
-  // Eighteen, down from fifty-four. The near silhouette is carried by the
-  // outer city's own masses now, and thirty towers' worth of draw calls buys a
-  // great deal more standing on a street inside the map than it ever did here.
-  for (let i = 0; i < 18; i++) {
-    const h = hash(i * 7919);
-    // Spread round the compass with a jitter, so the ring is not a polygon.
-    const ang = (i / 18) * Math.PI * 2 + ((h % 100) / 100 - 0.5) * 0.09;
-    let rad = RING_IN + ((h >>> 7) % 100) / 100 * (RING_OUT - RING_IN);
-    // Taller further out, which is how a skyline behind a skyline reads: the
-    // near ring cannot hide the far one, so the depth stays legible.
-    const top = 26 + ((h >>> 13) % 70) + (rad - RING_IN) * 0.35;
-    const w = 22 + ((h >>> 19) % 34);
-    const d = 22 + ((h >>> 23) % 34);
-    // A ring is a circle and the district is a rectangle, so a radius that
-    // clears the map along one bearing plants a tower on a corner roof along
-    // another: the district's corners are 256 m out, past the inner radius, and
-    // that is exactly where two of these landed the first time. Push each one
-    // out until its FOOTPRINT is clear of the whole rectangle — whichever axis
-    // it escapes by — rather than trusting the radius alone.
-    const ca = Math.abs(Math.cos(ang));
-    const sa = Math.abs(Math.sin(ang));
-    rad = Math.max(rad, Math.min(
-      ca > 1e-3 ? (CLEAR_X + w / 2) / ca : Infinity,
-      sa > 1e-3 ? (CLEAR_Z + d / 2) / sa : Infinity,
-    ));
-    const x = Math.cos(ang) * rad;
-    const z = Math.sin(ang) * rad;
-    const tint = shade(pick(FACADE_TINTS, i * 13), 0.9);
-    // Down to well below the street: the base is never seen, and a backdrop
-    // tower standing on its own visible bottom edge is a card, not a building.
-    box([x, (top - 60) / 2, z], [w, top + 60, d], tint, undefined, S_MASS);
-    box([x, top - 0.7, z], [w + 1.2, 1.4, d + 1.2], TRIM, undefined, S_TRIM);
-    // No lit bands out here any more. They were carrying the backdrop's night
-    // read before the walls had windows in them; now they are two brushes per
-    // tower saying something the facade already says, and 54 towers' worth of
-    // that is a hundred draw calls better spent inside the map.
-    const lit = h % 4 === 0 ? LIT_COLD : LIT_WARM;
-    // What it does at the top. Flat-topped boxes all the way round the horizon
-    // is the one thing that gives a backdrop away — a real skyline is mostly
-    // things standing on other things — so every tower ends in one of four
-    // ways, by hash, and no two neighbours end the same way for long.
-    const cap = h % 4;
-    let crest = top;
-    if (cap === 0 || cap === 1) {
-      // Stepped: a smaller mass set back on top, twice for the tall ones. The
-      // step used to carry a cornice band of its own, the way the main mass
-      // does. At 300 m a 1.2 m band is a pixel and a half, and forty of them
-      // is a whole building's worth of calls spent on something unresolvable.
-      let cy = top;
-      let cw = w * 0.62;
-      let cd = d * 0.62;
-      for (let step = 0; step < (cap === 0 ? 1 : 2); step++) {
-        const ch = 8 + ((h >>> (3 + step * 4)) % 20);
-        box([x, cy + ch / 2, z], [cw, ch, cd], tint, undefined, S_MASS);
-        cy += ch;
-        cw *= 0.62;
-        cd *= 0.62;
+
+  /**
+   * The perimeter of a rectangle given its HALF-extents, which is 4(hx + hz) and
+   * not 2(hx + hz). Worth its own function: the first cut of this used the half
+   * and every tower in all three rings landed in one half of the ring, piled
+   * into the north-west and left three sides of the map open to the sky.
+   */
+  const perim = (hx: number, hz: number) => (hx + hz) * 4;
+
+  /** A point `t` along a rectangle's perimeter, with the outward normal there. */
+  const onRect = (hx: number, hz: number, t: number) => {
+    const per = perim(hx, hz);
+    let u = ((t % per) + per) % per;
+    if (u < hz * 2) return { x: hx, z: -hz + u, nx: 1, nz: 0 };
+    u -= hz * 2;
+    if (u < hx * 2) return { x: hx - u, z: hz, nx: 0, nz: 1 };
+    u -= hx * 2;
+    if (u < hz * 2) return { x: -hx, z: hz - u, nx: -1, nz: 0 };
+    return { x: -hx + (u - hz * 2), z: -hz, nx: 0, nz: -1 };
+  };
+
+  /**
+   * `detail` out here is spent by DISTANCE, and that is the whole cost control.
+   *
+   * A plain brush is a draw call, so a ring costs its count times its detail and
+   * the district's budget is not elastic. What survives at each range is
+   * measurable, so: no ring gets a cornice, because a 1.4 m band is two pixels
+   * at 300 m and the old eighteen towers were paying for one each. A beacon is
+   * one box and the best thing per call on a night horizon, so everything tall
+   * enough carries one. A sign is what the eye goes to first, so the near two
+   * rings get them and the fog ring does not — a saturated colour at 600 m
+   * through haze is a grey smudge.
+   *
+   * `wide` is the other half of it, and it is the cheap half: a wider tower
+   * covers more of the horizon for the same one draw call, so coverage is bought
+   * with width before it is bought with count. The rings get wider as they go
+   * out, which is also just perspective — a 90 m mass at 700 m subtends what a
+   * 30 m one does at 230.
+   *
+   * The fog ring is very wide indeed (92–168 m), and that is what closes the
+   * last hole. Thirty towers over its perimeter is one every 160 m, which left a
+   * band of bare ground plate visible at the horizon wherever a mid-ring gap
+   * lined up with a far-ring one. Widening them shuts that without another call,
+   * and at 700 m through haze a superblock and three towers are the same
+   * silhouette anyway.
+   */
+  const RINGS = [
+    { pad: 30, jit: 55, n: 40, lo: 34, hi: 78, wide: 34, vary: 30, steps: 2, sign: true, seed: 31 },
+    { pad: 130, jit: 100, n: 40, lo: 66, hi: 150, wide: 44, vary: 40, steps: 1, sign: true, seed: 977 },
+    { pad: 300, jit: 190, n: 30, lo: 110, hi: 230, wide: 92, vary: 76, steps: 1, sign: false, seed: 4409 },
+  ];
+
+  for (const r of RINGS) {
+    const hx = CLEAR_X + r.pad;
+    const hz = CLEAR_Z + r.pad;
+    const per = perim(hx, hz);
+    for (let i = 0; i < r.n; i++) {
+      const h = hash(r.seed * 104729 + i * 6151);
+      // Evenly spaced round the perimeter, then jittered by up to half a step.
+      // The even spacing is what closes the ring; the jitter is what stops it
+      // reading as a fence, and it is bounded so that it can never open a hole.
+      const t = ((i + 0.5) / r.n + ((h % 1000) / 1000 - 0.5) * 0.8 / r.n) * per;
+      const at = onRect(hx, hz, t);
+      const out = ((h >>> 10) % 100) / 100 * r.jit;
+      const x = at.x + at.nx * out;
+      const z = at.z + at.nz * out;
+      const w = r.wide + ((h >>> 19) % r.vary);
+      const d = r.wide + ((h >>> 23) % r.vary);
+      const top = r.lo + ((h >>> 13) % (r.hi - r.lo));
+      const tint = shade(pick(FACADE_TINTS, r.seed + i * 13), 0.9);
+      // Down to well below the street: the base is never seen, and a backdrop
+      // tower standing on its own visible bottom edge is a card, not a building.
+      box([x, (top - 60) / 2, z], [w, top + 60, d], tint, undefined, S_MASS);
+      // What it does at the top. Flat-topped boxes all the way round the horizon
+      // is the one thing that gives a backdrop away — a real skyline is mostly
+      // things standing on other things — so every tower ends in one of four
+      // ways, by hash, and no two neighbours end the same way for long.
+      const cap = h % 4;
+      let crest = top;
+      if (cap === 0 || cap === 1) {
+        // Stepped: a smaller mass set back on top, twice for the tall ones.
+        let cy = top;
+        let cw = w * 0.62;
+        let cd = d * 0.62;
+        for (let step = 0; step < (cap === 0 ? 1 : r.steps); step++) {
+          const ch = 8 + ((h >>> (3 + step * 4)) % 20);
+          box([x, cy + ch / 2, z], [cw, ch, cd], tint, undefined, S_MASS);
+          cy += ch;
+          cw *= 0.62;
+          cd *= 0.62;
+        }
+        crest = cy;
+      } else if (cap === 2) {
+        // A mast — the outline that says communications rather than offices, and
+        // the one shape on a horizon that is unmistakably not a box.
+        const mh = 14 + ((h >>> 5) % 26);
+        box([x, top + mh / 2, z], [2.2, mh, 2.2], MAST, undefined, S_STEEL);
+        box([x, top + mh * 0.42, z], [9, 1.2, 9], MAST, undefined, S_STEEL);
+        crest = top + mh;
       }
-      crest = cy;
-    } else if (cap === 2) {
-      // A mast — the outline that says communications rather than offices, and
-      // the one shape on a horizon that is unmistakably not a box.
-      const mh = 14 + ((h >>> 5) % 26);
-      box([x, top + mh / 2, z], [2.2, mh, 2.2], MAST, undefined, S_STEEL);
-      box([x, top + mh * 0.42, z], [9, 1.2, 9], MAST, undefined, S_STEEL);
-      crest = top + mh;
-    }
-    // A beacon on anything tall enough to need one, wherever its top ended up.
-    if (crest > 84) box([x, crest + 1.2, z], [3.2, 1.5, 3.2], 0xff5a4a, undefined, S_LAMP);
-    // And on a few of them, a sign the size of a building — the thing your eye
-    // goes to first in any night skyline, and the only saturated colour out
-    // here. Turned to face the middle of the district, because a billboard
-    // facing away from the only person in the city is a wasted billboard.
-    if (h % 7 === 0 && top > 50) {
-      const bw = Math.min(w, d) * 0.8;
-      const bh = Math.min(24, top * 0.3);
-      const inx = -Math.cos(ang);
-      const inz = -Math.sin(ang);
-      box([x + inx * (w / 2 + 0.6), top * 0.66, z + inz * (d / 2 + 0.6)],
-        Math.abs(inx) > Math.abs(inz) ? [1.2, bh, bw] : [bw, bh, 1.2],
-        pick(ACCENT, i * 5), undefined, S_LAMP);
+      // A beacon on anything tall enough to need one, wherever its top ended up.
+      if (crest > 84) box([x, crest + 1.2, z], [3.2, 1.5, 3.2], 0xff5a4a, undefined, S_LAMP);
+      // And on a few of them, a sign the size of a building — turned to face the
+      // middle of the district, because a billboard facing away from the only
+      // person in the city is a wasted billboard.
+      // Sized in METRES, not as a fraction of the tower. As a fraction it was
+      // fine on a 30 m mass and became a fifty-metre emissive panel once the
+      // rings widened — and an emissive surface that big at 300 m through fog
+      // does not read as a sign, it blows out to a white rectangle and looks
+      // like a hole in the building.
+      if (r.sign && h % 9 === 0 && top > 50) {
+        const bw = Math.min(20, Math.min(w, d) * 0.7);
+        const bh = Math.min(15, top * 0.22);
+        // Straddling the face, not standing off it. The old ring's normals were
+        // diagonal, so a sign pushed clear of the wall still overlapped the mass
+        // on the other axis and `rule 1` was satisfied by accident; these
+        // normals are axis-aligned, and a sign 0.6 m off the face is a billboard
+        // floating beside a building. Half in the wall is also what a sign is.
+        box([x - at.nx * (w / 2), top * 0.66, z - at.nz * (d / 2)],
+          at.nx !== 0 ? [1.2, bh, bw] : [bw, bh, 1.2],
+          pick(SIGN_C, r.seed + i * 5), undefined, S_LAMP);
+      }
     }
   }
 }
@@ -2293,17 +2450,32 @@ box([ladderX - LADDER_LEN / 2 + 0.6, LADDER_TOP + 1.2, YARD_Z], [1.2, 2.4, SLOT 
   GANTRY, undefined, S_STEEL);
 
 // --- the Line ----------------------------------------------------------------
-// A conveyor, and the important word is CIRCUIT. It is a closed loop: 412 m
-// along the avenue at z = -35, down the east side of the district, 412 m back
-// along z = 101, up the west side, and into the first leg again. Something
-// running along the top of it never arrives anywhere — it comes back round.
+// A conveyor, and the important word is CIRCUIT. It is a closed loop, and it
+// runs the RIM: four legs, one down each side of the district, in the 18 m of
+// pavement between the outermost blocks and the plate's edge. Something running
+// along the top of it never arrives anywhere — it comes back round.
 //
-// That is the whole reason this is not the grid it started as. A grid of four
-// legs crossing has eight ENDS, and a platform travelling a track with an end
-// on it eventually runs off the end. There is no end here. Every leg finishes
-// at a junction square and every junction square is on the loop, including the
-// two chords over the north–south avenues, which leave the loop and rejoin it
-// rather than stopping.
+// The rim is where it belongs, and the first version had it wrong. Two of the
+// four legs ran down INTERIOR avenues — z = -35 and z = 101, the two wide
+// east–west streets — which put 824 m of elevated deck and fourteen metres of
+// gantry straight across the middle of the district at eye level from every roof
+// in it. A district you are meant to be able to see across had a bridge through
+// the view in both directions. Out on the pavement the same structure frames the
+// place instead of dividing it, and it does one more thing for free: it now runs
+// within a metre of the outer blocks the whole way round, so the roofscape and
+// the Line are neighbours rather than separate maps.
+//
+// TWO things cross the middle, and only two: the chords, down the north–south
+// avenues at x = -72 and x = 71. Those are the ones that earn it — they leave
+// the loop at one rim leg, dip through the district, and rejoin it at the other,
+// so a lap can be a lap round the edge or a figure across the centre. Two
+// crossings you choose between reads as a network; six reads as scaffolding.
+//
+// That closure is the whole reason this is not the grid it started as. A grid of
+// four legs crossing has eight ENDS, and a platform travelling a track with an
+// end on it eventually runs off the end. There is no end here. Every leg
+// finishes at a junction square and every junction square is on the loop, the
+// chords included.
 //
 // The two long sides share one height profile, which is what makes the whole
 // thing close: the deck is at the same height at any given x whether you are on
@@ -2338,18 +2510,69 @@ export const LINE_OVER = 14;
 const RAIL_W = 1.6, RAIL_H = 0.9;
 /** How high a frame's posts reach: the top of the rail, and not past it. */
 const MAST_UP = LINE_OVER + RAIL_H / 2;
-/** How far one span's girder and rail run past a bend into the next one's. */
+/** How far one span's chords and rail run past a bend into the next one's. */
 const LAP = 1.6;
+/**
+ * The girder is a TRUSS, and these are its three numbers.
+ *
+ * It was one 6 x 1.6 m box per span, which is the shape a girder has in a
+ * drawing and not the shape one has in the world: a mile of blank slab under the
+ * road, reading as a kerbstone the size of a street and telling you nothing
+ * about how the road is held up. Nothing else on the Line was blocky — the deck
+ * is a road, the rail is a rail, the columns are columns — so the one part
+ * carrying all of it was the one part that looked like a placeholder.
+ *
+ * So: two chords under the deck edges, and a web of posts and diagonals between
+ * them in each side plane. A post at every joint and one diagonal in every panel,
+ * the diagonals alternating, which is the pattern that leaves NOTHING BUT
+ * TRIANGLES — and a triangle is a hole. That is the other half of the reason to
+ * build it this way rather than draw a lattice on a box: at 8 x 5.5 m the
+ * openings are bigger than a dash, so the underside of the Line stops being a
+ * ceiling and becomes something you go through. The Line runs 18 m clear over
+ * roofs that reach 30, so this is reachable geometry, not scenery.
+ *
+ * `TRUSS_D` is measured to the bottom chord's CENTRELINE from the deck's
+ * underside. 5.5 m over spans up to 78 m is about 1:14, which is what a real
+ * truss of this reach is, and it is also what makes the diagonals sit at 35°
+ * rather than lying down.
+ */
+const TRUSS_D = 5.5;
+/** A chord's section, and a web member's. Chords are heavier; they always are. */
+const CHORD = 1.2, WEB = 0.7;
+/** One panel of the web — the length of a triangle, and so of the hole in it. */
+const PANEL = 8;
+/**
+ * How deep the whole structure reaches below the deck's TOP surface: the slab,
+ * the truss, and half a chord to get to the underside of it.
+ *
+ * Exported because `verify:level` measures the air under the Line and has to
+ * start its ray below the girder rather than below the deck — started under the
+ * deck it hits the truss's own ties and reports the truss instead of whatever
+ * the Line is flying over.
+ */
+export const LINE_UNDER = LINE_T + TRUSS_D + CHORD / 2;
 /** How far apart the piers stand, and how clear of a junction they keep. */
 const PIER_SPAN = 62, PIER_CLEAR = 26;
 /** Portal legs stand this far either side of the centreline. */
 export const LINE_PY = LINE_W / 2 - 1.2;
 /** Everywhere the Line reaches the ground, so the verifier can measure spans. */
 export const LINE_PIERS: { x: number; z: number }[] = [];
-/** The two long sides run out here, over the pavement between blocks and rim. */
-const LOOP_X = 206;
-/** And the loop's two ends, which are the avenues at z = -35 and z = 101. */
-const LOOP_Z0 = -35, LOOP_Z1 = 101;
+/**
+ * Where the four legs run, and all four are the same answer to the same
+ * question: the middle of the outer pavement.
+ *
+ * The blocks stop at ±197 in x and ±164 in z, `PAVE` is 18 m wide outside that,
+ * and the rim wall stands at the far edge of it — so ±206 and ±173 are the
+ * centre lines of that band on each axis. A 16 m deck laid down the middle of it
+ * leaves a metre inside and a metre out, which is why the legs are here and not
+ * at a rounder number.
+ *
+ * The z pair used to be -35 and 101: the two wide east–west avenues, i.e. two
+ * legs cutting through the district rather than round it. See the note above.
+ */
+const LOOP_X = (EXTENT.x1 - EXTENT.x0) / 2 + PAVE / 2;
+const LOOP_Z1 = (EXTENT.z1 - EXTENT.z0) / 2 + PAVE / 2;
+const LOOP_Z0 = -LOOP_Z1;
 
 /**
  * A leg of the Line: a straight run with a height profile.
@@ -2403,14 +2626,81 @@ const chord = (name: string, x: number, top: number, dip: number): Leg => ({
     [LOOP_Z1 - 35, dip], [LOOP_Z1 - 8, top], [LOOP_Z1, top]],
 });
 
+/**
+ * The four rim legs and the two chords, and they are named rather than indexed
+ * because the gates below and the bridges further down all have to agree about
+ * which leg they mean. `LINE_LEGS[0]` was fine while there were four of them and
+ * it is a trap now.
+ */
+const LEG_NORTH: Leg = { name: 'north', axis: 'x', at: LOOP_Z0, nodes: LOOP_PROFILE };
+const LEG_SOUTH: Leg = { name: 'south', axis: 'x', at: LOOP_Z1, nodes: LOOP_PROFILE };
+const LEG_EAST: Leg = {
+  name: 'east', axis: 'z', at: LOOP_X, nodes: [[LOOP_Z0, 44], [LOOP_Z1, 44]],
+};
+const LEG_WEST: Leg = {
+  name: 'west', axis: 'z', at: -LOOP_X, nodes: [[LOOP_Z0, 20], [LOOP_Z1, 20]],
+};
+const CHORD_W = chord('chord-west', -72, 28, 21);
+const CHORD_E = chord('chord-east', 71, 41, 34);
+
 export const LINE_LEGS: Leg[] = [
-  { name: 'north', axis: 'x', at: LOOP_Z0, nodes: LOOP_PROFILE },
-  { name: 'south', axis: 'x', at: LOOP_Z1, nodes: LOOP_PROFILE },
-  { name: 'east', axis: 'z', at: LOOP_X, nodes: [[LOOP_Z0, 44], [LOOP_Z1, 44]] },
-  { name: 'west', axis: 'z', at: -LOOP_X, nodes: [[LOOP_Z0, 20], [LOOP_Z1, 20]] },
-  chord('chord-west', -72, 28, 21),
-  chord('chord-east', 71, 41, 34),
+  LEG_NORTH, LEG_SOUTH, LEG_EAST, LEG_WEST, CHORD_W, CHORD_E,
 ];
+
+/**
+ * Where something comes ONTO the Line, so the side frames leave a doorway.
+ *
+ * The frames between the deck and the rail are a wall with holes in it, and a
+ * hole you cannot get to is not a way on. So the three places the roofscape
+ * reaches the Line are declared here, ONCE, and both halves read them: the
+ * frames skip their web across a gate, and the bridges further down are built at
+ * the gate's own position rather than at a number that happens to match. Move one
+ * and the doorway moves with it.
+ *
+ * `sgn` is which edge of the deck the bridge arrives at, across the leg.
+ */
+export const LINE_GATES = [
+  /**
+   * Onto the north rim leg, and it exists because the loop moved out here.
+   *
+   * The place picks itself: at x = -109 the profile is holding its 28 m shelf
+   * and the roof of the block it passes is 28 too, with a metre of pavement
+   * between them. Dead level, and the shortest way on the map onto 1500 m of
+   * elevated road. Without something like it the rim legs would be a fence you
+   * can see over the whole way round and never climb — which is exactly the
+   * risk of putting the loop out here, and it is answered by one landing.
+   */
+  { name: 'north', leg: LEG_NORTH, at: COLS[1].c, sgn: 1 as const },
+  /**
+   * Off the Spire's terrace, onto the east chord.
+   *
+   * It used to hop onto the north leg, which passed three metres from the
+   * Spire's block when that leg ran down the z = -35 avenue. The leg is 138 m
+   * away now, so the connection moves to the thing that IS beside the Spire: the
+   * east chord runs down the 24 m avenue along its whole east face, four metres
+   * off it, four metres up. The landmark stays tied into the circuit, which
+   * matters — the Line's pitches are the way down from the crown now that the
+   * Chute is gone.
+   */
+  { name: 'spire', leg: CHORD_E, at: ROWS[1].c + 14, sgn: -1 as const },
+  /** Off the spine roofs, onto the west chord where it bottoms out. */
+  { name: 'west', leg: CHORD_W, at: 40, sgn: 1 as const },
+  /** Off the tall block beside the east chord, on a long diagonal. */
+  { name: 'east', leg: CHORD_E, at: 75, sgn: 1 as const },
+];
+/** A gate by name, so nothing downstream depends on the order of that array. */
+const gate = (n: string) => LINE_GATES.find((g) => g.name === n)!;
+/**
+ * How wide a doorway is.
+ *
+ * Twelve metres, which is a panel and a half — so a gate always takes out a
+ * post and the two diagonals either side of it rather than sometimes leaving a
+ * member standing in the middle of the opening.
+ */
+const GATE_W = 12;
+/** Is `at` on this side of this leg inside a doorway? */
+const atGate = (leg: Leg, at: number, sgn: number, pad = 0) => LINE_GATES.some(
+  (g) => g.leg === leg && g.sgn === sgn && Math.abs(g.at - at) < GATE_W / 2 + pad);
 
 /** Deck height anywhere along a leg. */
 export function lineY(leg: Leg, at: number): number {
@@ -2468,6 +2758,12 @@ for (const leg of LINE_LEGS) {
     p.x + (leg.axis === 'z' ? off : 0),
     p.z + (leg.axis === 'x' ? off : 0),
   ];
+  /** A point `off` across the leg from `p` and `along` down it, at height `y`. */
+  const pt = (p: P3, off: number, along: number, y: number): P3 => ({
+    x: p.x + (leg.axis === 'z' ? off : along),
+    y,
+    z: p.z + (leg.axis === 'x' ? off : along),
+  });
 
   for (const [lo, hi] of segs) {
     const yLo = lineY(leg, lo);
@@ -2483,9 +2779,10 @@ for (const leg of LINE_LEGS) {
       box([kx, mid.y + 0.45, kz], [0.7, 0.9, seg.len], TIER, seg.q, S_STEEL);
     }
 
-    // A girder under the deck and the rail over it: both the length of the span
-    // and both running LAP past the bend into the next span's, so the two
-    // overlap rather than meeting on a plane.
+    // The girder. Two chords under the deck EDGES — the same two lines the piers
+    // stand on, so the truss lands on its columns rather than near them — each
+    // running LAP past the bend into the next span's, so consecutive chords
+    // overlap instead of meeting on a plane.
     //
     // That lap is what lets the piers stand sixty metres apart. A span used to
     // need a frame of its own because it had nothing else holding it up, and
@@ -2495,17 +2792,94 @@ for (const leg of LINE_LEGS) {
     // pier carries the road between them instead, which is what a girder is
     // for, and the columns go where a column should go rather than where the
     // road happens to change its mind.
-    box([mid.x, mid.y - LINE_T / 2 - 0.8, mid.z], [6, 1.6, seg.len + LAP],
-      GANTRY, seg.q, S_STEEL);
+    for (const sgn of [-1, 1]) {
+      const [cx, cz] = side(mid, sgn * LINE_PY);
+      box([cx, mid.y - LINE_T - TRUSS_D, cz], [CHORD, CHORD, seg.len + LAP],
+        GANTRY, seg.q, S_STEEL);
+    }
+
+    // The web, in the plane of each chord. Panels are as near PANEL as divide
+    // the span evenly, because a truss with one odd bay at the end is a truss
+    // built by a script and this one is meant to look built.
+    //
+    // A joint belongs to exactly ONE span: posts run 1..n, so the joint at the
+    // start of a span is the previous span's last post rather than a second one
+    // in the same place. Doubling them was two boxes fighting over a millimetre
+    // at every bend on the Line.
+    const bays = Math.max(2, Math.round((hi - lo) / PANEL));
+    const bay = (hi - lo) / bays;
+    /** A joint: `at` along the leg, `sgn` across it, `drop` below the deck top. */
+    const joint = (at: number, sgn: number, drop: number): P3 => {
+      const c = pos(at, lineY(leg, at) - drop);
+      const [jx, jz] = side(c, sgn * LINE_PY);
+      return { x: jx, y: c.y, z: jz };
+    };
+    const TOP = LINE_T, BOT = LINE_T + TRUSS_D;
+    for (const sgn of [-1, 1]) {
+      for (let i = 0; i < bays; i++) {
+        const a = lo + i * bay, b = a + bay;
+        if (i > 0) member(joint(a, sgn, TOP), joint(a, sgn, BOT), WEB, GANTRY, S_STEEL);
+        // Alternating, so every opening is a triangle and no two diagonals in a
+        // row lean the same way.
+        if (i % 2) member(joint(a, sgn, TOP), joint(b, sgn, BOT), WEB, GANTRY, S_STEEL);
+        else member(joint(a, sgn, BOT), joint(b, sgn, TOP), WEB, GANTRY, S_STEEL);
+      }
+      member(joint(hi, sgn, TOP), joint(hi, sgn, BOT), WEB, GANTRY, S_STEEL);
+    }
+    // And a tie across the bottom every other joint, which is what makes the two
+    // side trusses one box girder instead of two ladders standing near each
+    // other. Every other, not every: from the street you read the rhythm, and a
+    // tie at every joint is a floor.
+    for (let i = 2; i <= bays; i += 2) {
+      const a = lo + i * bay;
+      member(joint(a, -1, BOT), joint(a, 1, BOT), WEB, GANTRY, S_STEEL);
+    }
+
     // The rail: ONE beam down the centreline, on the deck's own slope. One, not
     // one under each edge — a single rail is what a gantry runs on and what the
     // frames below are shaped to carry.
     box([mid.x, mid.y + LINE_OVER, mid.z], [RAIL_W, RAIL_H, seg.len + LAP],
       GANTRY, seg.q, S_STEEL);
+
+    // --- and the same thing again, above the deck ---------------------------
+    // The girder under the road was half the structure and looked like all of
+    // it, because the fourteen metres between the deck and the rail had two
+    // posts every sixty metres in them and nothing else. That is not the top of
+    // a gantry, it is a road with some sticks over it — and it is also the half
+    // you are standing in, which makes it the half that matters.
+    //
+    // So the section is one frame all the way through: the DECK is the bottom
+    // chord of the truss above and the top chord of the truss below, the posts
+    // continue through it on the same joints, and the two webs are the same web.
+    // A chord along each side at the rail's level closes it, in the rail's own
+    // band so the cross beam at every pier meets it without a step.
+    for (const sgn of [-1, 1]) {
+      const [tx, tz] = side(mid, sgn * LINE_PY);
+      box([tx, mid.y + LINE_OVER, tz], [CHORD, RAIL_H, seg.len + LAP],
+        GANTRY, seg.q, S_STEEL);
+      const UP = -LINE_OVER;
+      for (let i = 0; i <= bays; i++) {
+        const a = lo + i * bay, b = a + bay;
+        // A post at every joint, on the same line as the one below it — except
+        // across a doorway, where the wall has to have a hole in it.
+        if (i > 0 && !atGate(leg, a, sgn)) {
+          member(joint(a, sgn, 0), joint(a, sgn, UP), WEB, GANTRY, S_STEEL);
+        }
+        if (i === bays) continue;
+        // And a diagonal in every panel, leaning the opposite way to the one
+        // under it — so a joint has a post going through it and a V either side,
+        // and the whole side reads as one lattice rather than two stacked.
+        if (atGate(leg, (a + b) / 2, sgn, bay / 2)) continue;
+        if (i % 2) member(joint(a, sgn, UP), joint(b, sgn, 0), WEB, GANTRY, S_STEEL);
+        else member(joint(a, sgn, 0), joint(b, sgn, UP), WEB, GANTRY, S_STEEL);
+      }
+    }
   }
 
   // Piers. A leg under each edge of the deck down to the ground, a cap across
-  // under the deck, and the same posts carried up to the rail.
+  // AT THE BOTTOM CHORD — the girder sits on its columns, which is the whole
+  // order of an elevated road: column, cap, girder, deck — and the same posts
+  // carried up to the rail.
   //
   // The Overpass stood on a single column down the centreline, which was fine
   // because it ran down a 24 m avenue nothing else used. The chords run down
@@ -2536,15 +2910,45 @@ for (const leg of LINE_LEGS) {
       const top = y - LINE_T;
       const p = pos(at, 0);
       LINE_PIERS.push({ x: p.x, z: p.z });
+      /** Where the column stops and the girder starts: the bottom chord. */
+      const capY = top - TRUSS_D;
       for (const sgn of [-1, 1]) {
         const [px, pz] = side(p, sgn * LINE_PY);
-        box([px, (top - BASE) / 2, pz], [2.4, top + BASE, 2.4], MAST, undefined, S_STEEL);
+        box([px, (capY - BASE) / 2, pz], [2.4, capY + BASE, 2.4], MAST, undefined, S_STEEL);
         box([px, y + MAST_UP / 2, pz], [1.6, MAST_UP, 1.6], MAST, undefined, S_STEEL);
+        // Knee braces, in the plane of the truss above them: the column flaring
+        // out into the girder it carries rather than meeting it at a point. This
+        // is the join you actually see from the street, because it is the one
+        // place where the two heaviest things on the Line touch.
+        for (const dir of [-1, 1]) {
+          member({ x: px, y: capY - 4.5, z: pz },
+            pt(p, sgn * LINE_PY, dir * 5.5, capY), WEB, GANTRY, S_STEEL);
+        }
+        // And the same again above the deck, under the end of the rail's cross
+        // beam. Two 14 m posts holding a rail up on nothing are a pair of
+        // sticks; braced, they are a portal frame. They stay out at the chord
+        // line, which is 6.8 m off centre and so well clear of the cargo.
+        for (const dir of [-1, 1]) {
+          member({ x: px, y: y + LINE_OVER - 5, z: pz },
+            pt(p, sgn * LINE_PY, dir * 5, y + LINE_OVER - RAIL_H / 2), WEB, GANTRY, S_STEEL);
+        }
       }
       const across = LINE_PY * 2 + 2.4;
-      box([p.x, top - 1.2, p.z],
-        leg.axis === 'z' ? [across, 1.6, 2.4] : [2.4, 1.6, across],
+      box([p.x, capY, p.z],
+        leg.axis === 'z' ? [across, CHORD, CHORD] : [CHORD, CHORD, across],
         GANTRY, undefined, S_STEEL);
+      // Portal bracing across the legs: a tie and an X above it, in the top half
+      // of the columns so that nothing new arrives in the street. A pair of
+      // columns is two objects; a pair with an X between them is one frame.
+      {
+        const braceLo = capY * 0.55;
+        member(pt(p, -LINE_PY, 0, braceLo), pt(p, LINE_PY, 0, braceLo),
+          WEB, MAST, S_STEEL);
+        for (const sgn of [-1, 1]) {
+          member(pt(p, sgn * LINE_PY, 0, braceLo),
+            pt(p, -sgn * LINE_PY, 0, capY - 1.2), WEB, MAST, S_STEEL);
+        }
+      }
       // The cross beam, in the SAME band as the rail rather than above it.
       // Above it, it was a step standing proud of the rail at every frame — a
       // bump on the one surface the cargo runs along, and the cargo runs along
@@ -2568,13 +2972,17 @@ for (const leg of LINE_LEGS) {
 // nothing runs through.
 for (const j of JUNCTIONS) {
   const top = j.y - LINE_T;
+  const capY = top - TRUSS_D;
   box([j.x, j.y - LINE_T / 2, j.z], [LINE_W, LINE_T, LINE_W], ROAD, undefined, S_ROAD);
   for (const sx of [-1, 1]) {
     for (const sz of [-1, 1]) {
       const px = j.x + sx * LINE_PY;
       const pz = j.z + sz * LINE_PY;
-      box([px, (top - BASE) / 2, pz], [2.4, top + BASE, 2.4], MAST, undefined, S_STEEL);
+      box([px, (capY - BASE) / 2, pz], [2.4, capY + BASE, 2.4], MAST, undefined, S_STEEL);
       box([px, j.y + MAST_UP / 2, pz], [1.6, MAST_UP, 1.6], MAST, undefined, S_STEEL);
+      // The corner post of the truss, carrying the deck's corner down to the
+      // chord ring the columns hold up.
+      member({ x: px, y: top, z: pz }, { x: px, y: capY, z: pz }, WEB, GANTRY, S_STEEL);
     }
   }
   LINE_PIERS.push({ x: j.x, z: j.z });
@@ -2585,10 +2993,25 @@ for (const j of JUNCTIONS) {
   box([j.x, j.y + LINE_OVER, j.z], [RAIL_W, RAIL_H, LINE_W], GANTRY, undefined, S_STEEL);
   box([j.x, j.y + LINE_OVER, j.z], [LINE_W, RAIL_H, RAIL_W], GANTRY, undefined, S_STEEL);
   for (const sgn of [-1, 1]) {
-    box([j.x, top - 1.2, j.z + sgn * LINE_PY], [across, 1.6, 2.4], GANTRY, undefined, S_STEEL);
-    box([j.x + sgn * LINE_PY, top - 1.2, j.z], [2.4, 1.6, across], GANTRY, undefined, S_STEEL);
+    // The chord ring, at the same level as every leg's bottom chord so the four
+    // girders arriving here land on one thing instead of four. It is a ring
+    // rather than two beams because a crossing is carried in both directions.
+    box([j.x, capY, j.z + sgn * LINE_PY], [across, CHORD, CHORD], GANTRY, undefined, S_STEEL);
+    box([j.x + sgn * LINE_PY, capY, j.z], [CHORD, CHORD, across], GANTRY, undefined, S_STEEL);
     box([j.x, j.y + LINE_OVER, j.z + sgn * LINE_PY], [across, RAIL_H, RAIL_W],
       GANTRY, undefined, S_STEEL);
+  }
+  // A V of diagonals in each of the four side planes, off the corners up to the
+  // middle of the deck edge above. Same web, same triangles, turned the corner:
+  // the square reads as part of the girder rather than a block the girder runs
+  // into.
+  for (const sgn of [-1, 1]) {
+    for (const dir of [-1, 1]) {
+      member({ x: j.x + dir * LINE_PY, y: capY, z: j.z + sgn * LINE_PY },
+        { x: j.x, y: top, z: j.z + sgn * LINE_PY }, WEB, GANTRY, S_STEEL);
+      member({ x: j.x + sgn * LINE_PY, y: capY, z: j.z + dir * LINE_PY },
+        { x: j.x + sgn * LINE_PY, y: top, z: j.z }, WEB, GANTRY, S_STEEL);
+    }
   }
 }
 
@@ -2619,9 +3042,16 @@ export const rails: [number, number, number][][] = [(() => {
 // roofscape wherever one comes near — which, with nothing on it below 20 m,
 // means the tall blocks and the Spire rather than the street.
 {
-  const north = LINE_LEGS[0];
-  const cw = LINE_LEGS[4];
-  const ce = LINE_LEGS[5];
+  // Every one of these lands at a GATE — the same three declared up with the
+  // Line, which is what the side frames leave a doorway for. Read from there
+  // rather than typed again: a bridge that arrives where the wall has no hole in
+  // it is a way on that is bricked up.
+  const gNorth = gate('north');
+  const gSpire = gate('spire');
+  const gWest = gate('west');
+  const gEast = gate('east');
+  /** Where a gate meets the deck, across the leg. */
+  const lip = (g: typeof gSpire) => g.leg.at + g.sgn * (LINE_W / 2);
   /** A flat bridge from a roof edge to a deck edge. Both are level; a 1° ramp
    *  between them would be the one grade a slide dies on. */
   const bridge = (x0: number, z0: number, x1: number, z1: number, y: number) => {
@@ -2629,22 +3059,34 @@ export const rails: [number, number, number][][] = [(() => {
       [Math.max(10, Math.abs(x1 - x0) + 1), LINE_T, Math.max(10, Math.abs(z1 - z0) + 1)],
       ROAD, undefined, S_ROAD);
   };
-  // Off the Spire's terrace, which sits at 30 with the north side passing three
-  // metres away at 31.
-  bridge(20, ROWS[1].hi, 20, LOOP_Z0 - LINE_W / 2, Math.min(TERRACE, lineY(north, 20)));
+  // Onto the north rim leg. The one place on the whole rim where the deck and
+  // the roof beside it are at the same height, so this is a landing rather than
+  // a ramp — the pavement between them is a metre wide and the two tops are the
+  // same 28.
+  bridge(gNorth.at, ROWS[0].lo, gNorth.at, lip(gNorth),
+    Math.min(HEIGHT[0][1], lineY(gNorth.leg, gNorth.at)));
+  // Off the Spire's terrace and onto the east chord, which passes four metres
+  // off its east face and four metres above the terrace. A long diagonal for the
+  // same reason the east one below is: four metres up over four metres across is
+  // a wall, and over twenty-eight it is a slope you carry speed down.
+  ramp({ x: COLS[3].hi, y: TERRACE, z: gSpire.at - 28 },
+    { x: lip(gSpire), y: lineY(gSpire.leg, gSpire.at), z: gSpire.at }, 10, 1.2,
+    ROAD, 3, undefined, S_ROAD);
   // Onto the west chord where it bottoms out level with the spine roofs.
-  bridge(COLS[2].lo, 40, cw.at + LINE_W / 2, 40, Math.min(HEIGHT[2][2], lineY(cw, 40)));
+  bridge(COLS[2].lo, gWest.at, lip(gWest), gWest.at,
+    Math.min(HEIGHT[2][2], lineY(gWest.leg, gWest.at)));
   // And onto the east chord, off the tall block beside it, on a long diagonal
   // because that one is seven metres up.
   ramp({ x: COLS[4].lo, y: HEIGHT[3][4], z: 40 },
-    { x: ce.at + LINE_W / 2, y: lineY(ce, 75), z: 75 }, 10, 1.2, ROAD, 3,
+    { x: lip(gEast), y: lineY(gEast.leg, gEast.at), z: gEast.at }, 10, 1.2, ROAD, 3,
     undefined, S_ROAD);
 
-  // A footbridge across the north end of the same avenue. The Overpass used to
-  // run the full length of it and carried this crossing for free; the loop turns
-  // east at z = -35 and leaves the top of that avenue with a 31 m roof-to-roof
-  // jump over it, which is past the budget on both tunes. This is the smallest
-  // thing that answers it: one deck at the lower of the two roofs.
+  // A footbridge across the north end of the east chord's avenue, at the roofs'
+  // own level. The chord runs the full length of that avenue now that the loop
+  // is out on the rim, so the crossing is no longer missing — but the chord is
+  // at 34 up there and these two roofs are 30 and 34, and a crossing you have to
+  // climb onto is not the same thing as a crossing. One deck at the lower of the
+  // two, under the road.
   {
     const y = Math.min(HEIGHT[0][3], HEIGHT[0][4]);
     box([(COLS[3].hi + COLS[4].lo) / 2, y - LINE_T / 2, ROWS[0].c],
@@ -2757,7 +3199,7 @@ for (let ri = 0; ri < ROWS.length; ri++) {
     const C = COLS[ci], R = ROWS[ri];
     const k = ri * COLS.length + ci;
     const pw = 26, pd = 22, ph = 8;
-    box([C.c, ph - DECK_T / 2, R.c], [pw, DECK_T, pd], DECK, undefined, S_DECK);
+    box([C.c, ph - DECK_T / 2, R.c], [pw, DECK_T, pd], DECK, undefined, S_ROOF);
     roofs.push({ cx: C.c, cz: R.c, w: pw, d: pd, top: ph });
     for (const sx of [-1, 1]) {
       for (const sz of [-1, 1]) {
@@ -3025,6 +3467,16 @@ const CYBER_GROUND = 0xe9e7e1;
  * brush stays out of its way.
  */
 const CYBER_TARMAC = 0xf2f0ec;
+/**
+ * And the roofs, which are the one thing up here that is genuinely dark.
+ *
+ * Everything else in this style is off-white with dark accents cut into it. A
+ * roof is not an accent, it is a surface — fifty of them, and they are most of
+ * what you see from any height on the map. White they read as fifty blank lids
+ * and the district has no top to it; ballasted grey they read as the working
+ * side of a building, and the white walls get to be white against something.
+ */
+const CYBER_ROOF = 0x54565b;
 
 /** Ramp indices carry over untouched: this is a recolour, not a re-cut. */
 /**
@@ -3046,12 +3498,118 @@ const CYBER_SURFACE: Record<string, string> = {
   [S_STREET]: 'blacktop',
   [S_PAVING]: 'slab',
   [S_DECK]: 'slab',
+  // A roof is ballast, not concrete, and it is the only dark surface up here.
+  [S_ROOF]: 'roofdeck',
   [S_STEEL]: 'girder',
   [S_CRATE]: 'ribbed',
+  // Road paint stays road paint, and keeps its own colour rather than being
+  // sorted into one of the three material families below.
+  [S_LANE]: 'lane',
 };
 
+/**
+ * Glass, in openings this level cuts for it.
+ *
+ * The district had no glass. It had a window PAINTED INTO THE CLADDING — two
+ * dark rectangles per 22 m repeat, at a fixed height up that repeat — and the
+ * consequence is the bug you can see from any street: the repeat is measured in
+ * metres of BRUSH from the bottom of a face, so the row of windows sat 12.3 m up
+ * whatever it landed on. Every building shorter than that had none at all, and
+ * the taller ones had a row at a height with no relationship to the building.
+ * A wall texture does not know how tall the wall is, so it cannot be the thing
+ * that decides where a window goes.
+ *
+ * So the openings are placed here, off the same storey pitch `facade` uses, and
+ * they are real brushes with a real material in them. Which also buys the thing
+ * a painted window can never have: SIZES, put where the building wants them.
+ * The first floor gets one panoramic strip the length of the wall; every floor
+ * above it gets a row of short punched lights. That contrast is the whole point
+ * — a long run of glass low down with small openings over it reads as a working
+ * floor with offices above, where the same window repeated up the wall reads as
+ * a spreadsheet.
+ *
+ * Cyberedge only, and appended AFTER the mapped list so it cannot shift an index
+ * `RAMP_BRUSHES_CYBER` is holding. The dusk level still paints its own windows
+ * and still wants to: they are what carries its night skyline, and they cost it
+ * nothing. This costs the white district about eighty draw calls and it has them
+ * — that variant wears no kit models at all, so it runs at half the budget.
+ */
+/**
+ * Glass, and it is much lighter than the instinct says.
+ *
+ * The first value here was a dark slate, on the reasoning that glass is dark —
+ * and every window on the map came out as a black rectangle punched in a white
+ * wall. Glass is not dark, it is a MIRROR: from outside, in daylight, most of
+ * what a pane sends back is the sky, and the sky at noon is the brightest thing
+ * in the scene. Dark is what a window looks like at night from outside, or at
+ * any time from in.
+ */
+const CYBER_GLASS = 0x8ea6b8;
+const GLAZING: Brush[] = (() => {
+  const out: Brush[] = [];
+  /** Half the depth of an opening: half of it stands proud, half is recessed. */
+  const OUT = 0.11;
+  /** The first floor's strip, and one of the lights above it. */
+  const PANO_H = 3.0;
+  const SMALL: [number, number] = [3.6, 2.4];
+  const FACES = [[1, 0], [-1, 0], [0, 1], [0, -1]] as const;
+  for (const r of roofs) {
+    // Plazas, canopies and the little service decks get none. A 2 m parapet
+    // with a strip window in it is not a building.
+    if (r.top < 10 || Math.min(r.w, r.d) < 12) continue;
+
+    // The storeys, and they are read off the building rather than chosen: the
+    // service bands sit on an 8.5 m pitch from PLINTH, so the wall between two
+    // of them is a floor, and the middle of that wall is where its glazing
+    // goes. Starting 2.2 m up rather than a full storey is what puts the first
+    // one just clear of the canopy at 5.2 — and it is also why this glazes
+    // everything down to 12 m instead of only the six buildings over 22.
+    const mid: number[] = [];
+    for (let y = PLINTH + 2.2; y < r.top - 3.0; y += 8.5) mid.push(y);
+    if (!mid.length) continue;
+
+    // FIRST FLOOR: one panoramic strip, wrapping all four faces. This is the
+    // storey a building glazes properly — it is where the floor is used, it is
+    // the band your eye lands on from the street, and on a shed of this kind it
+    // is a single continuous run of glass rather than a set of openings. One
+    // brush, for a whole building.
+    out.push({
+      p: [r.cx, mid[0], r.cz],
+      s: [r.w + OUT * 2, PANO_H, r.d + OUT * 2],
+      c: CYBER_GLASS, t: 'glass',
+    });
+
+    // EVERY FLOOR ABOVE IT: a row of smaller lights instead. That contrast is
+    // the whole point — a long strip low down and short punched openings above
+    // reads as a building with a working floor and offices over it, where the
+    // same window repeated up the wall reads as a spreadsheet.
+    for (let i = 1; i < mid.length; i++) {
+      for (const [nx, nz] of FACES) {
+        const along = nx !== 0 ? r.d : r.w;
+        if (along < 16) continue;
+        // One every thirteen metres or so, which on this district's 50 m blocks
+        // is four to a face. Spread over 86% of the width so the end ones stay
+        // off the corner — a window wrapping a corner is a window with no wall
+        // to sit in.
+        const n = Math.max(2, Math.min(5, Math.round(along / 13)));
+        for (let j = 0; j < n; j++) {
+          const off = ((j + 0.5) / n - 0.5) * along * 0.86;
+          const px = r.cx + nx * (r.w / 2) + (nx === 0 ? off : 0);
+          const pz = r.cz + nz * (r.d / 2) + (nz === 0 ? off : 0);
+          out.push({
+            p: [px, mid[i], pz],
+            s: nx !== 0 ? [OUT * 2, SMALL[1], SMALL[0]] : [SMALL[0], SMALL[1], OUT * 2],
+            c: CYBER_GLASS, t: 'glass',
+          });
+        }
+      }
+    }
+  }
+  return out;
+})();
+
 export const RAMP_BRUSHES_CYBER: number[] = RAMP_BRUSHES_RAW.slice();
-export const brushesCyber: Brush[] = brushesRaw.map((b, i) => {
+const cyberMapped: Brush[] = brushesRaw.map((b, i) => {
   const src = RAW_SRC[i] ?? '';
   let surface = CYBER_SURFACE[src] ?? 'plate';
   // A texture cannot know which way a road points, so there are two blacktops
@@ -3059,12 +3617,21 @@ export const brushesCyber: Brush[] = brushesRaw.map((b, i) => {
   // longer along the road than across it, which is a good enough tell for
   // something that only decides which way a painted line runs.
   if (surface === 'blacktop') surface = b.s[0] >= b.s[2] ? 'blacktopX' : 'blacktopZ';
+  // The Line's deck instead tiles at its own WIDTH, which is the only way a
+  // texture can put a line down the middle of a road: one repeat across, so the
+  // centre of the map is the centre of the deck. It works for the deck and
+  // nothing else on the map, because the deck is the only road with a constant
+  // width — see `blacktopDeck`.
+  if (src === S_ROAD) surface = 'blacktopDeck';
   // Blacktop keeps a near-white brush: its darkness is painted into the map,
   // because a dark brush colour would multiply the lane markings down with it.
   const mass = surface === 'girder' ? CYBER_STEEL
     : surface === 'slab' ? CYBER_GROUND
-      : surface.startsWith('blacktop') ? CYBER_TARMAC : CYBER_MASS;
-  const c = b.c === RAW_WHITE ? CYBER_TRIM : b.c === RAW_RED ? CYBER_RED : mass;
+      : surface === 'roofdeck' ? CYBER_ROOF
+        : surface === 'lane' ? LANE
+          : surface.startsWith('blacktop') ? CYBER_TARMAC : CYBER_MASS;
+  const c = surface === 'lane' ? LANE
+    : b.c === RAW_WHITE ? CYBER_TRIM : b.c === RAW_RED ? CYBER_RED : mass;
   return {
     ...b,
     // The accent bands stay bare. They are 30 cm of pure colour doing a job —
@@ -3081,6 +3648,7 @@ export const brushesCyber: Brush[] = brushesRaw.map((b, i) => {
     c,
   };
 });
+export const brushesCyber: Brush[] = [...cyberMapped, ...GLAZING];
 
 /**
  * Midday: the key high and nearly white, the dome deep blue, the haze pushed
@@ -3132,15 +3700,6 @@ export const CYBER_THEME: Theme = {
   // eye loses them anyway.
   inkCrease: [0.6, 60, 170],
   inkSuper: 2,
-  // Three tones and nothing between them: lit, shadow, and the line.
-  //
-  // The floor has to stay UNDER the first band centre or it swallows it and
-  // three tones quietly become two — at three bands the centres sit at 0.17,
-  // 0.5 and 0.83, so anything above about 0.4 erases the darkest one. 0.38
-  // leaves all three standing and still keeps a shadowed white wall at a solid
-  // mid grey rather than letting it fall to near black.
-  posterize: 3,
-  posterizeFloor: 0.38,
   // The district is 430 x 364, so a 480 m square holds it with room for the
   // near skyline. Two thirds of the default span over the same 4096 texels is
   // a shadow edge a third sharper, and this style has nowhere to hide a soft
@@ -3160,9 +3719,10 @@ export const CYBER_THEME: Theme = {
 export const triggers: Trigger[] = [
   { p: [RINGS.ladder.x, RINGS.ladder.y + 3, RINGS.ladder.z], r: 13, kind: 'checkpoint', name: 'ladder' },
   { p: [RINGS.stacks.x, RINGS.stacks.y + 3, RINGS.stacks.z], r: 13, kind: 'checkpoint', name: 'stacks' },
-  // On the Line, at the top of the pitch that climbs out of the middle of the
-  // map — the one place on the circuit you arrive at from three directions.
-  { p: [60, lineY(LINE_LEGS[0], 60) + 3, LINE_LEGS[0].at], r: 11,
+  // On the Line, at the top of the 16° pitch on the north side and just short of
+  // the east chord's junction — so it is the one point on the circuit you can
+  // arrive at from three directions.
+  { p: [60, lineY(LEG_NORTH, 60) + 3, LEG_NORTH.at], r: 11,
     kind: 'checkpoint', name: 'overpass' },
   { p: [TOWER_X, SPIRE_TOP + 3, TOWER_Z + TOWER_D / 2 - 7], r: 12, kind: 'checkpoint', name: 'crown' },
   // Placed where the descent actually PUTS you, not where the Yard looks tidy.

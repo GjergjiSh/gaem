@@ -21,6 +21,8 @@ export function makePlayer(spawn: V3): Player {
     dashCooldown: 0,
     dashDir: V.v3(),
     dashTime: 0,
+    dashSuper: false,
+    superCooldown: 0,
     coyoteJump: 0,
     coyoteDash: 0,
     bufJump: 0,
@@ -38,12 +40,11 @@ export function makePlayer(spawn: V3): Player {
     lastWallZ: 0,
     wallChain: 0,
     sprinting: false,
-    stamina: T.stamina.max,
+    gas: T.gas.max,
+    gasIdle: 0,
+    gasDry: false,
     thrusting: false,
     boosting: false,
-    fuel: T.thruster.fuelMax,
-    fuelIdle: 0,
-    fuelDry: false,
     cables: [
       { on: false, anchor: V.v3(), len: 0 },
       { on: false, anchor: V.v3(), len: 0 },
@@ -170,14 +171,73 @@ function enter(p: Player, s: StateName) {
   p.stateTime = 0;
 }
 
+// ---------------------------------------------------------------- gas
+
+/**
+ * Can this move be paid for?
+ *
+ * One rule for the whole kit, and it is the blunt one: a move you cannot afford
+ * does not come out. Not a weaker version and not one on credit — nothing, and a
+ * buffered press waits on the tank exactly the way it waits on a cooldown.
+ *
+ * Blunt is safe here only because of what is free. Running, wallrunning, the
+ * wingsuit and the rope cost nothing, and the ground refuels at
+ * `gas.groundRefuel` times the normal rate, so the worst an empty tank can do is
+ * make you walk for about a second. Charge for running and this rule strands
+ * you; charge for everything else and it is a budget.
+ */
+function hasGas(p: Player, cost: number) {
+  if (cost <= 0 || T.cheats.infiniteGas) return true;
+  return p.gas >= cost;
+}
+
+/**
+ * Spend it, all at once, for a move that happens in an instant.
+ *
+ * A function rather than a subtraction because of the second line: spending has
+ * to push the refuel delay out. Without that, the tank starts refilling between
+ * two jumps and every number in the price list is a lie.
+ */
+function spendGas(p: Player, cost: number) {
+  if (cost <= 0 || T.cheats.infiniteGas) return;
+  p.gas = Math.max(0, p.gas - cost);
+  p.gasIdle = 0;
+}
+
+/**
+ * Spend it over time, for the jets — the one thing here that bills per second.
+ *
+ * This is also the only spender that can set `gasDry`, and deliberately: the dry
+ * lockout exists so that burning the last drop costs you the jets for a moment.
+ * A lockout that also took your jump would leave you on a rooftop with a full
+ * bar and nothing to press.
+ */
+function burnGas(p: Player, rate: number, dt: number) {
+  p.gasIdle = 0;
+  if (T.cheats.infiniteGas) return;
+  p.gas = Math.max(0, p.gas - rate * dt);
+  if (p.gas <= 0) p.gasDry = true;
+}
+
+/**
+ * What a jump costs. Two numbers, because they are two different purchases: the
+ * one off the floor is how you get anywhere, the one in the air is a bought metre
+ * of reach. Read the same way in `canJump` and in `doJump`, off `fromGround`.
+ */
+function jumpGas(fromGround: boolean) {
+  return fromGround ? T.jump.gas : T.jump.gasAir;
+}
+
 // ---------------------------------------------------------------- actions
 
 function canJump(p: Player) {
-  return p.jumpsLeft > 0 || p.coyoteJump > 0;
+  if (!(p.jumpsLeft > 0 || p.coyoteJump > 0)) return false;
+  return hasGas(p, jumpGas(p.grounded || p.coyoteJump > 0));
 }
 
 function doJump(p: Player, speedBonus = 1) {
   const fromGround = p.grounded || p.coyoteJump > 0;
+  spendGas(p, jumpGas(fromGround));
   p.vel.y = fromGround ? T.jump.speed : T.jump.doubleJumpSpeed;
   if (speedBonus !== 1) {
     p.vel = V.setLenH(p.vel, Math.min(T.momentum.hardCap, V.lenH(p.vel) * speedBonus));
@@ -191,8 +251,19 @@ function doJump(p: Player, speedBonus = 1) {
   enter(p, 'airborne');
 }
 
+/**
+ * The run is free; the kick is not. Wallrunning is running — same rule as the
+ * ground — but the ejection is an impulse the size of a jump, so it is priced
+ * like one. Gated separately from `canJump` because a wall jump spends no jump
+ * charge and never went through it.
+ */
+function canWallJump(p: Player) {
+  return hasGas(p, T.wall.gasJump);
+}
+
 /** Kick off a wall: outward along the normal, plus a solid vertical pop. */
 function doWallJump(p: Player) {
+  spendGas(p, T.wall.gasJump);
   const n = p.wallNormal;
   // Ejection angle comes entirely from jumpOut / jumpUp / jumpKeepAlong, with no
   // hidden speed-preservation clamp, so the three sliders fully describe the arc
@@ -219,7 +290,7 @@ function doWallJump(p: Player) {
 
 function canDash(p: Player) {
   if (!T.dash.enabled) return false;
-  if (p.stamina < T.stamina.dashCost) return false;
+  if (!hasGas(p, T.dash.gas)) return false;
   return p.dashCharges > 0 && p.dashCooldown <= 0;
 }
 
@@ -239,9 +310,65 @@ function doDash(p: Player, i: Intent) {
   p.dashBoost = p.slamBoost > 0 ? T.slam.dashBoost : 1;
   p.dashTime = T.dash.duration;
   p.dashEntrySpeed = V.lenH(p.vel);
+  p.dashSuper = false;
   p.dashCharges--;
-  p.stamina = Math.max(0, p.stamina - T.stamina.dashCost);
+  spendGas(p, T.dash.gas);
   p.dashCooldown = T.dash.cooldown;
+  p.bufDash = 0;
+  p.coyoteDash = 0;
+  if (T.dash.refundJumpOnDash) p.jumpsLeft = Math.max(p.jumpsLeft, T.jump.maxJumps - 1);
+  registerTech(p);
+  enter(p, 'dashing');
+}
+
+/**
+ * Z. Everything about it is a dash except the size of it and one clamp.
+ *
+ * It runs in the SAME state as the dash, on purpose: every cancel, every link and
+ * every bit of tech you already know still applies, because there is nothing new
+ * to know. `p.dashSuper` is only which set of numbers the state is reading.
+ *
+ * Its own `enabled`, though, and not `dash.enabled`: the shipped tune has the
+ * dash switched off (Shift is sprint there), and a launch that silently
+ * disappeared along with it would be a bug with no symptom to search for.
+ */
+function canSuperDash(p: Player) {
+  if (!T.superdash.enabled) return false;
+  if (p.superCooldown > 0) return false;
+  return hasGas(p, T.superdash.gas);
+}
+
+function doSuperDash(p: Player, i: Intent) {
+  const sd = T.superdash;
+
+  // Spherical, where the dash is a tilted horizontal. The stick picks the compass
+  // bearing and the pitch picks the elevation, so aiming straight up goes
+  // straight up whatever the stick says — the dash's construction adds y to a
+  // full-length horizontal vector, which caps a fully vertical aim at 45 degrees
+  // the moment you are holding W. Aiming at the sky has to mean the sky.
+  let dir = wishDir(i);
+  if (V.lenH(dir) < 1e-6) dir = V.v3(-Math.sin(i.yaw), 0, -Math.cos(i.yaw));
+  const pitch = i.pitch * sd.aim;
+  const cp = Math.cos(pitch);
+  p.dashDir = V.norm(V.v3(dir.x * cp, Math.sin(pitch), dir.z * cp));
+
+  // Everything else stops, for the reason the wingsuit stops everything: this
+  // owns velocity for its window, and a cable or a glide still running inside it
+  // would be steering the thing it is trying to launch. The rope especially —
+  // `updateGrapple` gets the last word on velocity every tick, so a live cable
+  // would clamp a 70 m/s launch back to its radius and read as Z doing nothing.
+  if (p.state === 'wallrunning') detachWall(p);
+  if (p.state === 'wingsuit') stowWing(p);
+  if (p.grappling) releaseGrapple(p, false);
+  p.slamming = false;
+  p.vaultT = 0;
+
+  p.dashSuper = true;
+  p.dashBoost = p.slamBoost > 0 ? T.slam.dashBoost : 1;
+  p.dashTime = sd.duration;
+  p.dashEntrySpeed = V.lenH(p.vel);
+  p.superCooldown = sd.cooldown;
+  spendGas(p, sd.gas);
   p.bufDash = 0;
   p.coyoteDash = 0;
   if (T.dash.refundJumpOnDash) p.jumpsLeft = Math.max(p.jumpsLeft, T.jump.maxJumps - 1);
@@ -254,10 +381,12 @@ function canSlide(p: Player) {
   // Sliding is a ground move. Without the explicit grounded test you can crouch
   // while stuck to a wall, which looks and reads wrong.
   if (!p.grounded || p.state === 'wallrunning') return false;
+  if (!hasGas(p, T.slide.gas)) return false;
   return p.slideCooldown <= 0 && V.lenH(p.vel) >= T.slide.minSpeed;
 }
 
 function doSlide(p: Player) {
+  spendGas(p, T.slide.gas);
   const h = V.lenH(p.vel);
   p.vel = V.setLenH(p.vel, Math.min(T.momentum.hardCap, h + T.slide.boost));
   p.bufSlide = 0;
@@ -289,6 +418,7 @@ function endSlide(p: Player) {
  */
 function trySlam(p: Player, i: Intent, col: CollisionWorld): boolean {
   if (!T.slam.enabled || !i.slam.pressed || p.slamming) return false;
+  if (!hasGas(p, T.slam.gas)) return false;
   if (p.grounded || p.state === 'grounded' || p.state === 'sliding') return false;
   // Hooked: the rope keeps it. C becomes a dive, handled by updateGrapple.
   if (p.grappling) return false;
@@ -300,6 +430,7 @@ function trySlam(p: Player, i: Intent, col: CollisionWorld): boolean {
   if (clear !== null) return false;
 
   p.slamming = true;
+  spendGas(p, T.slam.gas);
   p.vel = V.v3(p.vel.x * T.slam.keepH, -T.slam.speed, p.vel.z * T.slam.keepH);
   if (p.state === 'wallrunning') detachWall(p);
   p.vaultT = 0;                 // no hopping a ledge on the way down
@@ -361,6 +492,7 @@ function ledgeAhead(p: Player, dir: V3, col: CollisionWorld): number | null {
 function tryVault(p: Player, col: CollisionWorld): boolean {
   const t = T.vault;
   if (!t.enabled || p.vaultT > 0 || p.vaultCooldown > 0) return false;
+  if (!hasGas(p, t.gas)) return false;
   if (p.state === 'wallrunning') return false;
 
   const h = V.lenH(p.vel);
@@ -373,6 +505,7 @@ function tryVault(p: Player, col: CollisionWorld): boolean {
   // is the same relation the jump height is read with. A fixed impulse is either
   // too weak for the tall ledges or a pop on the short ones.
   const up = Math.sqrt(2 * T.world.gravityRise * (rise + t.clearance));
+  spendGas(p, t.gas);
   p.vel.y = Math.max(p.vel.y, up);
   p.vaultDir = dir;
   p.vaultT = t.hold;
@@ -470,7 +603,7 @@ function updateWallrunning(p: Player, i: Intent, wish: V3, col: CollisionWorld, 
   if (!hit || Math.abs(hit.normal.y) > Math.sin(T.wall.maxAngle)) return detachWall(p);
   p.wallNormal = V.norm(V.v3(hit.normal.x, 0, hit.normal.z));
 
-  if (p.bufJump > 0) return doWallJump(p);
+  if (p.bufJump > 0 && canWallJump(p)) return doWallJump(p);
   if (p.bufDash > 0 && canDash(p)) return doDash(p, i);
   // Only a genuine landing ends the run. `grounded` alone lies here: an
   // outward-leaning wall registers a contact under the capsule and reads as
@@ -736,7 +869,10 @@ function updateGrapple(p: Player, i: Intent, col: CollisionWorld, dt: number) {
  * The shape of the verb is "hang and shoot", not "fly": `maxRise` caps the climb,
  * `hoverDrag` bleeds horizontal speed so a hover parks you rather than launching
  * you across the arena, and the tank is short. Running it dry locks the jets out
- * until `restartFuel` is back, so there is a real cost to burning the last drop.
+ * until `gas.restart` is back, so there is a real cost to burning the last drop.
+ *
+ * The jets are the only thing in the kit that bills per SECOND rather than per
+ * press, which is why they are also the only thing that can set `gasDry`.
  *
  * Returns the gravity scale to apply this tick.
  */
@@ -746,7 +882,7 @@ function updateThruster(p: Player, i: Intent, wish: V3, dt: number): number {
     // The gate that stops a held jump from lighting the jets on every hop.
     && (!t.requireEmptyJumps || p.jumpsLeft <= 0);
 
-  p.thrusting = wants && !p.fuelDry && p.fuel > 0;
+  p.thrusting = wants && !p.gasDry && (p.gas > 0 || T.cheats.infiniteGas);
   if (!p.thrusting) return 1;
 
   // Afterburner: the dash key, held while the jets are already lit. The hover is
@@ -754,9 +890,7 @@ function updateThruster(p: Player, i: Intent, wish: V3, dt: number): number {
   // only thing keeping it honest is that it drinks the tank.
   p.boosting = t.boost && i.dash.held;
 
-  p.fuelIdle = 0;
-  p.fuel = Math.max(0, p.fuel - t.burnRate * (p.boosting ? t.boostBurn : 1) * dt);
-  if (p.fuel <= 0) p.fuelDry = true;
+  burnGas(p, t.burnRate * (p.boosting ? t.boostBurn : 1), dt);
 
   if (p.boosting) return boostThruster(p, i, wish, dt);
 
@@ -832,6 +966,153 @@ function boostThruster(p: Player, i: Intent, wish: V3, dt: number): number {
   return t.gravityScale;
 }
 
+// ---------------------------------------------------------------- wingsuit
+
+/**
+ * The aim, as a unit vector. The wingsuit's only steering input: it flies where
+ * the camera points, which is what makes it read as a body in a stance rather
+ * than a character being driven with WASD.
+ */
+function lookDir(i: Intent): V3 {
+  const cp = Math.cos(i.pitch);
+  return V.v3(-Math.sin(i.yaw) * cp, Math.sin(i.pitch), -Math.cos(i.yaw) * cp);
+}
+
+/**
+ * Rotate a unit vector toward another by at most `maxRad`, preserving length.
+ *
+ * A slerp rather than a normalised lerp, because this is the one place in the
+ * solver where the ANGLE is the quantity being rate-limited — `turn` is in rad/s
+ * and has to mean that at every angle, or the suit turns faster when it happens
+ * to be pointing near where you are looking.
+ */
+function turnToward(from: V3, to: V3, maxRad: number): V3 {
+  const d = V.clamp(V.dot(from, to), -1, 1);
+  const ang = Math.acos(d);
+  if (ang < 1e-4) return to;
+  const t = Math.min(1, maxRad / ang);
+  const sin = Math.sin(ang);
+  // Antipodal: every rotation plane is equally valid and the slerp is 0/0. Take
+  // the linear blend, which for an exact reversal is degenerate and for anything
+  // else is close enough at the step sizes this runs at.
+  if (sin < 1e-5) {
+    const b = V.norm(V.add(V.scale(from, 1 - t), V.scale(to, t)));
+    return V.len(b) > 0.5 ? b : to;
+  }
+  const a = Math.sin((1 - t) * ang) / sin;
+  const b = Math.sin(t * ang) / sin;
+  return V.norm(V.add(V.scale(from, a), V.scale(to, b)));
+}
+
+function canWing(p: Player) {
+  // Airborne only. A wingsuit on the ground is a costume.
+  return T.wing.enabled && !p.grounded && p.state !== 'wingsuit';
+}
+
+/**
+ * Deploy, and everything else stops.
+ *
+ * A wingsuit is not a move you chain into — it is a different way of being in
+ * the air, and half a dash still running inside it would own the velocity the
+ * glide is trying to steer. So the dash, the slide, the wallrun, the slam, the
+ * vault and the rope all end here.
+ *
+ * The jets are the one exception, and deliberately: they are a modifier rather
+ * than a state, they are what turns the glide into flight, and cancelling them
+ * would make the two verbs exclusive when the whole point is that they combine.
+ */
+function doWing(p: Player, i: Intent) {
+  p.dashTime = 0;
+  p.slamming = false;
+  p.vaultT = 0;
+  if (p.state === 'wallrunning') detachWall(p);
+  if (p.grappling) releaseGrapple(p, false);
+  // Deployed at the apex of a jump there is no velocity to fly on, so the suit
+  // has no direction to turn and the first tick would be undefined. Take the aim
+  // and enough speed to have a wing.
+  const stall = Math.sqrt(T.wing.gravity / Math.max(1e-6, T.wing.lift));
+  if (V.len(p.vel) < stall * 0.5) p.vel = V.scale(lookDir(i), stall * 0.5);
+  enter(p, 'wingsuit');
+}
+
+function stowWing(p: Player) {
+  enter(p, p.grounded ? 'grounded' : 'airborne');
+}
+
+/**
+ * The glide. See `T.wing` for the model; this is that model and nothing else.
+ *
+ * Note what is NOT here: no air control, no wall attach, no cap from
+ * `currentCap`. The suit is exempt from the overspeed bleed too (see `step`),
+ * because bleeding a glide back to the run cap would delete the whole verb — a
+ * dive is supposed to be the fastest thing on the map.
+ */
+function updateWingsuit(p: Player, i: Intent, dt: number) {
+  const w = T.wing;
+  const aim = lookDir(i);
+
+  // --- GRAVITY, on the velocity VECTOR and not along the path. This is the whole
+  // model and it took two tries to get right: applied along the flight path only,
+  // as an energy term, aiming exactly level makes `dir.y` zero and gravity does
+  // nothing at all — you could hold the nose flat and fly forever, and a climb
+  // could bleed to a dead stop and hang there. A wingsuit that was a hover.
+  //
+  // On the vector it does both of its jobs at once, as it does in the world: the
+  // component along the path is the speed you gain diving and pay climbing, and
+  // the component across it bends the path down whatever you are aiming at.
+  //
+  // `wing.gravity`, not `world.gravityFall` — see the note on it. One value for
+  // both directions, whatever it is, or a dive would gain more than a climb costs
+  // and the loop would make energy.
+  p.vel.y -= w.gravity * dt;
+
+  let speed = V.len(p.vel);
+  let dir = speed > 1e-4 ? V.scale(p.vel, 1 / speed) : aim;
+
+  // --- LIFT, the only thing that fights that bend, and your hand is on it: the
+  // velocity swings toward where you look. Across the path, so it changes
+  // direction and never speed — free, which is why a dive can be spent on a
+  // climb.
+  //
+  // The rate goes as SPEED, which is the piece that makes this behave like a
+  // wing rather than like a steering wheel. Lift is proportional to v², so the
+  // rate it can rotate a path is v²/v — fast is agile, slow is floppy, out of
+  // one number. It also puts the stall where the arithmetic says: gravity bends
+  // down at g/v and lift bends up at lift·v, so level flight is sustainable
+  // exactly above sqrt(gravity / lift), and below that the nose falls whatever
+  // you do.
+  const rate = Math.min(w.turnMax, w.lift * speed);
+  dir = turnToward(dir, aim, rate * dt);
+
+  // --- DRAG, along the path, and the only irreversible term in here. It is what
+  // gives the dive a terminal speed and what stops dive-and-climb from being a
+  // closed loop you could pump for height.
+  speed = V.clamp(speed - w.drag * speed * speed * dt, 0, w.maxSpeed);
+  p.vel = V.scale(dir, speed);
+
+  // --- the jets. The suit already points where you look, so these only push.
+  // `requireEmptyJumps` is not consulted: it exists to stop a held hop lighting
+  // the jets, and there is no hop in here to hold.
+  const t = T.thruster;
+  p.thrusting = t.enabled && i.thrust.held && !p.gasDry && (p.gas > 0 || T.cheats.infiniteGas);
+  p.boosting = false;
+  if (p.thrusting) {
+    burnGas(p, t.burnRate * w.jetBurn, dt);
+    p.vel.x += aim.x * w.jetAccel * dt;
+    p.vel.y += aim.y * w.jetAccel * dt;
+    p.vel.z += aim.z * w.jetAccel * dt;
+    const s = V.len(p.vel);
+    if (s > w.jetCap) p.vel = V.scale(p.vel, w.jetCap / s);
+  }
+
+  // The one way out that is not X or the ground: a dash. Being unable to leave a
+  // mode is worse than any rule it would break.
+  if (w.cancelOnDash && p.bufDash > 0 && canDash(p)) {
+    stowWing(p);
+    doDash(p, i);
+  }
+}
+
 // ---------------------------------------------------------------- states
 
 function gravity(p: Player, dt: number, scale = 1) {
@@ -882,7 +1163,7 @@ function updateAirborne(p: Player, i: Intent, wish: V3, col: CollisionWorld, dt:
   }
 
   // A wall jump stays available briefly after leaving the wall.
-  if (p.bufJump > 0 && p.wallCoyote > 0) return doWallJump(p);
+  if (p.bufJump > 0 && p.wallCoyote > 0 && canWallJump(p)) return doWallJump(p);
   // Slid off a ledge a moment ago? The jump still counts as a slide jump and
   // keeps the multiplier. This is the dash-slide-jump ledge extension.
   if (p.bufJump > 0 && p.slideCoyote > 0 && canJump(p)) {
@@ -901,26 +1182,45 @@ function updateDashing(p: Player, i: Intent, col: CollisionWorld, dt: number) {
   // dashing while already faster — out of an afterburn at 34 u/s, say — dropped
   // you to 32 for the duration and handed it back on exit. Net zero, and it read
   // as the dash doing nothing at all. At speed the dash is now a free redirect.
-  const base = T.dash.speed * p.dashBoost;
+  const sd = T.superdash;
+  const base = (p.dashSuper ? sd.speed : T.dash.speed) * p.dashBoost;
+  // The launch has its own ceiling. `momentum.hardCap` is the run's safety net
+  // and is well under `superdash.speed`, so borrowing it here would quietly
+  // delete the move.
+  const ceil = p.dashSuper ? sd.maxSpeed : T.momentum.hardCap * p.dashBoost;
   const speed = T.dash.preserveEntrySpeed
-    ? Math.min(T.momentum.hardCap * p.dashBoost, Math.max(base, p.dashEntrySpeed))
-    : base;
+    ? Math.min(ceil, Math.max(base, p.dashEntrySpeed))
+    : Math.min(ceil, base);
   p.vel = V.scale(p.dashDir, speed);
-  if (T.dash.gravityScale > 0) gravity(p, dt, T.dash.gravityScale);
+  const gScale = p.dashSuper ? sd.gravityScale : T.dash.gravityScale;
+  if (gScale > 0) gravity(p, dt, gScale);
 
   p.dashTime -= dt;
 
   // Dash is cancellable — this is where most of the tech comes from.
-  if (p.bufJump > 0 && p.wallCoyote > 0) return doWallJump(p);
+  if (p.bufJump > 0 && p.wallCoyote > 0 && canWallJump(p)) return doWallJump(p);
   if (p.bufJump > 0 && canJump(p)) return doJump(p);
   if (p.bufSlide > 0 && p.grounded && canSlide(p)) return doSlide(p);
   if (!p.grounded && tryWallAttach(p, col)) return;
 
   if (p.dashTime <= 0) {
-    const out = T.dash.speed * p.dashBoost * T.dash.exitSpeedKeep;
-    const keep = T.dash.preserveEntrySpeed ? Math.max(out, p.dashEntrySpeed) : out;
-    p.vel = V.scale(p.dashDir, Math.min(keep, T.momentum.hardCap * p.dashBoost));
-    if (p.vel.y > 0) p.vel.y = Math.min(p.vel.y, T.jump.speed);
+    if (p.dashSuper) {
+      // THE difference between the two moves, and it is one missing clamp. An
+      // ordinary dash exits with its vertical pinned to `jump.speed`, which is
+      // what keeps it a reposition rather than a launch — a dash that could fling
+      // you would make every other verb in the kit optional.
+      //
+      // This is the launch, so the clamp is off and `hardCap` does not apply
+      // either. 70 x 0.85 leaves you at 59 m/s, and straight up that is about
+      // another 49m of coasting on top of the 24 the window already covered.
+      p.dashSuper = false;
+      p.vel = V.scale(p.dashDir, Math.min(sd.maxSpeed, sd.speed * p.dashBoost * sd.exitKeep));
+    } else {
+      const out = T.dash.speed * p.dashBoost * T.dash.exitSpeedKeep;
+      const keep = T.dash.preserveEntrySpeed ? Math.max(out, p.dashEntrySpeed) : out;
+      p.vel = V.scale(p.dashDir, Math.min(keep, T.momentum.hardCap * p.dashBoost));
+      if (p.vel.y > 0) p.vel.y = Math.min(p.vel.y, T.jump.speed);
+    }
     enter(p, p.grounded ? 'grounded' : 'airborne');
   }
 }
@@ -978,6 +1278,7 @@ function tickTimers(p: Player, dt: number) {
   p.slideCooldown = d(p.slideCooldown);
   p.slideCoyote = d(p.slideCoyote);
   p.dashCooldown = d(p.dashCooldown);
+  p.superCooldown = d(p.superCooldown);
   p.wallCoyote = d(p.wallCoyote);
   p.wallCooldown = d(p.wallCooldown);
   p.vaultT = d(p.vaultT);
@@ -987,24 +1288,29 @@ function tickTimers(p: Player, dt: number) {
   p.grappleCooldown = d(p.grappleCooldown);
   p.chainTimer = d(p.chainTimer);
   if (p.chainTimer <= 0) p.chain = 0;
-  p.stamina = Math.min(T.stamina.max, p.stamina + T.stamina.regen * dt);
   p.stateTime += dt;
 
-  // Thruster tank. Refuelling belongs here rather than in updateThruster because
-  // it has to happen in every state — most of all on the ground, where the
+  // The tank. Refuelling belongs here rather than in updateThruster because it
+  // has to happen in every state — most of all on the ground, where the
   // groundRefuel bonus makes "land, top up, go again" the loop instead of
   // hanging in the air waiting. Landing is the reward, not patience.
-  const th = T.thruster;
+  //
+  // `gasIdle` counts from the last SPEND, not from the last burn: every spender
+  // resets it, so a jump delays the refill exactly the way a hover does. Without
+  // that, hopping across a roof would refuel between the hops and the prices
+  // would mean nothing.
+  const g = T.gas;
   if (p.thrusting) {
-    p.fuelIdle = 0;
+    p.gasIdle = 0;
   } else {
-    p.fuelIdle += dt;
-    if (p.fuelIdle >= th.refuelDelay) {
-      const rate = th.refuelRate * (p.grounded ? th.groundRefuel : 1);
-      p.fuel = Math.min(th.fuelMax, p.fuel + rate * dt);
+    p.gasIdle += dt;
+    if (p.gasIdle >= g.refuelDelay) {
+      const rate = g.refuelRate * (p.grounded ? g.groundRefuel : 1);
+      p.gas = Math.min(g.max, p.gas + rate * dt);
     }
   }
-  if (p.fuelDry && p.fuel >= th.restartFuel) p.fuelDry = false;
+  if (T.cheats.infiniteGas) { p.gas = g.max; p.gasDry = false; }
+  if (p.gasDry && p.gas >= g.restart) p.gasDry = false;
   // Cleared every tick; only updateAirborne re-arms them, so no other state can
   // leave the HUD showing a burn that isn't happening.
   p.thrusting = false;
@@ -1023,7 +1329,10 @@ export function step(p: Player, i: Intent, col: CollisionWorld, dt: number) {
   // Hold-to-hang by default; `toggle` turns the press into an on/off switch.
   if (i.grapple.pressed) {
     if (p.grappling) releaseGrapple(p);
-    else fireGrapple(p, i, col);
+    // A rope and a wing fight over the same velocity — the cable wants to hold
+    // you to a radius and the glide wants to fly a path — so firing one stows
+    // the other. Same rule as the slam, and the same reason.
+    else if (fireGrapple(p, i, col) && p.state === 'wingsuit') stowWing(p);
   } else if (!T.grapple.toggle && p.grappling && !i.grapple.held) {
     releaseGrapple(p);
   }
@@ -1037,9 +1346,34 @@ export function step(p: Player, i: Intent, col: CollisionWorld, dt: number) {
   // landing boost, which is the cost, and needs no rule of its own.
   if (p.slamming && T.slam.jumpCancel && i.jump.pressed) p.slamming = false;
 
+  // The super dash, before the state machine and ahead of the wingsuit.
+  //
+  // Here rather than in each state's update for the reason the wingsuit is here:
+  // it cancels whatever you were doing, so that move must not get a tick of its
+  // own first — and handling it once buys every entry at no cost. Ground, air,
+  // slide, dash, wallrun, wingsuit: Z works out of all of them without a single
+  // one of them knowing the move exists.
+  //
+  // Ahead of the wingsuit because Z out of a glide should be a launch, and X on
+  // the same tick should then be a glide off the top of it — that ordering makes
+  // the pair a loop. The other way round the two presses would cancel out.
+  if (i.super.pressed && canSuperDash(p)) doSuperDash(p, i);
+
+  // The wingsuit, before the state machine and for the same reason as the slam:
+  // deploying cancels whatever you were doing, so that move must not get a tick
+  // of its own first.
+  if (T.wing.enabled && i.wing.pressed) {
+    if (p.state === 'wingsuit') stowWing(p);
+    else if (canWing(p)) doWing(p, i);
+  }
+
   // Before the state machine: a slam cancels whatever you were doing, so the
   // state it cancels should not get a tick of its own first.
   trySlam(p, i, col);
+  // And a slam out of a wingsuit closes it. Both own velocity outright, so the
+  // two cannot run at once — and of the pair the slam is the one you just asked
+  // for.
+  if (p.slamming && p.state === 'wingsuit') stowWing(p);
 
   // Sprint is a held modifier, not a state — the cap change happens in currentCap().
   p.sprinting = T.sprint.enabled && i.dash.held && i.moveY > T.sprint.minForward;
@@ -1056,6 +1390,7 @@ export function step(p: Player, i: Intent, col: CollisionWorld, dt: number) {
       case 'dashing': updateDashing(p, i, col, dt); break;
       case 'sliding': updateSliding(p, i, wish, dt); break;
       case 'wallrunning': updateWallrunning(p, i, wish, col, dt); break;
+      case 'wingsuit': updateWingsuit(p, i, dt); break;
     }
     guard++;
   } while (p.state !== before && guard < 3);
@@ -1063,14 +1398,19 @@ export function step(p: Player, i: Intent, col: CollisionWorld, dt: number) {
   // The slam owns velocity outright while it is running, so it goes after the
   // state (which would otherwise re-apply air control into it) and before the
   // rope. Vaulting is suppressed for the same reason: the whole move is "down".
+  // Vaulting is suppressed in the suit for the reason it is suppressed in a
+  // slam: the whole move is a path, and a hop over a lip is not on it.
   if (p.slamming) updateSlam(p);
-  else tryVault(p, col);
+  else if (p.state !== 'wingsuit') tryVault(p, col);
 
   // After the state, before the move: the rope gets the last word on velocity,
   // so it can cancel whatever the state just added that the rope would not allow.
   updateGrapple(p, i, col, dt);
 
-  if (p.state !== 'dashing') bleedOverspeed(p, dt);
+  // The suit is exempt along with the dash. Bleeding a glide back toward the run
+  // cap would delete the verb outright: a dive is meant to be the fastest thing
+  // on the map, and `wing.maxSpeed` is what bounds it instead.
+  if (p.state !== 'dashing' && p.state !== 'wingsuit') bleedOverspeed(p, dt);
 
   p.prevPos = V.copy(p.pos);
   const res = col.move(p.pos, V.scale(p.vel, dt));
@@ -1118,8 +1458,10 @@ export function step(p: Player, i: Intent, col: CollisionWorld, dt: number) {
     p.lastWallX = 0;
     p.lastWallZ = 0;
     p.wallChain = 0;
-    if (p.state === 'airborne' || p.state === 'wallrunning') {
+    if (p.state === 'airborne' || p.state === 'wallrunning' || p.state === 'wingsuit') {
       // Buffered slide on landing — lets you slide the instant you touch down.
+      // Which is also how a wingsuit is supposed to end: you come in fast and
+      // flat, and the slide is what you do with the speed.
       if (p.bufSlide > 0 && canSlide(p)) doSlide(p);
       else enter(p, 'grounded');
     }

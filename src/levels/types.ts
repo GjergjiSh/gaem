@@ -121,23 +121,6 @@ export interface Theme {
    */
   inkSuper?: number;
   /**
-   * Flat tones to snap the shading to, and the darkest one allowed.
-   *
-   * Zero bands leaves the shading continuous, which is what every level except
-   * cyberedge wants. Two or three is the reference's whole lighting model: a
-   * lit tone, a shadow tone, and the ink between them, with no gradient across
-   * a wall at all. Only the lighting response is banded — hue and saturation
-   * come through untouched, so an accent colour stays exactly as saturated as
-   * its texture made it.
-   *
-   * The floor matters as much as the count. Left to the maths the darkest band
-   * goes almost black, because there is nothing lighting a shadowed face but a
-   * deliberately starved ambient; the reference's shadow side is a solid mid
-   * grey, and this is the number that puts it there.
-   */
-  posterize?: number;
-  posterizeFloor?: number;
-  /**
    * Half-width of the sun's shadow frustum, in metres.
    *
    * The map is baked once, so this buys sharpness rather than frame time: the

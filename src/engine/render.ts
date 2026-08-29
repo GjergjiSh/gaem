@@ -94,8 +94,6 @@ const BASE_THEME: Required<Theme> = {
   inkFade: [140, 420],
   inkCrease: [0.45, 40, 110],
   inkSuper: 2,
-  posterize: 0,
-  posterizeFloor: 0.4,
   shadowSpan: 320,
   shadowBias: -0.0006,
   shadowNormalBias: 0.6,
@@ -181,6 +179,8 @@ export class Renderer {
   player: THREE.Group;
   /** One mesh per brush, index-aligned with level.brushes — the editor's handle. */
   brushMeshes: THREE.Mesh[] = [];
+  /** Last frame's facing, for the wingsuit's bank rate. */
+  private lastFacing = 0;
   /** 0..1 scope amount, written by the weapon each frame. Pulls FOV in. */
   adsT = 0;
   /**
@@ -286,6 +286,11 @@ export class Renderer {
 
     // Player: capsule plus a nose so facing direction is readable.
     this.player = new THREE.Group();
+    // Aircraft order: yaw outermost in world, then pitch about the body's own
+    // right, then roll about its own nose. The default 'XYZ' pitches about the
+    // WORLD x axis, which on a yawed body is a roll — and the wingsuit does both
+    // at once, so the order has to mean what it reads like.
+    this.player.rotation.order = 'YXZ';
     const body = new THREE.Mesh(
       new THREE.CapsuleGeometry(T.character.radius, T.character.height - 2 * T.character.radius),
       new THREE.MeshLambertMaterial({ color: 0xf43f5e }),
@@ -382,7 +387,6 @@ export class Renderer {
     this.ink.configure({
       colour: t.ink, width: t.inkWidth, fade: t.inkFade,
       crease: t.inkCrease, super: t.inkSuper,
-      bands: t.posterize, shadowFloor: t.posterizeFloor,
     });
     if (!this.ink.enabled) this.ink.dispose();
     const shadow = this.sun.shadow;
@@ -489,10 +493,12 @@ export class Renderer {
       this.levelGroup.add(ring);
     }
 
-    // Every copy of every kit model in the district, collapsed into one draw
-    // call per distinct piece. Not in the editor, where a model has to stay a
-    // child of the brush it belongs to so the gizmo drags it.
-    if (!this.edges) this.batchModels();
+    // Every copy of every kit model in the district, and every brush that
+    // repeats a size, a surface and a colour, collapsed into one draw call per
+    // distinct piece. Not in the editor, where a model has to stay a child of
+    // the brush it belongs to so the gizmo drags it, and where a brush has to
+    // keep its own material so selection can tint it.
+    if (!this.edges) this.batchDraws();
 
     // The city has changed shape, so the baked shadow map is out of date. One
     // flag, one extra pass on the next frame, and then never again — which is
@@ -531,7 +537,7 @@ export class Renderer {
    * the two cells it can see instead of the whole map.
    */
   private static readonly CELL = 128;
-  private batchModels() {
+  private batchDraws() {
     interface Batch {
       geo: THREE.BufferGeometry;
       mat: THREE.Material;
@@ -540,6 +546,40 @@ export class Renderer {
     }
     const batches = new Map<string, Batch>();
     const roots: THREE.Object3D[] = [];
+    const boxes: THREE.Mesh[] = [];
+    const cellOf = (o: THREE.Object3D) => {
+      const C = Renderer.CELL;
+      return `${Math.round(o.position.x / C)},${Math.round(o.position.z / C)}`;
+    };
+    const into = (
+      geo: THREE.BufferGeometry, mat: THREE.Material, shadow: boolean,
+      cell: string, m: THREE.Matrix4,
+    ) => {
+      const key = `${geo.uuid}|${mat.uuid}|${shadow}|${cell}`;
+      let b = batches.get(key);
+      if (!b) { b = { geo, mat, shadow, m: [] }; batches.set(key, b); }
+      b.m.push(m);
+    };
+
+    // The brushes themselves. `boxFor` quantises its geometry key to 25 cm and
+    // `materialFor` is one material per (surface, colour), so two brushes that
+    // agree on size, surface and colour ALREADY share both — which is the whole
+    // condition for instancing, arrived at without anything new. A kerb is 0.7 x
+    // 0.9 x whatever and there are hundreds of them; a truss is one member
+    // repeated down a mile of girder.
+    //
+    // Batches of one are left alone rather than instanced. An InstancedMesh of a
+    // single matrix costs the same draw and a little more state, and most of the
+    // masses in the district are one-offs.
+    for (const brush of this.brushMeshes) {
+      const mat = brush.material as THREE.Material;
+      if (Array.isArray(brush.material) || mat === HIDDEN) continue;
+      brush.updateWorldMatrix(true, false);
+      into(brush.geometry, mat, brush.castShadow, cellOf(brush),
+        brush.matrixWorld.clone());
+      boxes.push(brush);
+    }
+
     for (const brush of this.brushMeshes) {
       for (const child of brush.children) {
         if ((child as THREE.LineSegments).isLineSegments) continue;
@@ -548,15 +588,8 @@ export class Renderer {
         child.traverse((o) => {
           const mesh = o as THREE.Mesh;
           if (!mesh.isMesh || Array.isArray(mesh.material)) return;
-          const C = Renderer.CELL;
-          const cell = `${Math.round(brush.position.x / C)},${Math.round(brush.position.z / C)}`;
-          const key = `${mesh.geometry.uuid}|${mesh.material.uuid}|${mesh.castShadow}|${cell}`;
-          let b = batches.get(key);
-          if (!b) {
-            b = { geo: mesh.geometry, mat: mesh.material, shadow: mesh.castShadow, m: [] };
-            batches.set(key, b);
-          }
-          b.m.push(mesh.matrixWorld.clone());
+          into(mesh.geometry, mesh.material, mesh.castShadow, cellOf(brush),
+            mesh.matrixWorld.clone());
           found = true;
         });
         if (found) roots.push(child);
@@ -564,6 +597,7 @@ export class Renderer {
     }
     if (!batches.size) return;
     for (const b of batches.values()) {
+      if (b.m.length < 2) continue;
       const im = new THREE.InstancedMesh(b.geo, b.mat, b.m.length);
       for (let i = 0; i < b.m.length; i++) im.setMatrixAt(i, b.m[i]);
       im.instanceMatrix.needsUpdate = true;
@@ -576,6 +610,16 @@ export class Renderer {
     // model, and leaving the tree alone is what keeps a rebuild the only thing
     // that has to know about any of this — but they no longer draw.
     for (const r of roots) r.visible = false;
+    // A brush whose box went into a batch stops drawing the same way one under
+    // a model does: a dedicated hidden material, so the mesh stays in
+    // `brushMeshes` and stays raycastable for the sword, the Getsuga and the
+    // projectiles. Only the ones that actually got instanced — a batch of one
+    // was left as it was and still has to draw itself.
+    for (const m of boxes) {
+      const b = batches.get(`${m.geometry.uuid}|${(m.material as THREE.Material).uuid}`
+        + `|${m.castShadow}|${cellOf(m)}`);
+      if (b && b.m.length > 1) m.material = HIDDEN;
+    }
   }
 
   /**
@@ -625,6 +669,28 @@ export class Renderer {
     this.player.rotation.y = p.facing;
     this.player.scale.y = V.damp(this.player.scale.y, sliding ? 0.55 : 1, 14, dt);
     this.player.visible = !fp;
+
+    // The wingsuit stance. The body lies along its own flight path: the head is
+    // the +Y axis, yaw has already pointed +Z down the horizontal course, so the
+    // pitch that puts the head on the velocity is a quarter turn less the flight
+    // angle. Level comes out prone, a vertical dive comes out head-down, and a
+    // zoom climb stands you back up — all of it read off the velocity rather
+    // than animated, so the pose can never lie about where you are going.
+    const flying = p.state === 'wingsuit';
+    let wantPitch = 0;
+    let bank = 0;
+    if (flying) {
+      const sp = V.len(p.vel);
+      const flight = sp > 1e-4 ? Math.asin(V.clamp(p.vel.y / sp, -1, 1)) : 0;
+      wantPitch = Math.PI / 2 - flight - T.wing.lean;
+      // Bank into the turn, off the rate the facing is actually changing at, so
+      // the roll comes from the flying rather than from the input.
+      const rate = dt > 1e-5 ? V.shortestAngle(this.lastFacing, p.facing) / dt : 0;
+      bank = V.clamp(rate * T.wing.roll, -Math.PI / 2, Math.PI / 2);
+    }
+    this.lastFacing = p.facing;
+    this.player.rotation.x = V.damp(this.player.rotation.x, wantPitch, flying ? 7 : 12, dt);
+    this.player.rotation.z = V.damp(this.player.rotation.z, bank, 6, dt);
 
     const over = Math.max(0, V.lenH(p.vel) - currentCap(p)) / T.momentum.hardCap;
 

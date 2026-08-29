@@ -55,42 +55,7 @@ uniform float creaseNear;
 uniform float creaseFar;
 uniform float fadeNear;
 uniform float fadeFar;
-uniform float bands;
-uniform float shadowFloor;
 varying vec2 vUv;
-
-/**
- * Snap the shading to a few flat tones.
- *
- * A MeshStandardMaterial gives a wall dozens of greys as it turns away from the
- * key, and the reference has three: a lit tone, a shadow tone, and the line
- * between them. That is not a small stylistic gap — a smooth falloff is the
- * single thing that most reads as "3D render" rather than as drawn, and no
- * amount of getting the palette right survives it.
- *
- * Only the LIGHTING RESPONSE is quantised. The colour is scaled towards its
- * banded luminance rather than replaced by it, so a red door stays exactly as
- * red and as saturated as its texture made it and simply lands in one of the
- * three tones instead of sliding between them.
- *
- * Banding is done on the square root of luminance, not on luminance itself.
- * Light is linear and the eye is not: even bands in linear space put almost
- * every step up in the highlights and leave the whole shadow side in one, which
- * looks like a bug in the shader rather than a decision.
- */
-vec3 posterize(vec3 c) {
-  float l = max(dot(c, vec3(0.2126, 0.7152, 0.0722)), 1e-4);
-  float t = clamp(sqrt(l), 0.0, 1.0);
-  // Band CENTRES, so the darkest tone is not black and the lightest is not
-  // blown — quantising to band edges gives one tone nothing ever reaches and
-  // another that half the wall clips into.
-  float q = min((floor(t * bands) + 0.5) / bands, 1.0);
-  // And a floor, because the shadow side of a white building in the reference
-  // is a solid mid grey. Left to the maths it goes almost black, since there is
-  // nothing lighting it but a starved ambient.
-  q = max(q, shadowFloor);
-  return c * ((q * q) / l);
-}
 
 /** View-space position of whatever is under a pixel. */
 vec3 viewPos(vec2 uv) {
@@ -201,9 +166,6 @@ void main() {
     for (int j = 0; j < SS; j++) {
       vec2 uv = vUv + (vec2(float(i), float(j)) + 0.5 - float(SS) * 0.5) * texel;
       vec3 col = texture2D(tColor, uv).rgb;
-      // Not the sky. It is the one thing in frame that is supposed to be a
-      // gradient, and three bands of it is a target painted over the city.
-      if (bands > 0.5 && texture2D(tDepth, uv).x < 0.99999) col = posterize(col);
       float z = -viewPos(uv).z;
       sum += mix(col, lineColor, clamp(edgeAt(uv, o, z), 0.0, 1.0));
     }
@@ -242,10 +204,6 @@ export interface InkSettings {
   crease: [number, number, number];
   /** Resolution multiplier on each axis. 1 is off, 2 is four samples a pixel. */
   super: number;
-  /** Flat tones to snap the shading to. 0 leaves the shading continuous. */
-  bands: number;
-  /** Darkest tone any band may take, as a fraction of full, 0..1. */
-  shadowFloor: number;
 }
 
 export class Ink {
@@ -283,8 +241,6 @@ export class Ink {
         creaseFar: { value: 110 },
         fadeNear: { value: 140 },
         fadeFar: { value: 420 },
-        bands: { value: 0 },
-        shadowFloor: { value: 0.4 },
       },
     });
     const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.mat);
@@ -311,8 +267,6 @@ export class Ink {
     u.lineColor.value.setHex(s.colour);
     u.fadeNear.value = s.fade[0];
     u.fadeFar.value = s.fade[1];
-    u.bands.value = s.bands;
-    u.shadowFloor.value = s.shadowFloor;
     u.creaseWeight.value = s.crease[0];
     u.creaseNear.value = s.crease[1];
     u.creaseFar.value = s.crease[2];

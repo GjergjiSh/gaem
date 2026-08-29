@@ -1,0 +1,1 @@
+slam should be cancellable by a jumo
