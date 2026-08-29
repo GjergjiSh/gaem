@@ -2501,15 +2501,47 @@ const LINE_T = 1.6;
 /**
  * How far the overhead rail rides above the deck.
  *
- * Fourteen metres, which is far more headroom than a road needs and exactly
- * what this one does: the rail is not a roof, it is the thing the cargo hangs
- * from, and the cargo has to clear the deck with room to run under it.
+ * The rail is not a roof. It is the thing the cargo hangs from, and the cargo
+ * has to clear the deck with room to run under it — so this number is really
+ * "how tall is the frame", and the frame now has to hold a container.
+ *
+ * It was fourteen, from when the section above the deck was a box: two
+ * uprights 6.8 m off the centre line held that width all the way up, so
+ * whatever hung off the rail had 6.8 m to hang in. A triangle does not. Its
+ * half-width at height h is `PY * (1 - h / apex)`, and a container hanging
+ * 3.8 to 5.8 m under a 14 m ridge sits where that is 1.3 to 2.3 m — so the
+ * rafters bit 1.27 m into every container on the circuit.
+ *
+ * Twenty is what it takes to carry the SAME cargo in the same place: 5.2 m
+ * wide, 8.2 m over the deck, clearing the rafters by 0.30 m at its top
+ * corners. The cargo did not move — `line.hang` grew with the ridge — so the
+ * headroom under it, the gates, the bridges and the deck are all where they
+ * were. Only the frame over them got taller, which is what a jib carrying
+ * something looks like.
  */
-export const LINE_OVER = 14;
+export const LINE_OVER = 20;
 /** The rail's section. Every beam that meets it shares it, so nothing steps. */
 const RAIL_W = 1.6, RAIL_H = 0.9;
-/** How far one span's chords and rail run past a bend into the next one's. */
-const LAP = 1.6;
+/**
+ * How far a beam runs past a joint into its neighbour's, given the beam's
+ * half-section and how sharply the road bends there.
+ *
+ * Two boxes centred on the same line and meeting at an angle leave a wedge open
+ * on the OUTSIDE of the bend: `r * tan(dA / 2)` wide at radius `r` from the
+ * line. An overlap has to be at least that to close it — and everything PAST
+ * that stands proud of the neighbour by `e * sin(dA)`, hanging in mid-air over
+ * the joint.
+ *
+ * It used to be a flat 0.8 m at every end of every span, bend or no bend. On a
+ * straight that is invisible; at the 16° pitch it is 22 cm of rail standing out
+ * of the top of the rail it laps — on the one surface the cargo runs along, at
+ * every place the Line changes height. Which is where it looked broken.
+ *
+ * So the overlap is derived instead of picked: enough to close the joint, and
+ * on a straight the floor of 8 cm that keeps two boxes from meeting exactly on
+ * a plane.
+ */
+const overlap = (r: number, dA: number) => Math.max(0.08, r * Math.tan(dA / 2) * 1.6);
 /**
  * The girder is a TRUSS, and these are its three numbers.
  *
@@ -2765,11 +2797,47 @@ for (const leg of LINE_LEGS) {
     z: p.z + (leg.axis === 'x' ? off : along),
   });
 
+  /**
+   * How sharply the deck bends at `at`, in radians — 0 anywhere on a straight.
+   *
+   * Read off the built profile either side rather than out of the node list, so
+   * a span that starts at a junction edge asks the same question as one that
+   * starts at a pitch and gets the right answer without knowing which it is.
+   */
+  const bend = (at: number) => {
+    const d = 0.25;
+    const before = (lineY(leg, at) - lineY(leg, at - d)) / d;
+    const after = (lineY(leg, at + d) - lineY(leg, at)) / d;
+    return Math.abs(Math.atan(after) - Math.atan(before));
+  };
+
   for (const [lo, hi] of segs) {
     const yLo = lineY(leg, lo);
     const yHi = lineY(leg, hi);
     const seg = ramp(pos(lo, yLo), pos(hi, yHi), LINE_W, LINE_T, ROAD, 0, undefined, S_ROAD);
     const mid = pos((lo + hi) / 2, (yLo + yHi) / 2);
+    // The two joints this span has, and they are rarely the same: a span off a
+    // junction is straight at one end and pitched at the other.
+    const dLo = bend(lo), dHi = bend(hi);
+    /**
+     * A beam laid along the span's own centre line, lapped at each end by
+     * whatever that end's joint needs.
+     *
+     * `dy` is its height off the deck's centre line and `off` its offset across
+     * the leg, so the same call draws a chord under an edge and the rail over
+     * the middle. The lap is asymmetric, which is why this cannot stay
+     * `seg.len + LAP` centred on the span: a beam that laps 8 cm into a bend at
+     * one end and 80 cm into a straight at the other is not centred on its own
+     * span any more.
+     */
+    const beam = (dy: number, off: number, w: number, h: number) => {
+      const e0 = overlap(h / 2, dLo), e1 = overlap(h / 2, dHi);
+      const ua = (hi - lo) / seg.len, uy = (yHi - yLo) / seg.len;
+      const shift = (e1 - e0) / 2;
+      const c = pos((lo + hi) / 2 + ua * shift, (yLo + yHi) / 2 + uy * shift + dy);
+      const [bx, bz] = side(c, off);
+      box([bx, c.y, bz], [w, h, seg.len + e0 + e1], GANTRY, seg.q, S_STEEL);
+    };
 
     // A kerb down each edge, so a slide that drifts does not simply leave. Low
     // enough to step over and a solid brush, unlike the handrail it replaces —
@@ -2792,11 +2860,7 @@ for (const leg of LINE_LEGS) {
     // pier carries the road between them instead, which is what a girder is
     // for, and the columns go where a column should go rather than where the
     // road happens to change its mind.
-    for (const sgn of [-1, 1]) {
-      const [cx, cz] = side(mid, sgn * LINE_PY);
-      box([cx, mid.y - LINE_T - TRUSS_D, cz], [CHORD, CHORD, seg.len + LAP],
-        GANTRY, seg.q, S_STEEL);
-    }
+    for (const sgn of [-1, 1]) beam(-LINE_T - TRUSS_D, sgn * LINE_PY, CHORD, CHORD);
 
     // The web, in the plane of each chord. Panels are as near PANEL as divide
     // the span evenly, because a truss with one odd bay at the end is a truss
@@ -2838,8 +2902,7 @@ for (const leg of LINE_LEGS) {
     // The rail: ONE beam down the centreline, on the deck's own slope. One, not
     // one under each edge — a single rail is what a gantry runs on and what the
     // frames below are shaped to carry.
-    box([mid.x, mid.y + LINE_OVER, mid.z], [RAIL_W, RAIL_H, seg.len + LAP],
-      GANTRY, seg.q, S_STEEL);
+    beam(LINE_OVER, 0, RAIL_W, RAIL_H);
 
     // --- and the same thing again, above the deck ---------------------------
     // The girder under the road was half the structure and looked like all of
@@ -2860,9 +2923,17 @@ for (const leg of LINE_LEGS) {
     // to run beside it, and the section a crane's jib has rather than the one a
     // girder has. The ridge sits in the rail's own band, the same height the
     // pier cross beam meets it at, so nothing steps where the two join.
-    const UP = -LINE_OVER;
-    /** The ridge: dead on the centreline, where both sides' rafters land. */
-    const apex = (at: number): P3 => pos(at, lineY(leg, at) - UP);
+    /**
+     * The ridge: dead on the centreline, at the rail's UNDERSIDE.
+     *
+     * Not its centre line. A member ends on a face square to its own axis, so a
+     * rafter driven at the rail's middle puts its top corners out through the
+     * top of the rail — 10 cm for a rafter climbing straight, more for a
+     * diagonal, at every joint down a ridge that is meant to read as one line.
+     * Landing them under it hides the ends inside the beam they carry, which is
+     * also where a rafter meets a ridge on anything actually built.
+     */
+    const apex = (at: number): P3 => pos(at, lineY(leg, at) + LINE_OVER - RAIL_H / 2);
     for (const sgn of [-1, 1]) {
       for (let i = 0; i <= bays; i++) {
         const a = lo + i * bay, b = a + bay;
@@ -2931,7 +3002,7 @@ for (const leg of LINE_LEGS) {
        * the two side chords it ended on were the three parallel lines that made
        * the Line read as a box girder from the front instead of a jib.
        */
-      const ridge = pos(at, y + LINE_OVER);
+      const ridge = pos(at, y + LINE_OVER - RAIL_H / 2);
       for (const sgn of [-1, 1]) {
         const [px, pz] = side(p, sgn * LINE_PY);
         box([px, (capY - BASE) / 2, pz], [2.4, capY + BASE, 2.4], MAST, undefined, S_STEEL);
@@ -2942,18 +3013,28 @@ for (const leg of LINE_LEGS) {
         // out into the girder it carries rather than meeting it at a point. This
         // is the join you actually see from the street, because it is the one
         // place where the two heaviest things on the Line touch.
+        // The far end is 5.5 m along the leg, and on a pitch the chord it lands
+        // on is not at `capY` there — `capY` is the chord height at THIS pier.
+        // Asking the profile again is the difference between a brace that meets
+        // the girder and one that ends 1.6 m under it at the 16° pitch.
         for (const dir of [-1, 1]) {
           member({ x: px, y: capY - 4.5, z: pz },
-            pt(p, sgn * LINE_PY, dir * 5.5, capY), WEB, GANTRY, S_STEEL);
+            pt(p, sgn * LINE_PY, dir * 5.5,
+              lineY(leg, at + dir * 5.5) - LINE_T - TRUSS_D), WEB, GANTRY, S_STEEL);
         }
         // And the same again above the deck: a knee off each mast into the rail
         // it carries. They used to run ACROSS the leg, from an upright out to
         // the end of a cross beam; there is no cross beam now, so they run ALONG
         // it instead — off the mast at KNEE of its height, up to the rail either
         // side of the ridge. Same job, in the plane the structure still has.
+        // And the same correction: the rail 5.5 m along is not at this pier’s
+        // rail height either. Aimed at `y + LINE_OVER` these landed 35 cm above
+        // the rail on the 13° pitch and stood 61 cm proud of the top of it —
+        // the worst thing sticking out of the Line anywhere on it.
         for (const dir of [-1, 1]) {
           member(pt(p, sgn * LINE_PY * (1 - KNEE), 0, y + LINE_OVER * KNEE),
-            pt(p, 0, dir * 5.5, y + LINE_OVER - RAIL_H / 2), WEB, GANTRY, S_STEEL);
+            pt(p, 0, dir * 5.5,
+              lineY(leg, at + dir * 5.5) + LINE_OVER - RAIL_H / 2), WEB, GANTRY, S_STEEL);
         }
       }
       const across = LINE_PY * 2 + 2.4;
@@ -3002,8 +3083,13 @@ for (const j of JUNCTIONS) {
       // four uprights. It is the legs' own section turned into a crossing: every
       // approach still ends in a triangle, and the ridge runs through the apex
       // in both directions without meeting anything standing beside it.
+      // They stop at the rail's UNDERSIDE rather than on its centre line. A
+      // member ends on a face square to its own axis, so four of them driven at
+      // the point where the two rails cross put their corners 1.1 m out through
+      // the sides of a rail 0.8 m wide — bars crossing over and sticking out, at
+      // the one place on the Line where the most of them meet.
       member({ x: px, y: j.y, z: pz },
-        { x: j.x, y: j.y + LINE_OVER, z: j.z }, 1.6, MAST, S_STEEL);
+        { x: j.x, y: j.y + LINE_OVER - RAIL_H / 2, z: j.z }, 1.6, MAST, S_STEEL);
       // The corner post of the truss, carrying the deck's corner down to the
       // chord ring the columns hold up.
       member({ x: px, y: top, z: pz }, { x: px, y: capY, z: pz }, WEB, GANTRY, S_STEEL);
@@ -3016,6 +3102,10 @@ for (const j of JUNCTIONS) {
   // top of the Line turn a corner instead of arriving at one.
   box([j.x, j.y + LINE_OVER, j.z], [RAIL_W, RAIL_H, LINE_W], GANTRY, undefined, S_STEEL);
   box([j.x, j.y + LINE_OVER, j.z], [LINE_W, RAIL_H, RAIL_W], GANTRY, undefined, S_STEEL);
+  // A cap over the crossing, in the rail's own band so its top IS the rail's top
+  // and the silhouette does not step. Four masts and two rails arrive here; this
+  // is the block their ends die into instead of into each other.
+  box([j.x, j.y + LINE_OVER, j.z], [2.4, RAIL_H, 2.4], GANTRY, undefined, S_STEEL);
   for (const sgn of [-1, 1]) {
     // The chord ring, at the same level as every leg's bottom chord so the four
     // girders arriving here land on one thing instead of four. It is a ring

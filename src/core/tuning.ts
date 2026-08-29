@@ -365,7 +365,7 @@ export const T = {
   line: {
     speed: 9,           // metres a second round the circuit
     spacing: 90,        // metres between carriers, which sets how many there are
-    hang: 5.8,          // metres from the rail's centreline down to a carrier's floor
+    hang: 11.8,         // metres from the rail's centreline down to a carrier's floor
   },
 
   enemy: {
@@ -1053,7 +1053,7 @@ export const META: Record<string, { min?: number; max?: number; step?: number; d
   'weapon/projSize': { min: 0.03, max: 0.6, step: 0.01 },
   'line/speed': { min: 0, max: 30, step: 0.5, doc: 'Conveyor speed, m/s.' },
   'line/spacing': { min: 30, max: 300, step: 5, doc: 'Metres between carriers.' },
-  'line/hang': { min: 3.5, max: 12, step: 0.2, doc: 'Rail to carrier underside, m.' },
+  'line/hang': { min: 3.5, max: 18, step: 0.2, doc: 'Rail to carrier underside, m. Under `9 the frame clips the cargo.' },
   'enemy/colliderRadius': { min: 0.1, max: 2, step: 0.05, doc: 'Solid radius, x enemy scale.' },
   'enemy/scale': { min: 0.5, max: 4, step: 0.05, doc: 'Dummy size multiplier.' },
   'enemy/fireInterval': { min: 0.2, max: 6, step: 0.1 },
