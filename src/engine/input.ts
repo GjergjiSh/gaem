@@ -14,6 +14,11 @@ const KEYS = {
   // is a verb of its own, and on the ground it does nothing, which is the point:
   // one key, one meaning, and no crouch to fight the slide for it.
   slam: ['KeyC'],
+  // Its own key, not a Space overload. Sharing Space meant the vault had to
+  // decide, every tick, whether a press belonged to it or to the jump — and the
+  // one time it guessed wrong was the one time you wanted the other move. A
+  // dedicated key deletes the whole question.
+  vault: ['KeyF'],
   // Same key as jump on purpose: jump, double jump, keep holding and the jets
   // light. The solver gates it on having no jumps left (thruster.requireEmptyJumps),
   // so a held hop can't quietly burn the tank.
@@ -60,6 +65,7 @@ export class Input {
     dash: { pressed: false, held: false },
     slide: { pressed: false, held: false },
     slam: { pressed: false, held: false },
+    vault: { pressed: false, held: false },
     thrust: { pressed: false, held: false },
     grapple: { pressed: false, held: false },
     wing: { pressed: false, held: false },
@@ -125,6 +131,7 @@ export class Input {
       if (KEYS.dash.includes(e.code)) this.intent.dash.pressed = true;
       if (KEYS.slide.includes(e.code)) this.intent.slide.pressed = true;
       if (KEYS.slam.includes(e.code)) this.intent.slam.pressed = true;
+      if (KEYS.vault.includes(e.code)) this.intent.vault.pressed = true;
       if (KEYS.wing.includes(e.code)) this.intent.wing.pressed = true;
       if (KEYS.super.includes(e.code)) this.intent.super.pressed = true;
     });
@@ -259,6 +266,7 @@ export class Input {
     this.intent.dash.held = on(KEYS.dash);
     this.intent.slide.held = on(KEYS.slide);
     this.intent.slam.held = on(KEYS.slam);
+    this.intent.vault.held = on(KEYS.vault);
     this.intent.thrust.held = on(KEYS.thrust);
     this.intent.wing.held = on(KEYS.wing);
     this.intent.super.held = on(KEYS.super);
@@ -282,7 +290,7 @@ export class Input {
     this.intent.moveX = 0;
     this.intent.moveY = 0;
     for (const b of [this.intent.jump, this.intent.dash, this.intent.slide,
-      this.intent.slam, this.intent.thrust, this.intent.grapple,
+      this.intent.slam, this.intent.vault, this.intent.thrust, this.intent.grapple,
       this.intent.wing, this.intent.super]) {
       b.pressed = false;
       b.held = false;
@@ -295,6 +303,7 @@ export class Input {
     this.intent.dash.pressed = false;
     this.intent.slide.pressed = false;
     this.intent.slam.pressed = false;
+    this.intent.vault.pressed = false;
     this.intent.thrust.pressed = false;
     this.intent.grapple.pressed = false;
     this.intent.wing.pressed = false;

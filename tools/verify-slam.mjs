@@ -40,8 +40,8 @@ const btn = () => ({ pressed: false, held: false });
 const HOLD = { pressed: false, held: true };
 const intent = (over = {}) => ({
   moveX: 0, moveY: 0, look: { x: 0, y: 0 },
-  jump: btn(), dash: btn(), slide: btn(), grapple: btn(), slam: btn(), thrust: btn(),
-  wing: btn(), super: btn(),
+  jump: btn(), dash: btn(), slide: btn(), grapple: btn(), slam: btn(), vault: btn(),
+  thrust: btn(), wing: btn(), super: btn(),
   ...over,
 });
 

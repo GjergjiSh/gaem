@@ -799,24 +799,63 @@ export const T = {
     kickRate: 55,      // jitter frequency, Hz-ish
   },
 
-  // Automatic mantle. Anything between a step and a chest-high ledge used to be
-  // a full stop; this turns it into a hop that keeps your speed. Nothing is bound
-  // to it — it fires off the ledge itself, because the moment you have to press a
-  // button for it you have already lost the flow it exists to protect.
+  // Timed vault. Dash into something head-on, press F as you reach it, and the
+  // lip throws you into an arc on the far side. The button IS the move: no press,
+  // no vault, and the crate stops you like any other wall.
+  //
+  // It is not a jump. It spends no jump charge and never subtracts speed — it only
+  // ever adds. What it costs is the timing, and what it pays is set by the angle
+  // you came in at.
   vault: {
     enabled: true,
+    // false = the old automatic mantle, no button, fires off the ledge itself.
+    // Kept because it is the honest fallback if the timing turns out to be more
+    // tax than tech, and because levels built around the auto-hop still work.
+    timed: true,
+
+    // THE range knob. How close to the lip you have to be for F to register at
+    // all: press further out than this and nothing happens. Small is strict and
+    // demands you read the approach; large is generous and eventually stops
+    // being a timing at all, because there is no way left to be early.
+    triggerDist: 1.5,
+    // ...plus this many seconds of travel, which is the speed compensation.
+    // A pure distance is a shrinking amount of TIME the faster you close on the
+    // lip — 1.5 m is 190 ms at 8 m/s and 44 ms at 34 — so at 0 the move gets
+    // harder the better you are. Raise it if fast approaches feel unfair; leave
+    // it at 0 for a window that is the same metres at every speed, which is what
+    // makes the range something you can see and learn off the geometry.
+    triggerLead: 0,
+    // How long a registered press keeps looking for its lip before it lapses.
+    // Independent of the range on purpose: the range decides whether the press
+    // counts, this decides how long it waits.
+    inputHold: 0.25,
+    windowAfter: 0.12,  // 120 ms: a press this long after touching it still vaults
+
     maxHeight: 1.9,     // tallest ledge that vaults. Above this it is a wall
-    reach: 0.5,         // how far past the capsule the ledge probe looks
+    reach: 0.5,         // how far past the capsule counts as touching the lip
     minSpeed: 2.5,      // ignore ledges you are merely leaning on
     clearance: 0.3,     // clear the lip by this much instead of scraping it
-    push: 6,            // forward speed held through the hop, so you land ON it
+    push: 6,            // forward speed floor over the lip. Never slows you
     hold: 0.35,         // seconds that push is re-asserted while you rise
     cooldown: 0.2,      // no second vault until this expires
-    // Zero, and here so you can change your mind rather than because it is a
-    // knob worth turning. Nothing is bound to a vault — it fires off the ledge
-    // itself — so a cost on it is the level geometry billing you, and an empty
-    // tank would turn a lip you have cleared a hundred times into a wall.
+
+    // Zero, and here so you can change your mind rather than because it is a knob
+    // worth turning. The vault is already paid for with a timing you have to hit;
+    // billing it twice would mean an empty tank turns a lip you have cleared a
+    // hundred times into a wall, and the press into a lie.
     gas: 0,
+
+    // Entry angle is the skill the move is actually testing. Head-on is the full
+    // payout; a corner clip gets you over the thing and nothing else. Past
+    // maxEntryAngle it stops being a vault at all and goes back to being a wall
+    // you are skimming, which is the wallrun's job.
+    maxEntryAngle: 1.05, // radians off head-on that still vaults (~60 degrees)
+    launchUp: 5,         // extra rise at a perfect head-on entry, on top of clearing
+    pushBonus: 6,        // extra forward floor at a perfect head-on entry
+    // How much the launch turns from your own line toward straight over the lip.
+    // 0 keeps a diagonal entry diagonal across the top; 1 squares every vault up,
+    // which is safer to land and much more boring.
+    straighten: 0.3,
   },
 
   // C in the air: stop everything and go straight down. It is an escape and a
@@ -1109,6 +1148,14 @@ export const META: Record<string, { min?: number; max?: number; step?: number; d
   'vault/push': { min: 0, max: 20, step: 0.5, doc: 'Forward speed floor over the lip. Never slows you.' },
   'vault/hold': { min: 0.05, max: 1, step: 0.01 },
   'vault/cooldown': { min: 0, max: 1.5, step: 0.05 },
+  'vault/triggerDist': { min: 0.1, max: 8, step: 0.05, doc: 'Metres from the lip that F starts working. THE range knob.' },
+  'vault/triggerLead': { min: 0, max: 0.5, step: 0.005, doc: 'Extra range as seconds of travel. 0 = same metres at every speed.' },
+  'vault/inputHold': { min: 0.05, max: 1, step: 0.01, doc: 'How long a registered F press waits for its lip.' },
+  'vault/windowAfter': { min: 0, max: 0.5, step: 0.005, doc: 'Seconds AFTER touching it an F press still vaults.' },
+  'vault/maxEntryAngle': { min: 0.1, max: 1.55, step: 0.01, doc: 'Radians off head-on that still count. Wider = easier, flatter skill curve.' },
+  'vault/launchUp': { min: 0, max: 20, step: 0.25, doc: 'Extra rise for a head-on entry. THE arc knob.' },
+  'vault/pushBonus': { min: 0, max: 20, step: 0.5, doc: 'Extra forward speed for a head-on entry.' },
+  'vault/straighten': { min: 0, max: 1, step: 0.01, doc: '0 = launch along your line. 1 = always square over the lip.' },
   'sprint/multiplier': { min: 1, max: 2, step: 0.01, doc: 'Ground cap x this while sprinting.' },
   'sprint/minForward': { min: 0, max: 1, step: 0.05 },
   'sprint/fovAdd': { min: 0, max: 30, step: 0.5 },

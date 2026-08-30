@@ -770,8 +770,8 @@ const DT = 1 / 120;
 const btn = () => ({ pressed: false, held: false });
 const intent = (over = {}) => ({
   moveX: 0, moveY: 0, yaw: 0, pitch: 0,
-  jump: btn(), dash: btn(), slide: btn(), slam: btn(), thrust: btn(), grapple: btn(),
-  wing: btn(), super: btn(),
+  jump: btn(), dash: btn(), slide: btn(), slam: btn(), vault: btn(), thrust: btn(),
+  grapple: btn(), wing: btn(), super: btn(),
   ...over,
 });
 /** Camera yaw that makes moveY = 1 push along (dx, dz). */

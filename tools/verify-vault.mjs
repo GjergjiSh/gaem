@@ -79,7 +79,7 @@ const btn = (pressed = false, held = false) => ({ pressed, held });
 const intent = (over = {}) => ({
   moveX: 0, moveY: 0, yaw: 0, pitch: 0,
   jump: btn(), dash: btn(), slide: btn(), grapple: btn(), slam: btn(),
-  vault: btn(), thrust: btn(),
+  vault: btn(), thrust: btn(), wing: btn(), super: btn(),
   ...over,
 });
 
