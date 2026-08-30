@@ -117,10 +117,19 @@ void main() {
     // gradient filling the whole wedge.
     float thin = pow(smoothstep(0.5, 0.0, abs(f)), 6.0);
     // And starting at its own radius, so they do not all begin on one circle.
-    float along = smoothstep(inner + rnd * 0.35, 1.0, r);
+    // The jitter is a fraction of the room LEFT to the edge, not a flat 0.35,
+    // so start can never reach 1.0 and break smoothstep's edge0 < edge1
+    // requirement — which is exactly what happened when inner was pushed up:
+    // inner + rnd * 0.35 went past 1.0 for part of the streaks and GLSL's
+    // smoothstep is undefined past that point, which read as streaks that
+    // didn't line up with the rest.
+    float start = mix(inner, 1.0, rnd * 0.35);
+    float along = smoothstep(start, 1.0, r);
     float phase = fract(rnd2 + time * streakSpeed);
     float life = smoothstep(0.0, 0.15, phase) * (1.0 - smoothstep(0.45, 0.9, phase));
-    col += vec3(streaks * k * thin * along * life);
+    // Black, not white: a dark streak reads as motion blur / shadow racing past;
+    // a white one reads as a light source, which is the wrong metaphor here.
+    col = mix(col, vec3(0.0), clamp(streaks * k * thin * along * life, 0.0, 1.0));
   }
 
   // Vignette, on the raw amount rather than on the masked k: this one is

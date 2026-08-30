@@ -134,6 +134,17 @@
     "fovDash": 8,
     "fovSpeed": 12
   },
+  "rush": {
+    "rate": 30,
+    "streaks": 0.17000000000000004,
+    "streakCount": 64,
+    "streakSpeed": 3.2,
+    "inner": 0.78,
+    "kickGain": 0.39999999999999997
+  },
+  "vault": {
+    "timed": false
+  },
   "soundAssign": {
     "jump": "",
     "doubleJump": "",
@@ -143,7 +154,7 @@
     "slide": "",
     "slam": "",
     "land": "",
-    "vault": "",
+    "vault": "slide",
     "hookFire": "",
     "hookRelease": "",
     "wingDeploy": "",
