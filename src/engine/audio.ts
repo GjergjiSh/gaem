@@ -28,6 +28,7 @@
 //               into a wall of noise.
 
 import { T } from '../core/tuning';
+import { SOUNDS_LIKE } from './moves';
 import type { Frame } from './moves';
 
 const FILES = import.meta.glob('/assets/odm-sounds-ref/*.wav', {
@@ -281,12 +282,14 @@ export class Audio {
     }
 
     for (const m of f.fired) {
+      const slot = (SOUNDS_LIKE[m] ?? m) as Slot;
       // Landing is scaled by how hard you hit, so a hop off a kerb and a drop
-      // from a tower are not the same event at the same volume.
-      const scale = m === 'land' && flow.landScale
+      // from a tower are not the same event at the same volume. Keyed off the
+      // resolved slot, so a wall catch scales on the speed it came in at too.
+      const scale = slot === 'land' && flow.landScale
         ? 0.35 + 0.65 * Math.min(1, f.landSpeed / Math.max(1, flow.landFullSpeed))
         : 1;
-      this.fire(m as Slot, scale);
+      this.fire(slot, scale);
     }
 
     this.hold('thruster', f.thruster);

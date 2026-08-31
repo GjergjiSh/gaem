@@ -913,21 +913,37 @@ export const T = {
    * borrow the nearest verb and are marked. Assigning one clip to several moves
    * is fine and several of these do it.
    *
+   * `jump.wav` was one take holding two events - the push off, then the touch
+   * down about a second later - so every jump fired both and the landing arrived
+   * a second early. It is now cut at the gap: jump.wav is the push, land.wav is
+   * the touch down. The unrelated landing take that used to hold that name is
+   * still on disk as `land-2` if the harder thud reads better.
+   *
    * Empty string = that move is silent.
    */
   soundAssign: {
     jump: 'jump',
     doubleJump: 'jump',                     // guess: no second-jump clip yet
-    wallJump: 'jump',                       // guess
-    wallRun: '',                            // no clip for it yet
+    // No wallJump/wallRun here on purpose. A wall is a floor you happen to hit
+    // sideways, so catching one plays `land` and kicking off one plays `jump` -
+    // routed to those slots in engine/audio.ts rather than given knobs of their
+    // own. Their own knobs are what broke this: `wallRun` sat on '' and the wall
+    // was silent, and a saved profile can pin an override like that long after
+    // the default here has moved on.
+    // `dash.wav` was one take holding two events, same as the jump take: a hard
+    // transient, then a swell about eight tenths of a second later. Cut at the
+    // trough between them, and the two halves fall out as the two dashes - the
+    // hit is the super, the swell is the ordinary one.
     dash: 'dash',
-    superDash: 'dash',                      // guess: the same verb, spent harder
+    superDash: 'super-dash',
     slide: 'slide',
     // Silent by default. It fires ON a landing, so anything here plays on top of
     // `land` - which is either a nice accent or a doubled thud, and that is a
     // decision for ears rather than a default.
     bhop: '',
-    slam: 'dash',                           // guess: gas fired downward
+    // Guess: gas fired downward. Now the swell half rather than the whole take,
+    // which suits it - a slam is a push, not a strike.
+    slam: 'dash',
     land: 'land',
     vault: 'slide-2',                       // guess: scrape over a lip
     // This clip is the shot AND the bite, so `hookHit` stays silent under it or
@@ -952,14 +968,14 @@ export const T = {
   soundLevel: {
     jump: 1,
     doubleJump: 1,
-    wallJump: 1,
-    wallRun: 1,
     dash: 1,
     superDash: 1,
     slide: 0.8,
     bhop: 0.5,          // fires on every clean landing in a streak; keep it under
     slam: 1,
-    land: 1,
+    // The land half of the split jump take peaks ~10 dB under the push-off half,
+    // so it needs the lift to read as an impact. Still lands under the jump.
+    land: 1.8,
     vault: 0.9,
     hookFire: 1,
     hookHit: 0.8,

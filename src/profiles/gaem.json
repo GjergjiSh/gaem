@@ -130,6 +130,7 @@
   },
   "camera": {
     "firstPerson": true,
+    "bobRate": 0,
     "fovBase": 90,
     "fovDash": 8,
     "fovSpeed": 12
@@ -146,14 +147,11 @@
     "timed": false
   },
   "soundAssign": {
-    "jump": "",
-    "doubleJump": "",
-    "wallJump": "",
-    "dash": "",
-    "superDash": "",
+    "jump": "dash",
+    "doubleJump": "dash",
+    "dash": "slide",
     "slide": "",
     "slam": "",
-    "land": "",
     "vault": "slide",
     "hookFire": "",
     "hookRelease": "",
